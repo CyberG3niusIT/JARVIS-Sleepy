@@ -1,6 +1,6 @@
 # TODO — Next Session
 
-**Updated:** February 19, 2026
+**Updated:** February 20, 2026
 
 ---
 
@@ -16,15 +16,7 @@
 **Files:** `core/stt.py`, `/mnt/models/voice_training/`
 **Note:** Remove `_debug_save_audio()` from `stt.py` after retraining
 
-### 2. App Launcher Skill
-**Priority:** HIGH
-**Location:** `skills/system/app_launcher/`
-**Concept:** "Open Chrome. Fullscreen please. Thanks."
-- Config-driven alias map (natural names → executables)
-- Window management via `wmctrl`/`xdotool` (fullscreen, maximize, move to monitor)
-- Open questions: Wayland vs X11 tools, directory navigation, monitor naming
-
-### 3. Quick Wins (batch in one session)
+### 2. Quick Wins (batch in one session)
 - **News urgency filtering** — add urgency param to existing intent handler (~30 min)
 - **Qwen sampling params** — temp=0.7, top_p=0.8, top_k=20 for non-thinking mode (~10 min)
 - **Rotate OpenWeather API key** — real key in early git history (~5 min)
@@ -136,6 +128,8 @@ None!
 
 | Feature | Date | Notes |
 |---------|------|-------|
+| Publish Script Non-Interactive | Feb 20 | `--auto` flag for CI-friendly publish (auto-generate commit msg + push) |
+| GNOME Desktop Integration (5 phases) | Feb 19 | Extension (D-Bus bridge), desktop_manager, app launcher migration, volume, workspace, clipboard, notifications — 16 intents |
 | Developer Tools Polish | Feb 19 | HAL 9000 Easter eggs for blocked commands, smart port summary, conversational process summary |
 | Scoped TTS subprocess control | Feb 18 | Replaced global `pkill -9 aplay/piper` with tracked subprocess kill — `tts.kill_active()` |
 | Prescriptive Prompt + tool_choice=auto | Feb 18 | Rewrote vague prompt to explicit rules, removed tool_choice=required pattern matching. 150/150 test decisions correct (`8ae35ce`) |

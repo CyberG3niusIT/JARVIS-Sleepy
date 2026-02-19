@@ -1,7 +1,7 @@
 # JARVIS - Personal AI Assistant
 
-**Version:** 2.2.0 (Production Ready)
-**Last Updated:** February 18, 2026
+**Version:** 2.3.0 (Production Ready)
+**Last Updated:** February 20, 2026
 **Status:** ✅ Stable, Feature-Rich, Voice-Controlled
 
 ---
@@ -48,7 +48,7 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - **Conversation Windows** - Timer-based auto-close, multi-turn, noise filtering, dismissal detection
 - **Console Mode** - Text/hybrid/speech modes with rich stats panel
 
-### Skills (9 Active)
+### Skills (10 Active)
 
 #### 🌤️ Weather
 - Current conditions, forecasts, rain probability
@@ -87,6 +87,13 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - Daily & weekly rundowns (state machine: offered → re-asked → deferred → retry)
 - *"Jarvis, remind me to call the dentist at 3pm"*
 
+#### 🖥️ Desktop Control (App Launcher)
+- 16 intents: launch/close apps, fullscreen/minimize/maximize, volume up/down/mute, workspace switch/move, focus app, list windows, clipboard read/write
+- GNOME Shell extension D-Bus bridge for Wayland-native window management
+- *"Jarvis, open Chrome"*
+- *"Jarvis, volume up"*
+- *"Jarvis, switch to workspace 2"*
+
 #### 💬 Conversation
 - Greetings, small talk, acknowledgments, butler personality
 - *"Jarvis, how are you?"*
@@ -99,7 +106,8 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - **Cross-Session Memory** - Last 32 messages loaded from persistent history
 - **Health Check** - 5-layer system diagnostic (ANSI terminal report + voice summary)
 - **Hardware Failure Handling** - Startup retry, device monitoring, degraded mode, graceful recovery
-- **GitHub Publishing** - Automated redaction pipeline, PII verification, public repo sync
+- **GNOME Desktop Bridge** - Custom GNOME Shell extension (D-Bus), Wayland-native window management, wmctrl fallback
+- **GitHub Publishing** - Automated redaction pipeline, PII verification, non-interactive `--auto` publish
 
 ---
 
@@ -297,6 +305,13 @@ User: Hears response
 - ✅ **Scoped TTS subprocess control** — replaced global `pkill -9` with tracked subprocess kill
 - ✅ **GitHub publishing system** — automated redaction, PII verification, public repo sync
 
+### Phase 10: Desktop Integration + Tooling (Feb 19-20) 🚀
+- ✅ **GNOME Desktop Integration (5 phases)** — Custom GNOME Shell extension with D-Bus bridge, 14 D-Bus methods
+- ✅ **Desktop Manager** — Singleton module with lazy D-Bus, wmctrl fallback, pactl, notify-send, wl-clipboard
+- ✅ **App Launcher Skill v2.0** — 16 intents: launch/close, fullscreen/minimize/maximize, volume, workspace, focus, clipboard
+- ✅ **Desktop notifications** — Wired into reminder system via notify-send
+- ✅ **Publish script non-interactive mode** — `--auto` flag for CI-friendly publish (auto-generate commit msg + push)
+
 ---
 
 ## 🎨 Design Philosophy
@@ -337,8 +352,8 @@ Optimized for consumer hardware. No expensive GPUs required (though AMD GPU supp
 
 ### Short Term
 - [x] ~~Web Navigation Phase 3 (web research + LLM tool use)~~ — Done (Feb 18)
+- [x] ~~App launcher + desktop control (16 intents, GNOME Shell extension)~~ — Done (Feb 19)
 - [ ] Audio recording skill
-- [ ] App launcher skill
 - [ ] Email skill (Gmail)
 - [ ] Google Keep integration
 
@@ -524,7 +539,7 @@ Include:
 - ✅ Web research via local LLM tool calling (no cloud required)
 - ✅ Conversational memory with semantic recall across sessions
 - ✅ Speaker identification and dynamic user profiles
-- ✅ 9 modular skills with semantic intent matching
+- ✅ 10 modular skills with semantic intent matching (including 16-intent desktop control)
 - ✅ Hardware failure graceful degradation
 - ✅ Sub-1-second skill responses (600-800ms)
 - ✅ Open source on GitHub with automated PII redaction

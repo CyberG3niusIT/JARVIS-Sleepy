@@ -13,7 +13,7 @@ A fully local, privacy-first voice assistant built on AMD ROCm, fine-tuned speec
 - **Natural blended voice** — Kokoro TTS with custom voice blend (fable + george), gapless streaming playback
 - **Semantic understanding** — ML-based intent matching using sentence-transformers, not brittle regex patterns
 - **Always-on listening** — Porcupine wake word + WebRTC VAD + multi-turn conversation windows
-- **9 production skills** — time, weather, system info, filesystem, developer tools, conversation, reminders, web research, news
+- **10 production skills** — time, weather, system info, filesystem, developer tools, desktop control, conversation, reminders, web research, news
 - **Privacy by design** — everything runs locally; Claude API is a last-resort quality fallback only
 
 ---
@@ -110,6 +110,7 @@ The system uses an **event-driven pipeline** with a Coordinator managing STT/TTS
 | **System Info** | "What CPU do I have?" / "How much RAM?" | System queries with human-readable output |
 | **Filesystem** | "Find my config file" / "Count lines in main.py" | File search, line counting, script analysis |
 | **Developer Tools** | "Search the codebase for TODO" / "Git status" / "Show me the network" | 13 intents: codebase search, git multi-repo, system admin, general shell, visual output, 3-tier safety |
+| **Desktop Control** | "Open Chrome" / "Volume up" / "Switch to workspace 2" | 16 intents: app launch/close, window management, volume, workspaces, focus, clipboard via GNOME Shell extension D-Bus bridge |
 | **Conversation** | "Good morning" / "Thank you" / "How are you?" | Natural greetings, small talk, dismissal detection |
 | **Reminders** | "Remind me at 3pm" / "What's on my schedule?" | Priority tones, nag behavior, acknowledgment tracking |
 | **Web Research** | "How far is New York from London?" / "Who won the Super Bowl?" | Qwen 3-8B tool calling → DuckDuckGo → multi-source synthesis |
@@ -117,6 +118,7 @@ The system uses an **event-driven pipeline** with a Coordinator managing STT/TTS
 
 ### Additional Systems
 
+- **GNOME Desktop Bridge** — Custom GNOME Shell extension providing Wayland-native window management, with wmctrl fallback for XWayland
 - **Google Calendar** — Two-way sync with dedicated JARVIS calendar, OAuth, incremental sync, background polling
 - **Daily & Weekly Rundowns** — Interactive state machine: offered → re-asked → deferred → retry → pending mention
 - **Health Check** — 5-layer system diagnostic (GPU, LLM, STT, TTS, skills) with ANSI terminal report + voice summary
@@ -426,6 +428,8 @@ Say the wake word ("Jarvis") followed by your command:
 - *"Jarvis, search the codebase for TODO"*
 - *"Jarvis, who won the Super Bowl?"*
 - *"Jarvis, read me the tech headlines"*
+- *"Jarvis, open Chrome"*
+- *"Jarvis, volume up"*
 
 After JARVIS responds, you have a **conversation window** (default 4 seconds) to ask follow-up questions without repeating the wake word.
 
@@ -471,6 +475,7 @@ jarvis/
 │   ├── reminder_manager.py       # Reminders, rundowns, calendar sync
 │   ├── google_calendar.py        # Google Calendar OAuth + sync
 │   ├── news_manager.py           # RSS monitoring + classification
+│   ├── desktop_manager.py        # GNOME D-Bus bridge + wmctrl fallback + volume/clipboard
 │   ├── health_check.py           # System diagnostics
 │   ├── user_profile.py           # User profiles + speaker ID
 │   ├── speaker_id.py             # Resemblyzer d-vector enrollment
@@ -486,16 +491,21 @@ jarvis/
 │   │   ├── system_info/          # CPU, RAM, disk info
 │   │   ├── filesystem/           # File search, line counting
 │   │   ├── developer_tools/      # Codebase search, git, shell
+│   │   ├── app_launcher/         # Desktop control (16 intents: apps, windows, volume, workspaces, clipboard)
 │   │   └── web_navigation/       # Web search + browsing
 │   └── personal/
 │       ├── conversation/         # Greetings, small talk
 │       ├── reminders/            # Voice reminders + calendar
 │       └── news/                 # RSS headline delivery
 │
+├── extensions/                   # GNOME Shell extensions
+│   └── jarvis-desktop@jarvis/    # Desktop Bridge (D-Bus service for window/workspace control)
 ├── assets/                       # Audio cues (generate your own .wav files)
 ├── scripts/                      # Utility scripts
-│   ├── enroll_speaker.py         # Speaker voice enrollment
-│   ├── init_profiles.py          # User profile initialization
+│   ├── install_desktop_extension.sh  # Install GNOME Shell extension
+│   ├── test_desktop_manager.py       # Test desktop manager module
+│   ├── enroll_speaker.py             # Speaker voice enrollment
+│   ├── init_profiles.py              # User profile initialization
 │   └── ...
 ├── docs/                         # Documentation
 │   ├── SETUP_GUIDE.md            # Detailed installation
@@ -733,6 +743,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Version:** 2.1.0
+**Version:** 2.3.0
 **Status:** Production — actively developed
 **Last Updated:** February 2026
