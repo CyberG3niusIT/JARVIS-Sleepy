@@ -47,7 +47,8 @@ from rich import box
 from core.config import load_config
 from core.conversation import ConversationManager
 from core.responses import get_response_library
-from core.llm_router import LLMRouter
+from core.llm_router import LLMRouter, ToolCallRequest
+from core.web_research import WebResearcher, format_search_results
 from core.skill_manager import SkillManager
 from core.reminder_manager import get_reminder_manager
 from core.news_manager import get_news_manager
@@ -253,28 +254,118 @@ def render_stats(console, match_info, llm, used_llm, t_start, t_match, t_end, se
     console.print(Panel(table, title="[dim]Stats[/dim]", border_style="dim"))
 
 
+_DEFLECTION_PHRASES = [
+    "check official", "check the official", "you might want to check",
+    "i recommend checking", "i suggest checking", "check recent",
+    "i don't have access to", "i don't have real-time",
+    "i don't have information on", "i cannot access",
+    "beyond my knowledge", "outside my knowledge",
+    "check online", "search for", "look up",
+]
+
+
+def _is_deflection(response: str) -> bool:
+    """Detect responses that tell the user to go look it up themselves."""
+    lower = response.lower()
+    return any(phrase in lower for phrase in _DEFLECTION_PHRASES)
+
+
+def _do_web_search(query, web_researcher, llm, console):
+    """Execute a web search and stream the synthesized answer. Returns response text."""
+    console.print(f"\n[dim]Searching: {query}[/dim]")
+
+    results = web_researcher.search(query)
+
+    page_sections = []
+    for r in results[:3]:
+        url = r.get("url", "")
+        if not url:
+            continue
+        page_text = web_researcher.fetch_page(url, max_chars=2000)
+        if page_text and len(page_text) > 300:
+            page_sections.append(f"[{r['title']}] ({url}):\n{page_text}")
+
+    page_content = ""
+    if page_sections:
+        page_content = "\n\nFull article content:\n\n" + \
+            "\n\n---\n\n".join(page_sections)
+
+    tool_result = format_search_results(results) + page_content
+    console.print(f"[dim]Found {len(results)} results[/dim]")
+
+    # Build a fake ToolCallRequest for continue_after_tool_call
+    forced_call = ToolCallRequest(
+        name="web_search",
+        arguments={"query": query},
+        call_id="forced_search",
+    )
+    # Prime the LLM's tool call message history
+    from datetime import date
+    today = date.today().strftime("%B %d, %Y")
+    system_prompt = llm._build_system_prompt()
+    system_prompt += (
+        f"\n\nToday's date is {today}. "
+        "Your training data is OUTDATED. "
+        "Answer the user's question using ONLY the search results provided."
+    )
+    llm._tool_call_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": query},
+    ]
+
+    full_response = ""
+    console.print("[bold cyan]JARVIS:[/bold cyan] ", end="")
+    for token in llm.continue_after_tool_call(forced_call, tool_result):
+        full_response += token
+        sys.stdout.write(token)
+        sys.stdout.flush()
+
+    sys.stdout.write("\n")
+    return full_response
+
+
 def _stream_llm_console(llm, command, history, console, mode, real_tts,
                         memory_context=None, conversation_messages=None,
-                        max_tokens=None):
-    """Stream LLM response with typewriter output and first-chunk quality gate.
+                        max_tokens=None, web_researcher=None):
+    """Stream LLM response with typewriter output, web research, and quality gate.
 
     Returns the full accumulated response text, or empty string on failure.
     """
     chunker = SpeechChunker()
     full_response = ""
     first_chunk_checked = False
+    use_tools = llm.tool_calling and web_researcher
 
     # Print prefix for typewriter output
     console.print("[bold cyan]JARVIS:[/bold cyan] ", end="")
 
     try:
-        for token in llm.stream(
-            user_message=command,
-            conversation_history=history,
-            memory_context=memory_context,
-            conversation_messages=conversation_messages,
-            max_tokens=max_tokens,
-        ):
+        # Choose tool-aware or plain streaming
+        token_source = (
+            llm.stream_with_tools(
+                user_message=command,
+                conversation_history=history,
+                memory_context=memory_context,
+                conversation_messages=conversation_messages,
+            ) if use_tools else
+            llm.stream(
+                user_message=command,
+                conversation_history=history,
+                memory_context=memory_context,
+                conversation_messages=conversation_messages,
+                max_tokens=max_tokens,
+            )
+        )
+
+        tool_call_request = None
+
+        for item in token_source:
+            # Tool call sentinel — break to handle web search
+            if isinstance(item, ToolCallRequest):
+                tool_call_request = item
+                break
+
+            token = item
             full_response += token
 
             # Typewriter: print tokens as they arrive
@@ -294,6 +385,56 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
                         conversation_history=history,
                     )
                     return response
+
+        # --- Web search phase (tool call) ---
+        if tool_call_request:
+            query = tool_call_request.arguments.get("query", command)
+            console.print(f"\n[dim]Searching: {query}[/dim]")
+
+            if tool_call_request.name == "web_search":
+                results = web_researcher.search(query)
+
+                # Fetch top 3 page contents for richer synthesis
+                page_sections = []
+                for r in results[:3]:
+                    url = r.get("url", "")
+                    if not url:
+                        continue
+                    page_text = web_researcher.fetch_page(url, max_chars=2000)
+                    if page_text and len(page_text) > 300:
+                        page_sections.append(
+                            f"[{r['title']}] ({url}):\n{page_text}"
+                        )
+
+                page_content = ""
+                if page_sections:
+                    page_content = "\n\nFull article content:\n\n" + \
+                        "\n\n---\n\n".join(page_sections)
+
+                tool_result = format_search_results(results) + page_content
+                console.print(f"[dim]Found {len(results)} results[/dim]")
+            else:
+                tool_result = f"Unknown tool: {tool_call_request.name}"
+
+            # Stream synthesized answer
+            console.print("[bold cyan]JARVIS:[/bold cyan] ", end="")
+            for token in llm.continue_after_tool_call(
+                tool_call_request, tool_result
+            ):
+                full_response += token
+                sys.stdout.write(token)
+                sys.stdout.flush()
+
+            sys.stdout.write("\n")
+            return full_response
+
+        # --- Deflection safety net ---
+        # If Qwen answered but deflected ("check official channels", etc.),
+        # discard the response and do a web search instead.
+        if full_response and web_researcher and _is_deflection(full_response):
+            sys.stdout.write("\n")
+            console.print("[dim](deflection detected — searching instead)[/dim]")
+            return _do_web_search(command, web_researcher, llm, console)
 
         # Flush remaining
         remaining = chunker.flush()
@@ -585,6 +726,11 @@ def run_console(config, mode):
     llm = LLMRouter(config)
     skill_manager = SkillManager(config, conversation, tts_proxy, responses, llm)
     skill_manager.load_all_skills()
+
+    # Web research (for tool-calling LLM queries)
+    web_researcher = WebResearcher(config) if config.get("llm.local.tool_calling", False) else None
+    if web_researcher:
+        console.print("[cyan]Web research:[/cyan] enabled (DuckDuckGo + trafilatura)")
 
     # Reminder system
     reminder_manager = None
@@ -916,6 +1062,7 @@ def run_console(config, mode):
                     memory_context=memory_context,
                     conversation_messages=context_messages,
                     max_tokens=600 if doc_buffer.active else None,
+                    web_researcher=web_researcher,
                 )
                 if not response:
                     response = "I'm sorry, I'm having trouble processing that right now."
