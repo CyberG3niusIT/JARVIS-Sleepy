@@ -1,7 +1,7 @@
 # JARVIS Priority Development Roadmap
 
-**Created:** February 20, 2026 (session 6)
-**Updated:** February 20, 2026 (session 6 — verified with the user)
+**Created:** February 19, 2026 (session 6)
+**Updated:** February 19, 2026 (session 10 — news urgency filtering completed)
 **Method:** Exhaustive sweep of all docs, archives, memory files, code comments, and design documents
 **Ordering:** Genuine ROI for effort — difficulty/complexity vs real-world payoff
 
@@ -9,14 +9,13 @@
 
 ## Tier 0: Quick Wins — Minutes of Work, Immediate Payoff
 
-| # | Item | Effort | ROI | Source |
-|---|------|--------|-----|--------|
-| 1 | **Rotate OpenWeather API key** — real key in early git history | ~5 min | Security hygiene | TODO |
-| 2 | **Qwen sampling params** — temp=0.7, top_p=0.8, top_k=20 for non-thinking mode | ~10 min | Better response quality | TODO |
+*All Tier 0 items completed!*
 
 ### Completed (Tier 0)
-- ~~Install wl-clipboard~~ — Done (Feb 20)
-- ~~Enable GNOME extension~~ — Done (Feb 20, logout/login completed)
+- ~~Rotate OpenWeather API key~~ — Done (Feb 19, `25b5f0a`). Updated `redact.conf` with old+new patterns
+- ~~Qwen sampling params~~ — Done (Feb 19, `25b5f0a`). top_p=0.8, top_k=20 in all 6 llama.cpp payloads
+- ~~Install wl-clipboard~~ — Done (Feb 19)
+- ~~Enable GNOME extension~~ — Done (Feb 19, logout/login completed)
 - ~~Enroll the user's voice~~ — Done (Feb 16, `christopher.npy`). Secondary user has profile entry but no voice embedding yet
 
 ---
@@ -26,9 +25,11 @@
 | # | Item | Effort | ROI | Source |
 |---|------|--------|-----|--------|
 | 3 | **Whisper retraining** — 35-40 new phrases from log analysis, wake word reinforcement, background noise samples | 2-3 hours | Fix misrecognitions (fullscreen, follow-ups), improve wake word reliability from 60%→90%+ | TODO + whisper_retraining_data.md |
-| 4 | **News urgency filtering** — add urgency param to existing intent handler | ~30 min | "Read critical headlines" actually works | TODO + CLAUDE.md |
-| 5 | **Topic shift threshold tuning** — test 0.35-0.40 (currently 0.45, may be too sensitive) | ~30 min | Fewer fragmented topic segments in context window | TODO |
-| 6 | **Keyword routing improvements** — add missing keywords to system_info, conversation, news, reminders, weather skills (from audit) | ~1 hour | Reduces semantic-only routing brittleness for obvious commands | keyword_routing_audit.md |
+
+### Completed (Tier 1)
+- ~~Keyword routing improvements~~ — Done (Feb 18-19). All 5 skills updated per audit: system_info (12 keywords), conversation (9), news (12), reminders (11), weather (15). Generic blocklist in skill_manager.py.
+- ~~Topic shift threshold tuning~~ — Already done. config.yaml has 0.35 (down from 0.45 default). Confirmed live in production logs.
+- ~~News urgency filtering~~ — Done (Feb 19, `1d447c2` + `e1c4611`). max_priority param in news_manager, _detect_urgency() in skill, 9 urgency keywords, 5 semantic examples.
 
 ---
 
@@ -107,7 +108,7 @@
 | B1 | "Fullscreen" Whisper misrecognition | Medium | Covered by Whisper retraining (#3) |
 | B2 | Batch extraction (Phase 4) untested | Low | Needs 25+ messages in one session to trigger |
 | B3 | Console logging broken | Low | `JARVIS_LOG_FILE_ONLY=1` not working (also #29) |
-| B4 | Topic shift threshold may be too sensitive | Low | 0.45 → test 0.35-0.40 (also #5) |
+| ~~B4~~ | ~~Topic shift threshold~~ | ~~Resolved~~ | Already set to 0.35 in config.yaml, confirmed in production |
 | B5 | `_in_development/web_navigation/skill.py` has TODO: load prefs from YAML | None (archived prototype) | Not in production code |
 
 ---
