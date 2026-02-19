@@ -1,30 +1,21 @@
 """App Launcher skill — launch applications and manage windows by voice."""
 
-import logging
 import os
 import shlex
 import subprocess
-from typing import Optional
+from typing import Optional, Dict, Any
 
-logger = logging.getLogger(__name__)
+from core.base_skill import BaseSkill
 
 
-class AppLauncherSkill:
+class AppLauncherSkill(BaseSkill):
     """Launch apps, close them, and manage window state (fullscreen/minimize/maximize)."""
-
-    def __init__(self, config: dict, tts=None):
-        self.config = config
-        self.tts = tts
-        self.honorific = "sir"
-        self.semantic_intents = {}
-        self.intents = {}
-
-        # Load app aliases from config
-        launcher_config = config.get("app_launcher", {})
-        self.apps = launcher_config.get("apps", {})
 
     def initialize(self) -> bool:
         """Register semantic intents for app launching and window management."""
+
+        # Load app aliases from config
+        self.apps = self.config.get("app_launcher.apps", {})
 
         self.register_semantic_intent(
             examples=[
@@ -46,9 +37,13 @@ class AppLauncherSkill:
             examples=[
                 "close chrome",
                 "close the browser",
+                "close the terminal",
+                "close the calculator",
+                "close settings",
                 "shut down firefox",
                 "exit vs code",
                 "close that application",
+                "kill the app",
             ],
             handler=self.close_app,
             threshold=0.48,
@@ -103,34 +98,16 @@ class AppLauncherSkill:
             threshold=0.55,
         )
 
-        logger.info(f"App Launcher initialized with {len(self.apps)} configured apps")
+        self.logger.info(f"App Launcher initialized with {len(self.apps)} configured apps")
         return True
 
-    def register_semantic_intent(self, examples: list, handler, threshold: float):
-        """Register a semantic intent (called by skill_manager during load)."""
-        intent_id = f"<semantic:{handler.__name__}>"
-        self.semantic_intents[intent_id] = {
-            "examples": examples,
-            "handler": handler,
-            "threshold": threshold,
-        }
-
-    def handle_intent(self, intent: str, entities: dict) -> str:
-        """Route intents to handlers."""
-        if intent.startswith("<semantic:") and intent.endswith(">"):
-            handler_name = intent[10:-1]
-            for intent_id, data in self.semantic_intents.items():
-                if data["handler"].__name__ == handler_name:
-                    return data["handler"](entities.get("original_text", ""))
-
-        handler = self.intents.get(intent, {}).get("handler")
-        if handler:
-            return handler(entities.get("original_text", ""))
+    def handle_intent(self, intent: str, entities: Dict[str, Any]) -> str:
+        """Route pattern-based intents. Semantic intents bypass this."""
+        if intent in self.semantic_intents:
+            handler = self.semantic_intents[intent]['handler']
+            return handler(entities=entities)
+        self.logger.error(f"Unknown intent: {intent}")
         return f"I'm not sure how to handle that, {self.honorific}."
-
-    def respond(self, text: str) -> str:
-        """Return response with honorific placeholder for pipeline resolution."""
-        return text
 
     # ── App name extraction ────────────────────────────────────────────
 
@@ -146,11 +123,12 @@ class AppLauncherSkill:
 
     # ── Launch / Close ─────────────────────────────────────────────────
 
-    def launch_app(self, text: str = "") -> str:
+    def launch_app(self, entities: dict = None) -> str:
         """Launch an application by name."""
+        text = (entities or {}).get('original_text', '')
         alias = self._extract_app_name(text)
         if not alias:
-            return self.respond(
+            return (
                 f"I don't recognize that application, {self.honorific}. "
                 f"Say 'what apps can you launch' to see what's available."
             )
@@ -171,35 +149,28 @@ class AppLauncherSkill:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            logger.info(f"Launched {display_name}: {exec_cmd}")
-            return self.respond(f"Launching {display_name}, {self.honorific}.")
+            self.logger.info(f"Launched {display_name}: {exec_cmd}")
+            return f"Launching {display_name}, {self.honorific}."
         except FileNotFoundError:
-            logger.error(f"Executable not found for {alias}: {exec_cmd}")
-            return self.respond(
-                f"I couldn't find the executable for {display_name}, {self.honorific}."
-            )
+            self.logger.error(f"Executable not found for {alias}: {exec_cmd}")
+            return f"I couldn't find the executable for {display_name}, {self.honorific}."
         except Exception as e:
-            logger.error(f"Failed to launch {alias}: {e}")
-            return self.respond(
-                f"Something went wrong launching {display_name}, {self.honorific}."
-            )
+            self.logger.error(f"Failed to launch {alias}: {e}")
+            return f"Something went wrong launching {display_name}, {self.honorific}."
 
-    def close_app(self, text: str = "") -> str:
+    def close_app(self, entities: dict = None) -> str:
         """Close an application window gracefully via wmctrl."""
+        text = (entities or {}).get('original_text', '')
         alias = self._extract_app_name(text)
         if not alias:
-            return self.respond(
-                f"Which application should I close, {self.honorific}?"
-            )
+            return f"Which application should I close, {self.honorific}?"
 
         app = self.apps[alias]
         display_name = app.get("name", alias)
         window_id = self._find_window(alias)
 
         if not window_id:
-            return self.respond(
-                f"I don't see {display_name} running, {self.honorific}."
-            )
+            return f"I don't see {display_name} running, {self.honorific}."
 
         try:
             subprocess.run(
@@ -207,18 +178,17 @@ class AppLauncherSkill:
                 timeout=5,
                 capture_output=True,
             )
-            logger.info(f"Closed {display_name} (window {window_id})")
-            return self.respond(f"Closing {display_name}, {self.honorific}.")
+            self.logger.info(f"Closed {display_name} (window {window_id})")
+            return f"Closing {display_name}, {self.honorific}."
         except Exception as e:
-            logger.error(f"Failed to close {alias}: {e}")
-            return self.respond(
-                f"I couldn't close {display_name}, {self.honorific}."
-            )
+            self.logger.error(f"Failed to close {alias}: {e}")
+            return f"I couldn't close {display_name}, {self.honorific}."
 
     # ── Window management ──────────────────────────────────────────────
 
-    def fullscreen_app(self, text: str = "") -> str:
+    def fullscreen_app(self, entities: dict = None) -> str:
         """Make a window fullscreen via wmctrl."""
+        text = (entities or {}).get('original_text', '')
         window_id = self._resolve_window(text)
         if not window_id:
             return self._no_window_response("fullscreen")
@@ -233,33 +203,33 @@ class AppLauncherSkill:
                 ["wmctrl", "-i", "-r", window_id, "-b", "add,fullscreen"],
                 timeout=5, capture_output=True,
             )
-            logger.info(f"Fullscreened window {window_id}")
-            return self.respond(f"Done, {self.honorific}.")
+            self.logger.info(f"Fullscreened window {window_id}")
+            return f"Done, {self.honorific}."
         except Exception as e:
-            logger.error(f"Fullscreen failed: {e}")
-            return self.respond(f"I couldn't fullscreen that window, {self.honorific}.")
+            self.logger.error(f"Fullscreen failed: {e}")
+            return f"I couldn't fullscreen that window, {self.honorific}."
 
-    def minimize_app(self, text: str = "") -> str:
+    def minimize_app(self, entities: dict = None) -> str:
         """Minimize a window via wmctrl."""
+        text = (entities or {}).get('original_text', '')
         window_id = self._resolve_window(text)
         if not window_id:
             return self._no_window_response("minimize")
 
         try:
-            # wmctrl minimize: use xdg approach — wmctrl doesn't have native minimize
-            # Instead, use xdotool if available, or wmctrl iconic state
             subprocess.run(
                 ["wmctrl", "-i", "-r", window_id, "-b", "add,hidden"],
                 timeout=5, capture_output=True,
             )
-            logger.info(f"Minimized window {window_id}")
-            return self.respond(f"Minimized, {self.honorific}.")
+            self.logger.info(f"Minimized window {window_id}")
+            return f"Minimized, {self.honorific}."
         except Exception as e:
-            logger.error(f"Minimize failed: {e}")
-            return self.respond(f"I couldn't minimize that window, {self.honorific}.")
+            self.logger.error(f"Minimize failed: {e}")
+            return f"I couldn't minimize that window, {self.honorific}."
 
-    def maximize_app(self, text: str = "") -> str:
+    def maximize_app(self, entities: dict = None) -> str:
         """Maximize a window via wmctrl."""
+        text = (entities or {}).get('original_text', '')
         window_id = self._resolve_window(text)
         if not window_id:
             return self._no_window_response("maximize")
@@ -274,18 +244,16 @@ class AppLauncherSkill:
                 ["wmctrl", "-i", "-r", window_id, "-b", "add,maximized_vert,maximized_horz"],
                 timeout=5, capture_output=True,
             )
-            logger.info(f"Maximized window {window_id}")
-            return self.respond(f"Maximized, {self.honorific}.")
+            self.logger.info(f"Maximized window {window_id}")
+            return f"Maximized, {self.honorific}."
         except Exception as e:
-            logger.error(f"Maximize failed: {e}")
-            return self.respond(f"I couldn't maximize that window, {self.honorific}.")
+            self.logger.error(f"Maximize failed: {e}")
+            return f"I couldn't maximize that window, {self.honorific}."
 
-    def list_apps(self, text: str = "") -> str:
+    def list_apps(self, entities: dict = None) -> str:
         """List all configured applications."""
         if not self.apps:
-            return self.respond(
-                f"I don't have any applications configured, {self.honorific}."
-            )
+            return f"I don't have any applications configured, {self.honorific}."
 
         names = [app.get("name", alias) for alias, app in self.apps.items()]
         if len(names) == 1:
@@ -295,9 +263,7 @@ class AppLauncherSkill:
         else:
             app_list = ", ".join(names[:-1]) + f", and {names[-1]}"
 
-        return self.respond(
-            f"I can launch {app_list}, {self.honorific}."
-        )
+        return f"I can launch {app_list}, {self.honorific}."
 
     # ── Helpers ────────────────────────────────────────────────────────
 
@@ -337,7 +303,7 @@ class AppLauncherSkill:
                         return window_id
 
         except Exception as e:
-            logger.error(f"wmctrl -l failed: {e}")
+            self.logger.error(f"wmctrl -l failed: {e}")
 
         return None
 
@@ -353,13 +319,6 @@ class AppLauncherSkill:
         # Fall back to the active window (most recently focused)
         try:
             result = subprocess.run(
-                ["wmctrl", "-a", ":ACTIVE:", "-v"],
-                timeout=5,
-                capture_output=True,
-                text=True,
-            )
-            # Get active window via wmctrl -l and xprop
-            result = subprocess.run(
                 ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
                 timeout=5,
                 capture_output=True,
@@ -374,12 +333,10 @@ class AppLauncherSkill:
                     if window_id.startswith("0x"):
                         return window_id
         except Exception as e:
-            logger.debug(f"Could not get active window: {e}")
+            self.logger.debug(f"Could not get active window: {e}")
 
         return None
 
     def _no_window_response(self, action: str) -> str:
         """Response when no window can be found for the requested action."""
-        return self.respond(
-            f"I couldn't find a window to {action}, {self.honorific}."
-        )
+        return f"I couldn't find a window to {action}, {self.honorific}."
