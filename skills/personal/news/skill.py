@@ -11,6 +11,20 @@ from core.base_skill import BaseSkill
 from core.news_manager import get_news_manager
 
 
+# Urgency aliases — map spoken words to max_priority values
+# Priority 1 = critical, 2 = high, 3 = normal, 4 = low
+_URGENCY_MAP = {
+    "critical": 1,
+    "urgent": 1,
+    "breaking": 1,
+    "alert": 1,
+    "emergency": 1,
+    "important": 2,
+    "high priority": 2,
+    "significant": 2,
+    "major": 2,
+}
+
 # Category aliases — map spoken words to config category keys
 _CATEGORY_MAP = {
     "tech": "tech",
@@ -38,7 +52,7 @@ class NewsSkill(BaseSkill):
     def initialize(self) -> bool:
         """Register semantic intents for news commands."""
 
-        # --- Read all news ---
+        # --- Read all news (with optional urgency filtering) ---
         self.register_semantic_intent(
             examples=[
                 "what's the news",
@@ -51,12 +65,15 @@ class NewsSkill(BaseSkill):
                 "read the news",
                 "any breaking news",
                 "catch me up on the news",
+                "read critical headlines",
+                "any urgent news",
+                "are there any important headlines",
             ],
             handler=self.read_news,
             threshold=0.55,
         )
 
-        # --- Read category-specific news ---
+        # --- Read category-specific news (with optional urgency filtering) ---
         self.register_semantic_intent(
             examples=[
                 "any tech news today",
@@ -71,6 +88,8 @@ class NewsSkill(BaseSkill):
                 "local news today",
                 "any general news headlines",
                 "world news update",
+                "critical cybersecurity headlines",
+                "any urgent tech news",
             ],
             handler=self.read_category,
             threshold=0.62,
@@ -130,6 +149,18 @@ class NewsSkill(BaseSkill):
 
         return None
 
+    def _detect_urgency(self, text: str = None) -> int:
+        """Detect urgency level from user text. Returns max_priority or None."""
+        if not text:
+            text = getattr(self, '_last_user_text', '')
+        text_lower = text.lower()
+
+        for keyword, priority in _URGENCY_MAP.items():
+            if keyword in text_lower:
+                return priority
+
+        return None
+
     def read_news(self) -> str:
         """Read top headlines across all categories."""
         mgr = self._get_manager()
@@ -140,10 +171,12 @@ class NewsSkill(BaseSkill):
 
         # Check if user mentioned a specific category
         category = self._detect_category(text)
-        if category:
-            return self._read_for_category(mgr, category)
+        max_priority = self._detect_urgency(text)
 
-        response = mgr.read_headlines(limit=5)
+        if category:
+            return self._read_for_category(mgr, category, max_priority=max_priority)
+
+        response = mgr.read_headlines(limit=5, max_priority=max_priority)
 
         # Request follow-up window for "pull that up" / "more headlines"
         self.conversation.request_follow_up = 15.0
@@ -158,6 +191,7 @@ class NewsSkill(BaseSkill):
 
         text = getattr(self, '_last_user_text', '') if hasattr(self.conversation, '_last_user_message') else ""
         category = self._detect_category(text)
+        max_priority = self._detect_urgency(text)
 
         if not category:
             return self.respond(
@@ -165,11 +199,13 @@ class NewsSkill(BaseSkill):
                 "I have tech, cybersecurity, politics, general, and local."
             )
 
-        return self._read_for_category(mgr, category)
+        return self._read_for_category(mgr, category, max_priority=max_priority)
 
-    def _read_for_category(self, mgr, category: str) -> str:
+    def _read_for_category(self, mgr, category: str, max_priority: int = None) -> str:
         """Read headlines for a given category."""
-        response = mgr.read_headlines(category=category, limit=5)
+        response = mgr.read_headlines(
+            category=category, limit=5, max_priority=max_priority
+        )
         self.conversation.request_follow_up = 15.0
         return self.respond(response)
 

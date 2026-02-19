@@ -16,10 +16,10 @@
 **Files:** `core/stt.py`, `/mnt/models/voice_training/`
 **Note:** Remove `_debug_save_audio()` from `stt.py` after retraining
 
-### 2. Quick Wins (batch in one session)
+### 2. Quick Wins
 - **News urgency filtering** — add urgency param to existing intent handler (~30 min)
-- **Qwen sampling params** — temp=0.7, top_p=0.8, top_k=20 for non-thinking mode (~10 min)
-- **Rotate OpenWeather API key** — real key in early git history (~5 min)
+- ~~Qwen sampling params~~ — Done (Feb 19, `25b5f0a`). top_p=0.8, top_k=20
+- ~~Rotate OpenWeather API key~~ — Done (Feb 19, `25b5f0a`)
 
 ---
 
@@ -118,7 +118,7 @@ None!
 - **Voice testing: bare ack as answer** — JARVIS asks question → "yeah" → treated as answer (needs reliable trigger)
 - **Batch extraction (Phase 4) untested** — conversational memory batch fact extraction needs 25+ messages in one session to trigger
 - **Console logging** — `JARVIS_LOG_FILE_ONLY=1` not producing logs in file (deferred, not urgent)
-- **Topic shift threshold tuning** — 0.45 may be too sensitive; consider testing 0.35-0.40
+- ~~Topic shift threshold tuning~~ — Already set to 0.35 in config.yaml, confirmed live
 
 ---
 

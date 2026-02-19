@@ -205,25 +205,30 @@ class NewsManager:
         finally:
             conn.close()
 
-    def get_unread_by_category(self, category: str = None, limit: int = 5) -> List[Dict]:
-        """Get unread headlines, optionally filtered by category, newest first."""
+    def get_unread_by_category(self, category: str = None, limit: int = 5,
+                               max_priority: int = None) -> List[Dict]:
+        """Get unread headlines, optionally filtered by category and/or priority."""
         cutoff = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
         try:
+            conditions = ["read = 0", "detected_at >= ?"]
+            params = [cutoff]
+
             if category:
-                rows = conn.execute("""
-                    SELECT * FROM news_headlines
-                    WHERE read = 0 AND detected_at >= ? AND category = ?
-                    ORDER BY priority ASC, detected_at DESC
-                    LIMIT ?
-                """, (cutoff, category, limit)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT * FROM news_headlines
-                    WHERE read = 0 AND detected_at >= ?
-                    ORDER BY priority ASC, detected_at DESC
-                    LIMIT ?
-                """, (cutoff, limit)).fetchall()
+                conditions.append("category = ?")
+                params.append(category)
+            if max_priority is not None:
+                conditions.append("priority <= ?")
+                params.append(max_priority)
+
+            params.append(limit)
+            where = " AND ".join(conditions)
+            rows = conn.execute(f"""
+                SELECT * FROM news_headlines
+                WHERE {where}
+                ORDER BY priority ASC, detected_at DESC
+                LIMIT ?
+            """, params).fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()
@@ -643,15 +648,23 @@ class NewsManager:
     # Reading Headlines Aloud
     # ------------------------------------------------------------------
 
-    def read_headlines(self, category: str = None, limit: int = 5) -> str:
+    def read_headlines(self, category: str = None, limit: int = 5,
+                       max_priority: int = None) -> str:
         """Read top headlines with natural, varied cadence."""
         import random
 
-        headlines = self.get_unread_by_category(category=category, limit=limit)
+        headlines = self.get_unread_by_category(
+            category=category, limit=limit, max_priority=max_priority
+        )
+
+        # Build label fragments for speech
+        _PRIORITY_LABELS = {1: "critical", 2: "high-priority"}
+        pri_label = _PRIORITY_LABELS.get(max_priority, "") if max_priority else ""
+        cat_label = _CATEGORY_LABELS.get(category, category) if category else ""
 
         if not headlines:
-            cat_label = _CATEGORY_LABELS.get(category, category) if category else "news"
-            return f"No new {cat_label} headlines at the moment, {get_honorific()}."
+            qualifier = f"{pri_label} {cat_label}".strip() or "news"
+            return f"No new {qualifier} headlines at the moment, {get_honorific()}."
 
         ids_read = []
         lines = []
@@ -674,9 +687,9 @@ class NewsManager:
         self.mark_read(ids_read)
 
         # Build response
-        cat_label = _CATEGORY_LABELS.get(category, "") if category else ""
-        if cat_label:
-            intro = f"Here are the top {cat_label} headlines, {get_honorific()}. "
+        qualifier = f"{pri_label} {cat_label}".strip()
+        if qualifier:
+            intro = f"Here are the top {qualifier} headlines, {get_honorific()}. "
         else:
             intro = f"Here are the top headlines, {get_honorific()}. "
 
