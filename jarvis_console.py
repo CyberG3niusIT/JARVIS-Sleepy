@@ -159,6 +159,19 @@ class DocumentBuffer:
         return True
 
 
+# Binary file extensions rejected by /file command
+_BINARY_EXTENSIONS = frozenset({
+    '.exe', '.bin', '.so', '.dll', '.dylib', '.o', '.a',
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.tiff',
+    '.mp3', '.mp4', '.wav', '.flac', '.ogg', '.avi', '.mkv', '.mov', '.webm',
+    '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar', '.zst',
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.gguf', '.npy', '.npz', '.pt', '.pth', '.onnx', '.safetensors',
+    '.db', '.sqlite', '.sqlite3',
+    '.pyc', '.class', '.wasm',
+})
+
+
 def render_stats(console, match_info, llm, used_llm, t_start, t_match, t_end, session,
                   doc_buffer=None):
     """Render a compact stats panel with adaptive column layout."""
@@ -338,6 +351,149 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
         ))
         return True
 
+    elif cmd == "/file":
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        if not arg:
+            console.print("[yellow]Usage: /file <path> [--tail][/yellow]")
+            return True
+
+        # Parse --tail flag
+        tail_mode = "--tail" in arg
+        if tail_mode:
+            arg = arg.replace("--tail", "").strip()
+
+        # Strip quotes (drag-and-drop or copy-paste may include them)
+        arg = arg.strip("'\"")
+
+        filepath = Path(arg).expanduser().resolve()
+
+        if not filepath.exists():
+            console.print(f"[red]File not found:[/red] {filepath}")
+            return True
+        if not filepath.is_file():
+            console.print(f"[red]Not a file:[/red] {filepath}")
+            return True
+
+        # Binary rejection
+        if filepath.suffix.lower() in _BINARY_EXTENSIONS:
+            console.print(f"[red]Binary file rejected:[/red] {filepath.suffix} files are not supported")
+            return True
+
+        # Size check
+        size = filepath.stat().st_size
+        if size > 500_000:
+            console.print(f"[yellow]Warning:[/yellow] File is {size:,} bytes — loading anyway (will truncate to token budget)")
+
+        try:
+            text = filepath.read_text(encoding='utf-8', errors='replace')
+        except Exception as e:
+            console.print(f"[red]Error reading file:[/red] {e}")
+            return True
+
+        if not text.strip():
+            console.print(f"[yellow]File is empty:[/yellow] {filepath.name}")
+            return True
+
+        # --tail: keep end of file instead of beginning
+        if tail_mode:
+            lines = text.splitlines()
+            target_words = int(doc_buffer.max_tokens / TOKEN_RATIO)
+            kept = []
+            word_count = 0
+            for line in reversed(lines):
+                word_count += len(line.split())
+                if word_count > target_words:
+                    break
+                kept.append(line)
+            text = "\n".join(reversed(kept))
+
+        doc_buffer.load(text, f"file:{filepath.name}")
+        line_count = text.count('\n') + 1
+        preview = text[:200] + ("..." if len(text) > 200 else "")
+        tail_tag = " [dim](tail)[/dim]" if tail_mode else ""
+        console.print(Panel(
+            f"[bold green]Loaded[/bold green] ~{doc_buffer.token_estimate} tokens, "
+            f"{line_count} lines, {size:,} bytes ({doc_buffer.source}){tail_tag}\n\n"
+            f"[dim]{preview}[/dim]",
+            title="[cyan]Document Buffer[/cyan]",
+            border_style="cyan",
+        ))
+        return True
+
+    elif cmd == "/clipboard":
+        import subprocess as _sp
+        try:
+            result = _sp.run(
+                ["wl-paste", "--no-newline"],
+                capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode != 0:
+                console.print(f"[red]Clipboard error:[/red] {result.stderr.strip() or 'wl-paste failed'}")
+                return True
+            text = result.stdout
+        except FileNotFoundError:
+            console.print("[red]wl-paste not found.[/red] Install with: [bold]sudo apt install wl-clipboard[/bold]")
+            return True
+        except _sp.TimeoutExpired:
+            console.print("[red]Clipboard read timed out.[/red]")
+            return True
+
+        if not text.strip():
+            console.print("[yellow]Clipboard is empty.[/yellow]")
+            return True
+
+        doc_buffer.load(text, "clipboard")
+        lines = text.count('\n') + 1
+        preview = text[:200] + ("..." if len(text) > 200 else "")
+        console.print(Panel(
+            f"[bold green]Loaded[/bold green] ~{doc_buffer.token_estimate} tokens, "
+            f"{lines} lines ({doc_buffer.source})\n\n"
+            f"[dim]{preview}[/dim]",
+            title="[cyan]Document Buffer[/cyan]",
+            border_style="cyan",
+        ))
+        return True
+
+    elif cmd == "/append":
+        console.print("[cyan]Append mode — type or paste text. Press [bold]Esc then Enter[/bold] to submit, [bold]Ctrl+C[/bold] to cancel.[/cyan]")
+
+        append_bindings = KeyBindings()
+
+        @append_bindings.add('escape', 'enter')
+        def _submit_append(event):
+            event.current_buffer.validate_and_handle()
+
+        @append_bindings.add('enter')
+        def _newline_append(event):
+            event.current_buffer.insert_text('\n')
+
+        try:
+            append_session = PromptSession(history=pt_history)
+            text = append_session.prompt(
+                "append> ",
+                multiline=True,
+                key_bindings=append_bindings,
+                bottom_toolbar=HTML('<b>Esc+Enter</b> to submit | <b>Ctrl+C</b> to cancel'),
+            )
+        except KeyboardInterrupt:
+            console.print("[dim]Append cancelled.[/dim]")
+            return True
+
+        text = text.strip()
+        if not text:
+            console.print("[yellow]Nothing to append.[/yellow]")
+            return True
+
+        was_empty = not doc_buffer.active
+        doc_buffer.append(text, "append")
+        verb = "Loaded" if was_empty else "Appended"
+        console.print(Panel(
+            f"[bold green]{verb}[/bold green] — buffer now ~{doc_buffer.token_estimate} tokens ({doc_buffer.source})",
+            title="[cyan]Document Buffer[/cyan]",
+            border_style="cyan",
+        ))
+        return True
+
     elif cmd == "/context":
         if not doc_buffer.active:
             console.print("[dim]No document loaded. Use /paste or /file to load one.[/dim]")
@@ -368,12 +524,14 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
         help_table.add_column("Command", style="cyan bold", no_wrap=True)
         help_table.add_column("Description")
         help_table.add_row("/paste", "Multi-line paste mode (Esc+Enter to submit)")
-        help_table.add_row("/file <path>", "Load a file into document buffer (Phase 2)")
-        help_table.add_row("/clipboard", "Load clipboard contents (Phase 2)")
-        help_table.add_row("/append", "Append to existing buffer (Phase 2)")
+        help_table.add_row("/file <path>", "Load a file into document buffer (--tail for end of file)")
+        help_table.add_row("/clipboard", "Load clipboard contents via wl-paste")
+        help_table.add_row("/append", "Append text to existing buffer (multi-line mode)")
         help_table.add_row("/context", "Show current document buffer info")
         help_table.add_row("/clear", "Clear document buffer")
         help_table.add_row("/help", "Show this help")
+        help_table.add_row("", "")
+        help_table.add_row("[dim]Tip[/dim]", "[dim]Drag a file from Nautilus to auto-load it[/dim]")
         console.print(help_table)
         return True
 
@@ -525,6 +683,14 @@ def run_console(config, mode):
                 if reminder_manager:
                     reminder_manager.stop()
                 os.execv(sys.executable, [sys.executable] + sys.argv)
+
+            # Drag-and-drop auto-detect: bare file path → implicit /file
+            # Nautilus drops absolute paths; also handle ~/... paths
+            _stripped = command.strip().strip("'\"")
+            if ((_stripped.startswith("/") or _stripped.startswith("~/")) and
+                    os.path.isfile(os.path.expanduser(_stripped))):
+                _handle_slash_command(f"/file {_stripped}", doc_buffer, console, pt_history)
+                continue
 
             # Slash commands — handle before any skill routing
             if command.startswith("/"):

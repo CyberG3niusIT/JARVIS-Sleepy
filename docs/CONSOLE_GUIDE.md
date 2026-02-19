@@ -13,9 +13,9 @@ python3 jarvis_console.py --speech     # Launches full voice mode
 | Command | What It Does |
 |---------|-------------|
 | `/paste` | Enter multi-line paste mode — paste or type text, then press **Esc → Enter** to submit |
-| `/file <path>` | Load a file into the document buffer *(coming soon)* |
-| `/clipboard` | Load clipboard contents into the buffer *(coming soon)* |
-| `/append` | Append text to the existing buffer *(coming soon)* |
+| `/file <path>` | Load a file into the document buffer (`--tail` for end of file) |
+| `/clipboard` | Load clipboard contents into the buffer (via `wl-paste`) |
+| `/append` | Append text to the existing buffer (multi-line mode) |
 | `/context` | Show what's currently loaded — source, token count, preview |
 | `/clear` | Clear the document buffer |
 | `/help` | List all available commands |
@@ -26,7 +26,9 @@ The document buffer lets you feed text into JARVIS for analysis — logs, code, 
 
 ### Loading a document
 
-Type `/paste` and hit Enter. You're now in multi-line mode:
+There are four ways to load content:
+
+**Paste mode** — `/paste` opens multi-line editing:
 
 ```
 You > /paste
@@ -38,7 +40,48 @@ paste> [paste your content here]
 - **Esc then Enter** submits the text
 - **Ctrl+C** cancels
 
-After submitting, you'll see a confirmation panel with the token count and a preview.
+**Load a file** — `/file <path>`:
+
+```
+You > /file ~/jarvis/core/stt.py
+╭─ Document Buffer ──────────────────────────╮
+│ Loaded ~1,200 tokens, 85 lines, 4,521 bytes│
+│ (file:stt.py)                              │
+╰────────────────────────────────────────────╯
+```
+
+- Paths expand `~` and resolve to absolute
+- Binary files (images, archives, models, etc.) are rejected
+- Files over 500KB load with a warning (auto-truncated to token budget)
+- Use `--tail` to load the end of a file instead of the beginning (useful for logs)
+
+**Load from clipboard** — `/clipboard`:
+
+```
+You > /clipboard
+╭─ Document Buffer ─────────────────╮
+│ Loaded ~340 tokens, 12 lines      │
+│ (clipboard)                       │
+╰───────────────────────────────────╯
+```
+
+Reads from Wayland clipboard via `wl-paste`. Requires `wl-clipboard` (`sudo apt install wl-clipboard`).
+
+**Drag and drop** — drag a file from Nautilus into the terminal:
+
+The terminal pastes the file path as text. JARVIS auto-detects absolute file paths and loads them as if you typed `/file`.
+
+### Appending to the buffer
+
+Use `/append` to add more text to an existing buffer without replacing it:
+
+```
+You > /append
+Append mode — type or paste text. Press Esc then Enter to submit, Ctrl+C to cancel.
+append> [additional content]
+```
+
+The new text is added after the existing content with a blank line separator.
 
 ### Asking questions about it
 
@@ -102,5 +145,6 @@ DocCtx  ~820 tok (paste)
 
 - The document is **never saved** to chat history — it only lives in memory for the current session
 - Large documents are automatically truncated to ~4000 tokens (roughly 3000 words) to leave room for the LLM's context window
-- You can load a new document at any time with `/paste` — it replaces the previous one
+- You can load a new document at any time with `/paste` or `/file` — it replaces the previous one
+- Use `/append` to add to the buffer instead of replacing it
 - When a document is loaded, all queries go to the LLM (skill routing is bypassed) so JARVIS focuses on your document. Use `/clear` to return to normal skill routing.
