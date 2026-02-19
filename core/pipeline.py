@@ -1090,18 +1090,9 @@ class Coordinator:
                     results = self.web_researcher.search(query)
                     self._last_research_results = results
 
-                    # Fetch page content from top 3 results for richer synthesis.
+                    # Fetch page content from top 3 results concurrently.
                     # Multiple sources let the LLM cross-reference and pick the best info.
-                    page_sections = []
-                    for r in results[:3]:
-                        url = r.get("url", "")
-                        if not url:
-                            continue
-                        page_text = self.web_researcher.fetch_page(url, max_chars=2000)
-                        if page_text and len(page_text) > 300:
-                            page_sections.append(
-                                f"[{r['title']}] ({url}):\n{page_text}"
-                            )
+                    page_sections = self.web_researcher.fetch_pages_parallel(results)
 
                     page_content = ""
                     if page_sections:

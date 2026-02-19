@@ -9,6 +9,7 @@ Thread-safe, error-resilient — never crashes the pipeline.
 
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from core.logger import get_logger
@@ -48,7 +49,7 @@ class WebResearcher:
         self._search_cache = _TTLCache(ttl_seconds=300)   # 5 min
         self._page_cache = _TTLCache(ttl_seconds=600)      # 10 min
         self._last_search_time = 0.0
-        self._rate_limit_gap = 2.0  # seconds between searches
+        self._rate_limit_gap = 1.0  # seconds between searches
         self.logger.info("WebResearcher initialized")
 
     def search(self, query: str, max_results: int = 5) -> list[dict]:
@@ -137,6 +138,56 @@ class WebResearcher:
         except Exception as e:
             self.logger.error(f"Page fetch failed ({url}): {e}")
             return None
+
+    def fetch_pages_parallel(self, results: list[dict], max_results: int = 3,
+                             max_chars: int = 2000, timeout: float = 3.0,
+                             min_chars: int = 300) -> list[str]:
+        """Fetch page content from multiple search results concurrently.
+
+        Args:
+            results: Search results (each has 'title', 'url', 'snippet')
+            max_results: Maximum number of pages to fetch
+            max_chars: Max characters per page
+            timeout: Per-page fetch timeout in seconds
+            min_chars: Minimum content length to include
+
+        Returns:
+            List of formatted page sections: "[Title] (url):\ncontent..."
+        """
+        urls = []
+        for r in results[:max_results]:
+            url = r.get("url", "")
+            if url:
+                urls.append((r.get("title", ""), url))
+
+        if not urls:
+            return []
+
+        page_sections = []
+        start = time.time()
+
+        with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+            future_to_info = {
+                pool.submit(self.fetch_page, url, max_chars): (title, url)
+                for title, url in urls
+            }
+            for future in as_completed(future_to_info, timeout=timeout + 1):
+                title, url = future_to_info[future]
+                try:
+                    page_text = future.result(timeout=timeout)
+                    if page_text and len(page_text) >= min_chars:
+                        page_sections.append(
+                            f"[{title}] ({url}):\n{page_text}"
+                        )
+                except Exception as e:
+                    self.logger.debug(f"Page fetch skipped ({url}): {e}")
+
+        elapsed = time.time() - start
+        self.logger.info(
+            f"Parallel fetch: {len(page_sections)}/{len(urls)} pages "
+            f"in {elapsed:.1f}s"
+        )
+        return page_sections
 
     def clear_cache(self):
         """Clear all caches (e.g. when conversation window closes)."""

@@ -276,14 +276,7 @@ def _do_web_search(query, web_researcher, llm, console):
 
     results = web_researcher.search(query)
 
-    page_sections = []
-    for r in results[:3]:
-        url = r.get("url", "")
-        if not url:
-            continue
-        page_text = web_researcher.fetch_page(url, max_chars=2000)
-        if page_text and len(page_text) > 300:
-            page_sections.append(f"[{r['title']}] ({url}):\n{page_text}")
+    page_sections = web_researcher.fetch_pages_parallel(results)
 
     page_content = ""
     if page_sections:
@@ -394,17 +387,8 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
             if tool_call_request.name == "web_search":
                 results = web_researcher.search(query)
 
-                # Fetch top 3 page contents for richer synthesis
-                page_sections = []
-                for r in results[:3]:
-                    url = r.get("url", "")
-                    if not url:
-                        continue
-                    page_text = web_researcher.fetch_page(url, max_chars=2000)
-                    if page_text and len(page_text) > 300:
-                        page_sections.append(
-                            f"[{r['title']}] ({url}):\n{page_text}"
-                        )
+                # Fetch top 3 page contents concurrently for richer synthesis
+                page_sections = web_researcher.fetch_pages_parallel(results)
 
                 page_content = ""
                 if page_sections:
