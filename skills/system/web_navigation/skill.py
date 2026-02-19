@@ -185,8 +185,8 @@ class WebNavigationSkill(BaseSkill):
                 "base_url": "https://www.youtube.com",
             },
             "google": {
-                "selector": "div.g a[href]:first-child",
-                "wait": "div.g",
+                "selector": "div.yuRUbf a",
+                "wait": "div.yuRUbf",
                 "base_url": "",
             },
             "amazon": {
@@ -459,9 +459,11 @@ class WebNavigationSkill(BaseSkill):
 
         # Remove command verbs/phrases (order matters — longer first)
         strip_phrases = [
-            "search the web for", "search for", "search on",
+            "search the web for", "web search for", "web search",
+            "search for", "search on",
             "look up", "look for",
             "pull up", "show me", "find me",
+            "results for", "results",
             "search", "google", "find",
             "navigate to", "go to", "open",
             "check for", "check",
@@ -877,10 +879,24 @@ class WebNavigationSkill(BaseSkill):
                 scrape_url = url
 
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page(
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                    ],
+                )
+                context = browser.new_context(
                     user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                               "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                               "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                    locale="en-US",
+                )
+                page = context.new_page()
+                # Hide webdriver flag from bot detection
+                page.add_init_script(
+                    'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
                 )
 
                 page.goto(scrape_url, wait_until="domcontentloaded", timeout=15000)
@@ -1286,9 +1302,9 @@ class WebNavigationSkill(BaseSkill):
     def _number_to_ordinal(self, n: int) -> str:
         """Convert number to spoken ordinal."""
         ordinals = {
-            1: "the first one", 2: "the second one", 3: "the third one",
-            4: "the fourth one", 5: "the fifth one", 6: "the sixth one",
-            7: "the seventh one", 8: "the eighth one", 9: "the ninth one",
-            10: "the tenth one",
+            1: "first", 2: "second", 3: "third",
+            4: "fourth", 5: "fifth", 6: "sixth",
+            7: "seventh", 8: "eighth", 9: "ninth",
+            10: "tenth",
         }
         return ordinals.get(n, f"number {n}")

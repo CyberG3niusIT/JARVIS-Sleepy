@@ -270,21 +270,21 @@ class SkillManager:
                 self._last_match_info = {"layer": "fuzzy", "skill_name": skill_name, "intent_id": pattern, "confidence": None, "handler_name": pattern}
                 return (skill_name, pattern, entities)
 
-        # LAYER 3: Try semantic intent matching (embedding similarity)
-        semantic_match = self._match_semantic_intents(normalized)
-        if semantic_match:
-            skill_name, intent_id, entities = semantic_match
-            self.logger.info(f"🎯 Matched semantic intent: {intent_id} -> {skill_name}")
-            self._last_match_info = {"layer": "semantic", "skill_name": skill_name, "intent_id": intent_id, "confidence": entities.get("similarity"), "handler_name": intent_id}
-            return (skill_name, intent_id, entities)
-
-        # LAYER 4: Try keyword-based semantic matching (fallback)
+        # LAYER 3: Try keyword-based matching (explicit signals beat fuzzy similarity)
         keyword_match = self._match_by_keywords(normalized)
         if keyword_match:
             skill_name, pattern, entities = keyword_match
             self.logger.info(f"Matched intent (keywords): {pattern} -> {skill_name}")
             self._last_match_info = {"layer": "keyword", "skill_name": skill_name, "intent_id": pattern, "confidence": None, "handler_name": pattern}
             return keyword_match
+
+        # LAYER 4: Try semantic intent matching (embedding similarity fallback)
+        semantic_match = self._match_semantic_intents(normalized)
+        if semantic_match:
+            skill_name, intent_id, entities = semantic_match
+            self.logger.info(f"🎯 Matched semantic intent: {intent_id} -> {skill_name}")
+            self._last_match_info = {"layer": "semantic", "skill_name": skill_name, "intent_id": intent_id, "confidence": entities.get("similarity"), "handler_name": intent_id}
+            return (skill_name, intent_id, entities)
 
         self._last_match_info = None
         return None
@@ -340,17 +340,25 @@ class SkillManager:
         # Check each skill's keywords
         best_match = None
         best_score = 0
-        
+
+        # Keywords with explicit handler aliases get a bonus so they win ties
+        # (e.g. "search" → search_web should beat "graphics" → gpu_info)
+        _keyword_aliases = {"google", "search"}
+
         for skill_name, metadata in self.skill_metadata.items():
             # Access keywords attribute directly
             keywords = getattr(metadata, 'keywords', [])
             if not keywords:
                 continue
-            
+
             # Count how many keywords match (whole-word only to avoid substring false positives)
-            matches = sum(1 for keyword in keywords
-                          if re.search(r'\b' + re.escape(keyword.lower()) + r'\b', normalized_text))
-            
+            # Alias keywords get +1 bonus to win ties against regular keywords
+            matches = sum(
+                (2 if keyword.lower() in _keyword_aliases else 1)
+                for keyword in keywords
+                if re.search(r'\b' + re.escape(keyword.lower()) + r'\b', normalized_text)
+            )
+
             if matches > best_score:
                 best_score = matches
                 best_match = skill_name
@@ -477,6 +485,7 @@ class SkillManager:
                 # Explicit keyword→handler aliases (keywords that don't suffix-match naturally)
                 _keyword_aliases = {
                     "google": "search_web",
+                    "search": "search_web",
                 }
                 # Generic keywords too ambiguous for suffix matching
                 _generic_keywords = {"search", "open", "find", "look", "browse", "navigate", "web",
