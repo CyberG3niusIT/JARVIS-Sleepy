@@ -1,10 +1,10 @@
 # TODO — Next Session
 
-**Updated:** February 18, 2026
+**Updated:** February 19, 2026
 
 ---
 
-## Next Up
+## Tier 1: High ROI, Low Effort — Do Now/Soon
 
 ### 1. Whisper Retraining — Scheduled Feb 21
 **Priority:** HIGH
@@ -16,14 +16,46 @@
 **Files:** `core/stt.py`, `/mnt/models/voice_training/`
 **Note:** Remove `_debug_save_audio()` from `stt.py` after retraining
 
-### 2. Voice Testing — Remaining Items
+### 2. App Launcher Skill
 **Priority:** HIGH
-**Status:** Most tests passed this session. Remaining:
-1. ~~Metric bypass~~ PASSED — distance query returned km via web search
-2. ~~Bare ack noise filter~~ PASSED — "yeah" during conv window filtered
-3. Bare ack as answer — JARVIS asks question → "yeah" → treated as answer (needs reliable trigger)
+**Location:** `skills/system/app_launcher/`
+**Concept:** "Open Chrome. Fullscreen please. Thanks."
+- Config-driven alias map (natural names → executables)
+- Window management via `wmctrl`/`xdotool` (fullscreen, maximize, move to monitor)
+- Open questions: Wayland vs X11 tools, directory navigation, monitor naming
 
-### 3. Audio Recording Skill
+### 3. Quick Wins (batch in one session)
+- **News urgency filtering** — add urgency param to existing intent handler (~30 min)
+- **Qwen sampling params** — temp=0.7, top_p=0.8, top_k=20 for non-thinking mode (~10 min)
+- **Rotate OpenWeather API key** — real key in early git history (~5 min)
+
+---
+
+## Tier 2: High ROI, Medium Effort — Next Wave
+
+### 4. Inject User Facts into Web Research
+**Priority:** HIGH
+**Concept:** JARVIS reasons about what it knows about the user (location, preferences) during `stream_with_tools()`.
+**Risk:** History poisoning — needs careful scoping.
+
+### 5. Minimize Web Search Latency
+**Priority:** MEDIUM
+**Concept:** Forced search adds ~5-8s; explore caching, parallel fetch, snippet-only mode.
+
+### 6. Email Skill (Gmail Integration)
+**Priority:** MEDIUM
+**Concept:** Voice-composed email via Gmail API + OAuth (same pattern as Calendar).
+**Design:** `.archive/docs/MASTER_DESIGN.md` has contact DB schema and feature list.
+
+### 7. Google Keep Integration
+**Priority:** MEDIUM
+**Concept:** "Add milk to the grocery list." Shared access with secondary user.
+
+---
+
+## Tier 3: Medium ROI, Higher Effort — When Ready
+
+### 8. Audio Recording Skill
 **Priority:** MEDIUM
 **Location:** `skills/personal/audio_recording/`
 **Concept:** Voice-triggered recording with natural playback queries.
@@ -31,92 +63,70 @@
 - "Play the recording from yesterday" → date-based lookup + playback
 - 6 semantic intents (start, stop, play, query, list, export)
 
-### 4. App Launcher Skill
+### 9. "Onscreen Please" — Retroactive Visual Display
 **Priority:** MEDIUM
-**Location:** `skills/system/app_launcher/`
-**Concept:** "Open Chrome. Fullscreen please. Thanks."
-- Config-driven alias map (natural names → executables)
-- Window management via `wmctrl`/`xdotool` (fullscreen, maximize, move to monitor)
-- Open questions: Wayland vs X11 tools, directory navigation, monitor naming
+**Concept:** Buffer last raw output. "Onscreen please" displays it retroactively.
+
+### 10. Music Control (Apple Music)
+**Priority:** MEDIUM
+**Concept:** Playlist learning, volume via PulseAudio. Apple Music web interface is finicky.
+**Design:** `.archive/docs/MASTER_DESIGN.md` has playlist DB schema.
+
+### 11. LLM-Centric Architecture Migration
+**Priority:** MEDIUM (wait for Qwen 3.5 release)
+**Design:** `docs/DEVELOPMENT_VISION.md`
+**Concept:** Skills become tools, not destinations. Incremental migration.
+
+---
+
+## Tier 4: Lower Priority — Backlog
+
+### Skill Editing System
+**Design:** `docs/SKILL_EDITING_SYSTEM.md`
+**Concept:** "Edit the weather skill" → LLM code gen → review → apply with backup.
+**Note:** VS Code + Claude Code is faster for editing skills in practice.
+
+### Web Dashboard
+**Priority:** LOW (demo/showoff feature)
+**Concept:** Local Flask/FastAPI web UI for JARVIS management.
+
+### STT Worker Process
+**Design:** `docs/STT_WORKER_PROCESS.md`
+**Concept:** GPU isolation via separate process. Only needed if GPU conflicts resurface.
+
+### Automated Skill Generation
+**Concept:** Q&A → build → test → review → deploy. Depends on Skill Editing.
+
+### Mobile Access
+**Concept:** Remote command via phone. Different tech stack entirely.
+
+---
+
+## Tier 5: Aspirational — Someday/Maybe
+
+- **Malware Analysis Framework** — QEMU sandbox, VirusTotal/Any.run API, CISA-format reports. Build when a specific engagement needs it.
+- **Video / Face Recognition** — webcam → people/pets/objects. Hardware-dependent.
+- **Tor / Dark Web Research** — Brave Tor mode, safety protocols. Specialized professional use.
+- **Emotional context awareness** — laugh/frustration/distress detection. Research-level ML.
+- **Voice cloning (Paul Bettany)** — tested Coqui, rejected. Revisit when open-source matures.
+- **Proactive AI** — suggest actions based on patterns. Needs significant usage data first.
+- **Self-modification** — JARVIS proposes own improvements. Far future.
+- **Home automation** — IoT integration. Hardware-dependent.
 
 ---
 
 ## Active Bugs
 
-None! 🎉
+None!
 
 ---
 
 ## Minor Loose Ends
 
+- **Voice testing: bare ack as answer** — JARVIS asks question → "yeah" → treated as answer (needs reliable trigger)
 - **Batch extraction (Phase 4) untested** — conversational memory batch fact extraction needs 25+ messages in one session to trigger
 - **Console logging** — `JARVIS_LOG_FILE_ONLY=1` not producing logs in file (deferred, not urgent)
-
----
-
-## Future Enhancements
-
-- **Inject user facts into web research** — JARVIS should reason about what it knows about the user (location, preferences) during `stream_with_tools()`. Needs careful scoping to avoid history poisoning.
-- **Minimize web search latency** — forced search adds ~5-8s; explore caching, parallel fetch, snippet-only mode.
-- **Qwen sampling params** — Qwen team recommends temp=0.7, top_p=0.8, top_k=20 for non-thinking mode. Current: temp=0.6 only. Not urgent — prescriptive prompt works without them.
-- **News urgency filtering** — "Read critical headlines" should filter by urgency level. Currently matches count intent with no urgency parameter.
-
----
-
----
-
-## Designed Features — Not Yet Started
-
-### Email Skill (Gmail Integration)
-**Priority:** MEDIUM
-**Concept:** Voice-composed email via Gmail API + OAuth (same pattern as Calendar).
-
-### Google Keep Integration
-**Priority:** MEDIUM
-**Concept:** "Add milk to the grocery list." Shared access with secondary user.
-
-### Skill Editing System
-**Priority:** HIGH (Phase 2)
-**Design:** `docs/SKILL_EDITING_SYSTEM.md`
-**Concept:** "Edit the weather skill" → LLM code gen → review → apply with backup.
-
-### "Onscreen Please" — Retroactive Visual Display
-**Priority:** MEDIUM
-**Concept:** Buffer last raw output. "Onscreen please" displays it retroactively.
-
-### Web Dashboard
-**Priority:** LOW (demo/showoff feature)
-**Concept:** Local Flask/FastAPI web UI for JARVIS management.
-- System stats page (live health check data, GPU/CPU/RAM, pipeline status)
-- Configuration page (config.yaml rendered as a clean editable form)
-- Skill manager (browse installed skills, add from template, view metadata)
-- Database viewer (CRUD for memory.db facts, topic_segments, chat history)
-- Separate process, read-only by default, localhost only
-
----
-
-## Long-Term Roadmap
-
-### Phase 3: Entertainment & Control
-- **Music Control (Apple Music)** — playlist learning, volume via PulseAudio
-- **Automated Skill Generation** — Q&A → build → test → review → deploy
-
-### Phase 4: Security & Threat Hunting
-- **Malware Analysis Framework** — QEMU sandbox, VirusTotal/Any.run API, CISA-format reports
-- **Video / Face Recognition** — webcam → people/pets/objects
-- **Tor / Dark Web Research** — Brave Tor mode, safety protocols
-
-### Long-Term Vision
-- Proactive AI (suggest actions based on patterns)
-- Self-modification (JARVIS proposes own improvements)
-- Home automation (IoT integration)
-- Mobile access (remote command via phone)
-- GitHub open source release (`docs/GITHUB_PUBLISHING_PLAN.md`)
-- Emotional context awareness (laugh/frustration/distress detection)
-- Voice cloning — Paul Bettany JARVIS
-
-### Architecture Improvements
-- **STT Worker Process** — GPU isolation via separate process, IPC via JSON stdin/stdout. Design: `docs/STT_WORKER_PROCESS.md`
+- **Topic shift threshold tuning** — 0.45 may be too sensitive; consider testing 0.35-0.40
 
 ---
 
