@@ -606,6 +606,221 @@ header h1 {
     40% { transform: scale(1); opacity: 1; }
 }
 
+/* Health report — HUD style */
+.health-report {
+    max-width: 85%;
+    align-self: flex-start;
+    background: linear-gradient(170deg, rgba(14, 25, 50, 0.95) 0%, rgba(8, 12, 28, 0.98) 100%);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    border-radius: 4px;
+    overflow: hidden;
+    animation: hudFadeIn 0.4s ease-out;
+    box-shadow:
+        0 0 15px rgba(56, 189, 248, 0.08),
+        inset 0 1px 0 rgba(56, 189, 248, 0.1);
+    position: relative;
+}
+
+.health-report::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.8;
+}
+
+@keyframes hudFadeIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.health-header {
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.15);
+    background: linear-gradient(180deg, rgba(56, 189, 248, 0.06) 0%, transparent 100%);
+    position: relative;
+}
+
+.health-title {
+    font-family: 'Consolas', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+}
+
+.health-timestamp {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.68rem;
+    color: rgba(56, 189, 248, 0.5);
+    margin-top: 3px;
+    letter-spacing: 0.5px;
+}
+
+.health-layer {
+    padding: 10px 18px;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.08);
+}
+
+.health-layer:last-of-type {
+    border-bottom: none;
+}
+
+.health-layer-title {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: rgba(56, 189, 248, 0.7);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.06);
+}
+
+.health-check {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 0.82rem;
+    line-height: 1.4;
+    transition: background 0.15s;
+}
+
+.health-check:hover {
+    background: rgba(56, 189, 248, 0.03);
+}
+
+.health-dot {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    width: 14px;
+    text-align: center;
+}
+
+.health-dot.health-green {
+    color: var(--success);
+    text-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+}
+
+.health-dot.health-yellow {
+    color: var(--warning);
+    text-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+    animation: dotPulse 2s ease-in-out infinite;
+}
+
+.health-dot.health-red {
+    color: var(--error);
+    text-shadow: 0 0 8px rgba(248, 113, 113, 0.7);
+    animation: dotPulse 1s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.health-name {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 130px;
+    flex-shrink: 0;
+    font-size: 0.8rem;
+}
+
+.health-summary {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.health-footer {
+    display: flex;
+    gap: 20px;
+    padding: 10px 18px;
+    background: linear-gradient(0deg, rgba(56, 189, 248, 0.05) 0%, transparent 100%);
+    border-top: 1px solid rgba(56, 189, 248, 0.15);
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.health-count.green {
+    color: var(--success);
+    text-shadow: 0 0 4px rgba(52, 211, 153, 0.3);
+}
+
+.health-count.yellow {
+    color: var(--warning);
+    text-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
+}
+
+.health-count.red {
+    color: var(--error);
+    text-shadow: 0 0 4px rgba(248, 113, 113, 0.3);
+}
+
+/* HUD corner brackets */
+.hud-corner {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    z-index: 2;
+}
+
+.hud-tl {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid var(--accent);
+    border-left: 2px solid var(--accent);
+}
+
+.hud-tr {
+    top: -1px;
+    right: -1px;
+    border-top: 2px solid var(--accent);
+    border-right: 2px solid var(--accent);
+}
+
+.hud-bl {
+    bottom: -1px;
+    left: -1px;
+    border-bottom: 2px solid var(--accent);
+    border-left: 2px solid var(--accent);
+}
+
+.hud-br {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid var(--accent);
+    border-right: 2px solid var(--accent);
+}
+
+/* Scan-line overlay */
+.hud-scanline {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 1;
+    background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(56, 189, 248, 0.015) 3px,
+        rgba(56, 189, 248, 0.015) 4px
+    );
+}
+
 /* Scrollbar */
 #chat-area::-webkit-scrollbar {
     width: 6px;

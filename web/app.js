@@ -115,6 +115,10 @@
                 voiceToggle.checked = msg.enabled;
                 break;
 
+            case 'health_report':
+                addHealthReport(msg.data);
+                break;
+
             case 'stream_start':
                 removeThinking();
                 startStreaming();
@@ -233,6 +237,95 @@
         bubble.textContent = content;
         messageDiv.appendChild(bubble);
         messagesEl.appendChild(messageDiv);
+        scrollToBottom();
+    }
+
+    // --- Health report rendering ---
+    const LAYER_TITLES = {
+        bare_metal: 'Layer 1 — Bare Metal',
+        services: 'Layer 2 — Services & Processes',
+        internals: 'Layer 3 — JARVIS Internals',
+        data_stores: 'Layer 4 — Data Stores',
+        self_assessment: 'Layer 5 — Self-Assessment',
+    };
+
+    function addHealthReport(data) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'health-report';
+
+        // Corner brackets
+        wrapper.innerHTML = '<div class="hud-corner hud-tl"></div><div class="hud-corner hud-tr"></div>'
+            + '<div class="hud-corner hud-bl"></div><div class="hud-corner hud-br"></div>'
+            + '<div class="hud-scanline"></div>';
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'health-header';
+        var ts = new Date();
+        var timeStr = ts.toLocaleTimeString('en-US', { hour12: false }) + '.' + String(ts.getMilliseconds()).padStart(3, '0');
+        header.innerHTML = '<div class="health-title">\u25c8 System Health Report</div>'
+            + '<div class="health-timestamp">' + ts.toLocaleDateString() + ' &nbsp; ' + timeStr + '</div>';
+        wrapper.appendChild(header);
+
+        // Layers
+        const layerOrder = ['bare_metal', 'services', 'internals', 'data_stores', 'self_assessment'];
+        let totalGreen = 0, totalYellow = 0, totalRed = 0;
+
+        layerOrder.forEach(function (key) {
+            const checks = data[key];
+            if (!checks || checks.length === 0) return;
+
+            const section = document.createElement('div');
+            section.className = 'health-layer';
+
+            const layerHeader = document.createElement('div');
+            layerHeader.className = 'health-layer-title';
+            layerHeader.textContent = LAYER_TITLES[key] || key;
+            section.appendChild(layerHeader);
+
+            checks.forEach(function (check) {
+                if (check.status === 'green') totalGreen++;
+                else if (check.status === 'yellow') totalYellow++;
+                else if (check.status === 'red') totalRed++;
+
+                const row = document.createElement('div');
+                row.className = 'health-check';
+
+                const dot = document.createElement('span');
+                dot.className = 'health-dot health-' + check.status;
+                dot.textContent = check.status === 'red' ? '\u2716' : '\u25cf';
+
+                const name = document.createElement('span');
+                name.className = 'health-name';
+                name.textContent = check.name;
+
+                const summary = document.createElement('span');
+                summary.className = 'health-summary';
+                summary.textContent = check.summary;
+
+                row.appendChild(dot);
+                row.appendChild(name);
+                row.appendChild(summary);
+                section.appendChild(row);
+            });
+
+            wrapper.appendChild(section);
+        });
+
+        // Summary footer
+        const footer = document.createElement('div');
+        footer.className = 'health-footer';
+        let summaryHTML = '<span class="health-count green">\u25cf ' + totalGreen + ' passed</span>';
+        if (totalYellow > 0) {
+            summaryHTML += '<span class="health-count yellow">\u25cf ' + totalYellow + ' warning' + (totalYellow !== 1 ? 's' : '') + '</span>';
+        }
+        if (totalRed > 0) {
+            summaryHTML += '<span class="health-count red">\u2716 ' + totalRed + ' critical</span>';
+        }
+        footer.innerHTML = summaryHTML;
+        wrapper.appendChild(footer);
+
+        messagesEl.appendChild(wrapper);
         scrollToBottom();
     }
 

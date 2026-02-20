@@ -284,6 +284,10 @@ class DeveloperToolsSkill(BaseSkill):
         """Check if running in console mode (TTSProxy)."""
         return type(self.tts).__name__ == 'TTSProxy'
 
+    def _is_web_mode(self) -> bool:
+        """Check if running in web UI mode (WebTTSProxy)."""
+        return type(self.tts).__name__ == 'WebTTSProxy'
+
     def _blocked_response(self, reason: str = '') -> str:
         """Return a response for blocked commands — ~50% sci-fi Easter egg."""
         easter_eggs = [
@@ -806,11 +810,15 @@ class DeveloperToolsSkill(BaseSkill):
 
         health = get_full_health(self.config)
         brief = format_voice_brief(health)
-        visual_report = format_visual_report(health)
 
-        # Always show the full report on screen
-        self._display.show(visual_report, content_type='health_check',
-                           title='System Health Report')
+        # Store structured data for web UI pickup
+        self._last_health_data = health
+
+        # In web mode, the browser renders the report — skip terminal popup
+        if not self._is_web_mode():
+            visual_report = format_visual_report(health)
+            self._display.show(visual_report, content_type='health_check',
+                               title='System Health Report')
 
         # Speak only the brief status
         self.tts.speak(brief)

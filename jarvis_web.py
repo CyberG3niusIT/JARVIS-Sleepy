@@ -477,6 +477,37 @@ async def _do_web_search(command: str, web_researcher, llm) -> str:
     )
 
 
+def _extract_health_data(skill_manager) -> dict | None:
+    """Check if developer_tools just ran a health check and extract the data.
+
+    Returns dict with 'layers' (filtered check data) and 'brief' (corrected
+    voice summary matching filtered data) or None.
+    """
+    dt_skill = skill_manager.skills.get('developer_tools')
+    if dt_skill:
+        data = getattr(dt_skill, '_last_health_data', None)
+        if data:
+            dt_skill._last_health_data = None  # consume it
+            # Filter out checks not applicable in web mode
+            # (no mic, no Coordinator/pipeline)
+            skip_names = {'Audio Input'}
+            skip_phrases = {'Coordinator not available'}
+            filtered = {}
+            for layer, checks in data.items():
+                kept = [
+                    c for c in checks
+                    if c['name'] not in skip_names
+                    and not any(p in c.get('summary', '') for p in skip_phrases)
+                ]
+                if kept:
+                    filtered[layer] = kept
+            # Generate corrected brief from filtered data
+            from core.health_check import format_voice_brief
+            brief = format_voice_brief(filtered)
+            return {'layers': filtered, 'brief': brief}
+    return None
+
+
 def _build_stats(match_info, llm, used_llm, t_start, t_match, t_end) -> dict:
     """Build stats dict for WebSocket delivery."""
     stats = {}
@@ -555,15 +586,31 @@ async def websocket_handler(request):
                             # (skills call tts_proxy.speak() which would duplicate
                             # the response as a gold announcement banner)
                             tts_proxy.get_pending_announcements()
-                            if result['response']:
+
+                            # Check for structured health data from developer_tools
+                            health_data = _extract_health_data(components['skill_manager'])
+
+                            # Use corrected brief when health data is present
+                            # (raw brief counts web-irrelevant warnings)
+                            response_text = result['response']
+                            if health_data and health_data.get('brief'):
+                                response_text = health_data['brief']
+
+                            if response_text:
                                 await ws.send_json({
                                     'type': 'response',
-                                    'content': result['response'],
+                                    'content': response_text,
                                 })
                             if result['stats']:
                                 await ws.send_json({
                                     'type': 'stats',
                                     'data': result['stats'],
+                                })
+                            # Send structured health report for rich rendering
+                            if health_data:
+                                await ws.send_json({
+                                    'type': 'health_report',
+                                    'data': health_data['layers'],
                                 })
                             # Send doc buffer status
                             await ws.send_json({
