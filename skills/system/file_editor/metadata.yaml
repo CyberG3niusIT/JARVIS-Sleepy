@@ -1,0 +1,25 @@
+name: file_editor
+version: 1.0.0
+description: Voice-driven file creation and editing, sandboxed to the share/ directory
+category: system
+author: Jarvis Team
+enabled: true
+priority: 5
+
+intents: []
+
+keywords:
+  - write
+  - edit
+  - create
+  - generate
+  - save
+  - modify
+  - compose
+  - draft
+  - rewrite
+  - share
+  - rename
+  - overwrite
+
+dependencies: []
