@@ -48,6 +48,32 @@
                     <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
                 </svg>
             </button>
+            <button id="btn-append" class="toolbar-btn" title="Append text to document buffer">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+            </button>
+            <button id="btn-file" class="toolbar-btn" title="Load file into document buffer">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+            </button>
+            <button id="btn-clipboard" class="toolbar-btn" title="Load clipboard into document buffer">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                    <line x1="9" y1="12" x2="15" y2="12"/>
+                    <line x1="9" y1="16" x2="15" y2="16"/>
+                </svg>
+            </button>
+            <button id="btn-context" class="toolbar-btn" title="Show document buffer info">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="16" x2="12" y2="12"/>
+                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+            </button>
             <button id="btn-clear" class="toolbar-btn" title="Clear document buffer">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="18" y1="6" x2="6" y2="18"/>
@@ -123,6 +149,39 @@
             </div>
             <div class="modal-footer">
                 <button id="help-close" class="btn btn-primary">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- File path modal -->
+    <div id="file-modal" class="modal hidden">
+        <div class="modal-content modal-narrow">
+            <div class="modal-header">
+                <h2>Load File</h2>
+                <button class="modal-close" id="file-modal-close">&times;</button>
+            </div>
+            <div class="file-modal-body">
+                <label for="file-path-input">File path on server:</label>
+                <input type="text" id="file-path-input" placeholder="/home/user/..." autocomplete="off">
+            </div>
+            <div class="modal-footer">
+                <button id="file-cancel" class="btn btn-secondary">Cancel</button>
+                <button id="file-submit" class="btn btn-primary">Load</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Append modal -->
+    <div id="append-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Append Text</h2>
+                <button class="modal-close" id="append-modal-close">&times;</button>
+            </div>
+            <textarea id="append-textarea" placeholder="Paste or type text to append..." rows="12"></textarea>
+            <div class="modal-footer">
+                <button id="append-cancel" class="btn btn-secondary">Cancel</button>
+                <button id="append-submit" class="btn btn-primary">Append to Buffer</button>
             </div>
         </div>
     </div>

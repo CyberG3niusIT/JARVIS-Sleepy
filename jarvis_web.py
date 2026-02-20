@@ -47,6 +47,7 @@ from core.news_manager import get_news_manager
 from core.honorific import get_honorific
 from core.context_window import get_context_window
 from core.document_buffer import DocumentBuffer, BINARY_EXTENSIONS
+from core.speech_chunker import SpeechChunker
 
 logger = logging.getLogger("jarvis.web")
 
@@ -179,10 +180,11 @@ def init_components(config, tts_proxy):
 # ---------------------------------------------------------------------------
 
 async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy,
-                          config: dict) -> dict:
+                          config: dict, ws=None) -> dict:
     """Process a user command through the full pipeline.
 
-    Returns dict with 'response', 'stats', 'used_llm', etc.
+    Returns dict with 'response', 'stats', 'used_llm', 'streamed', etc.
+    When ws is provided, LLM responses are streamed token-by-token over WebSocket.
     """
     conversation = components['conversation']
     llm = components['llm']
@@ -318,7 +320,8 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
                 response = await asyncio.to_thread(news_manager.read_headlines, limit=5)
                 skill_handled = True
 
-    # LLM fallback (non-streaming for Phase 1)
+    # LLM fallback (streaming over WebSocket when ws is available)
+    streamed = False
     if not skill_handled:
         used_llm = True
         history = conversation.format_history_for_llm(include_system_prompt=False)
@@ -353,17 +356,28 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
         if doc_buffer.active:
             llm_command = doc_buffer.build_augmented_message(llm_command)
 
-        # Non-streaming LLM call (web research tool calling supported)
-        response = await _llm_fallback(
-            llm, llm_command, history, web_researcher,
-            memory_context=memory_context,
-            conversation_messages=context_messages,
-            max_tokens=600 if doc_buffer.active else None,
-        )
+        # Streaming LLM over WebSocket
+        if ws:
+            response, streamed = await _stream_llm_ws(
+                ws, llm, llm_command, history, web_researcher,
+                memory_context=memory_context,
+                conversation_messages=context_messages,
+                max_tokens=600 if doc_buffer.active else None,
+            )
+        else:
+            response = await _llm_fallback(
+                llm, llm_command, history, web_researcher,
+                memory_context=memory_context,
+                conversation_messages=context_messages,
+                max_tokens=600 if doc_buffer.active else None,
+            )
 
         if not response:
             response = "I'm sorry, I'm having trouble processing that right now."
-        else:
+            streamed = False  # Force non-streamed so error message gets sent
+        elif not streamed:
+            # Only strip filler for non-streamed responses;
+            # _stream_llm_ws already strips before stream_end
             response = llm.strip_filler(response)
 
     t_end = time.perf_counter()
@@ -377,7 +391,214 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
         'response': response,
         'stats': stats,
         'used_llm': used_llm,
+        'streamed': streamed,
     }
+
+
+async def _stream_llm_ws(ws, llm, command, history, web_researcher,
+                          memory_context=None, conversation_messages=None,
+                          max_tokens=None) -> tuple:
+    """Stream LLM response over WebSocket with quality gate and tool calling.
+
+    Returns (response_text, streamed_bool).
+    When streamed_bool is True, stream_start/stream_end were sent over ws.
+    When False, caller should send a normal 'response' message.
+    """
+    use_tools = llm.tool_calling and web_researcher
+    queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+
+    def _producer():
+        """Sync thread: run LLM streaming, push items to async queue."""
+        try:
+            source = (
+                llm.stream_with_tools(
+                    user_message=command,
+                    conversation_history=history,
+                    memory_context=memory_context,
+                    conversation_messages=conversation_messages,
+                ) if use_tools else
+                llm.stream(
+                    user_message=command,
+                    conversation_history=history,
+                    memory_context=memory_context,
+                    conversation_messages=conversation_messages,
+                    max_tokens=max_tokens,
+                )
+            )
+            for item in source:
+                asyncio.run_coroutine_threadsafe(queue.put(('item', item)), loop)
+        except Exception as e:
+            logger.error("LLM streaming producer error: %s", e)
+        finally:
+            asyncio.run_coroutine_threadsafe(queue.put(('done', None)), loop)
+
+    thread = threading.Thread(target=_producer, daemon=True)
+    thread.start()
+
+    chunker = SpeechChunker()
+    full_response = ""
+    buffered_tokens = ""
+    stream_started = False
+    first_chunk_checked = False
+    tool_call_request = None
+
+    # --- Phase 1: Consume tokens, buffer until quality gate passes ---
+    while True:
+        try:
+            tag, value = await asyncio.wait_for(queue.get(), timeout=60)
+        except asyncio.TimeoutError:
+            break
+
+        if tag == 'done':
+            break
+
+        if tag == 'item':
+            if isinstance(value, ToolCallRequest):
+                tool_call_request = value
+                break
+
+            token = value
+            full_response += token
+
+            if not stream_started:
+                # Buffer tokens until first sentence for quality gate
+                buffered_tokens += token
+                chunk = chunker.feed(token)
+                if chunk and not first_chunk_checked:
+                    first_chunk_checked = True
+                    quality_issue = llm._check_response_quality(chunk, command)
+                    if quality_issue:
+                        # Quality retry — fall back to non-streaming
+                        await ws.send_json({
+                            'type': 'info',
+                            'content': f'Quality retry: {quality_issue}',
+                        })
+                        retry = await asyncio.to_thread(
+                            llm.chat,
+                            user_message=command,
+                            conversation_history=history,
+                        )
+                        # Drain remaining producer output
+                        thread.join(timeout=5)
+                        return (retry or "", False)
+                    # Quality OK — start streaming, flush buffer
+                    await ws.send_json({'type': 'stream_start'})
+                    await ws.send_json({
+                        'type': 'stream_token',
+                        'token': buffered_tokens,
+                    })
+                    stream_started = True
+            else:
+                await ws.send_json({'type': 'stream_token', 'token': token})
+
+    # --- Handle tool call (web search) ---
+    if tool_call_request:
+        query = tool_call_request.arguments.get('query', command)
+        await ws.send_json({
+            'type': 'info',
+            'content': f'Searching: {query}',
+        })
+
+        if tool_call_request.name == 'web_search':
+            results = await asyncio.to_thread(web_researcher.search, query)
+            page_sections = await asyncio.to_thread(
+                web_researcher.fetch_pages_parallel, results
+            )
+            page_content = ""
+            if page_sections:
+                page_content = ("\n\nFull article content:\n\n"
+                                + "\n\n---\n\n".join(page_sections))
+            tool_result = format_search_results(results) + page_content
+            await ws.send_json({
+                'type': 'info',
+                'content': f'Found {len(results)} results',
+            })
+        else:
+            tool_result = f"Unknown tool: {tool_call_request.name}"
+
+        # Stream synthesis response
+        synthesis_queue = asyncio.Queue()
+
+        def _synthesis_producer():
+            try:
+                for token in llm.continue_after_tool_call(
+                    tool_call_request, tool_result
+                ):
+                    asyncio.run_coroutine_threadsafe(
+                        synthesis_queue.put(('item', token)), loop
+                    )
+            except Exception as e:
+                logger.error("Synthesis streaming error: %s", e)
+            finally:
+                asyncio.run_coroutine_threadsafe(
+                    synthesis_queue.put(('done', None)), loop
+                )
+
+        syn_thread = threading.Thread(target=_synthesis_producer, daemon=True)
+        syn_thread.start()
+
+        await ws.send_json({'type': 'stream_start'})
+        synthesis = ""
+        while True:
+            try:
+                tag, value = await asyncio.wait_for(
+                    synthesis_queue.get(), timeout=60
+                )
+            except asyncio.TimeoutError:
+                break
+            if tag == 'done':
+                break
+            if tag == 'item':
+                synthesis += value
+                await ws.send_json({'type': 'stream_token', 'token': value})
+
+        cleaned = llm.strip_filler(synthesis) if synthesis else ""
+        await ws.send_json({
+            'type': 'stream_end',
+            'full_response': cleaned,
+        })
+        return (cleaned, True)
+
+    # --- Handle short response (no sentence boundary hit) ---
+    if not stream_started:
+        remaining = chunker.flush()
+        if remaining and not first_chunk_checked:
+            quality_issue = llm._check_response_quality(remaining, command)
+            if quality_issue:
+                await ws.send_json({
+                    'type': 'info',
+                    'content': f'Quality retry: {quality_issue}',
+                })
+                retry = await asyncio.to_thread(
+                    llm.chat,
+                    user_message=command,
+                    conversation_history=history,
+                )
+                return (retry or "", False)
+        # Short enough to send as non-streaming response
+        return (full_response, False)
+
+    # --- Deflection safety net ---
+    if full_response and web_researcher and _is_deflection(full_response):
+        await ws.send_json({
+            'type': 'info',
+            'content': 'Searching for current information...',
+        })
+        fallback = await _do_web_search(command, web_researcher, llm)
+        await ws.send_json({
+            'type': 'stream_end',
+            'full_response': fallback or "",
+        })
+        return (fallback or "", True)
+
+    # --- Normal end ---
+    cleaned = llm.strip_filler(full_response) if full_response else ""
+    await ws.send_json({
+        'type': 'stream_end',
+        'full_response': cleaned,
+    })
+    return (cleaned, True)
 
 
 async def _llm_fallback(llm, command, history, web_researcher,
@@ -590,7 +811,8 @@ async def websocket_handler(request):
                     async with cmd_lock:
                         try:
                             result = await process_command(
-                                content, components, tts_proxy, config
+                                content, components, tts_proxy, config,
+                                ws=ws,
                             )
                             # Drain announcements queued during command processing
                             # (skills call tts_proxy.speak() which would duplicate
@@ -606,7 +828,8 @@ async def websocket_handler(request):
                             if health_data and health_data.get('brief'):
                                 response_text = health_data['brief']
 
-                            if response_text:
+                            # Only send response message if not already streamed
+                            if not result.get('streamed') and response_text:
                                 await ws.send_json({
                                     'type': 'response',
                                     'content': response_text,
@@ -639,6 +862,24 @@ async def websocket_handler(request):
                 elif msg_type == 'slash_command':
                     cmd = data.get('command', '')
                     await _handle_ws_slash(ws, cmd, data, doc_buffer)
+
+                elif msg_type == 'file_drop':
+                    filename = data.get('filename', 'unknown')
+                    content = data.get('content', '')
+                    ext = Path(filename).suffix.lower()
+                    if ext in BINARY_EXTENSIONS:
+                        await ws.send_json({
+                            'type': 'info',
+                            'content': f"Cannot load binary file ({ext}): {filename}",
+                        })
+                    elif content:
+                        doc_buffer.load(content, f"file:{filename}")
+                        await _send_doc_loaded(ws, doc_buffer, f"file:{filename}", content)
+                    else:
+                        await ws.send_json({
+                            'type': 'info',
+                            'content': f"File is empty: {filename}",
+                        })
 
                 elif msg_type == 'toggle_voice':
                     enabled = data.get('enabled', False)
@@ -682,22 +923,27 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer)
         content = data.get('content', '').strip()
         if content:
             doc_buffer.load(content, "paste")
+            await _send_doc_loaded(ws, doc_buffer, "paste", content)
+        else:
+            await ws.send_json({'type': 'info', 'content': "Nothing pasted."})
+
+    elif cmd == '/append':
+        content = data.get('content', '').strip()
+        if content:
+            doc_buffer.append(content, "paste")
+            lines = content.count('\n') + 1
             await ws.send_json({
                 'type': 'doc_status',
                 'active': True,
                 'tokens': doc_buffer.token_estimate,
                 'source': doc_buffer.source,
             })
-            lines = content.count('\n') + 1
             await ws.send_json({
                 'type': 'info',
-                'content': f"Document loaded: ~{doc_buffer.token_estimate} tokens, {lines} lines (paste)",
+                'content': f"Appended {lines} lines (~{doc_buffer.token_estimate} tokens total)",
             })
         else:
-            await ws.send_json({
-                'type': 'info',
-                'content': "Nothing pasted.",
-            })
+            await ws.send_json({'type': 'info', 'content': "Nothing to append."})
 
     elif cmd == '/clear':
         old_source, old_tokens = doc_buffer.clear()
@@ -718,17 +964,158 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer)
                 'content': "Document buffer is already empty.",
             })
 
+    elif cmd == '/file':
+        file_path = data.get('path', '').strip()
+        if not file_path:
+            await ws.send_json({'type': 'info', 'content': "Usage: /file <path>"})
+            return
+        await _load_file_into_buffer(ws, doc_buffer, file_path)
+
+    elif cmd == '/clipboard':
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['wl-paste'], capture_output=True, text=True, timeout=5,
+                env={**os.environ, 'DISPLAY': ':0'},
+            )
+            content = result.stdout.strip()
+            if content:
+                doc_buffer.load(content, "clipboard")
+                await _send_doc_loaded(ws, doc_buffer, "clipboard", content)
+            else:
+                await ws.send_json({
+                    'type': 'info',
+                    'content': "Clipboard is empty.",
+                })
+        except Exception as e:
+            await ws.send_json({
+                'type': 'info',
+                'content': f"Failed to read clipboard: {e}",
+            })
+
+    elif cmd == '/context':
+        if doc_buffer.active:
+            preview = doc_buffer.content[:300]
+            if len(doc_buffer.content) > 300:
+                preview += "..."
+            await ws.send_json({
+                'type': 'info',
+                'content': (
+                    f"Document buffer active: ~{doc_buffer.token_estimate} tokens, "
+                    f"source: {doc_buffer.source}\n"
+                    f"Preview: {preview}"
+                ),
+            })
+        else:
+            await ws.send_json({
+                'type': 'info',
+                'content': "Document buffer is empty.",
+            })
+
     elif cmd == '/help':
         await ws.send_json({
             'type': 'info',
             'content': "JARVIS Web UI — type naturally to interact. "
-                       "Use the toolbar buttons for paste, clear, and help.",
+                       "Use the toolbar buttons for paste, clear, file, clipboard, and help.",
         })
+
+
+async def _send_doc_loaded(ws, doc_buffer, source_label, content):
+    """Send doc_status + info after loading content into the buffer."""
+    await ws.send_json({
+        'type': 'doc_status',
+        'active': True,
+        'tokens': doc_buffer.token_estimate,
+        'source': doc_buffer.source,
+    })
+    lines = content.count('\n') + 1
+    await ws.send_json({
+        'type': 'info',
+        'content': f"Document loaded: ~{doc_buffer.token_estimate} tokens, {lines} lines ({source_label})",
+    })
+
+
+async def _load_file_into_buffer(ws, doc_buffer, file_path):
+    """Load a file from the server filesystem into the document buffer."""
+    p = Path(file_path).expanduser().resolve()
+    if not p.exists():
+        await ws.send_json({'type': 'info', 'content': f"File not found: {file_path}"})
+        return
+    if not p.is_file():
+        await ws.send_json({'type': 'info', 'content': f"Not a file: {file_path}"})
+        return
+    ext = p.suffix.lower()
+    if ext in BINARY_EXTENSIONS:
+        await ws.send_json({
+            'type': 'info',
+            'content': f"Cannot load binary file ({ext}): {p.name}",
+        })
+        return
+    try:
+        size = p.stat().st_size
+        if size > 500_000:
+            await ws.send_json({
+                'type': 'info',
+                'content': f"File too large ({size:,} bytes, max 500KB): {p.name}",
+            })
+            return
+        content = p.read_text(errors='replace')
+        doc_buffer.load(content, f"file:{p.name}")
+        await _send_doc_loaded(ws, doc_buffer, f"file:{p.name}", content)
+    except Exception as e:
+        await ws.send_json({'type': 'info', 'content': f"Failed to read file: {e}"})
 
 
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
+
+async def upload_handler(request):
+    """Handle file upload via POST /api/upload."""
+    components = request.app.get('components')
+    if not components:
+        return web.json_response({'error': 'Not initialized'}, status=503)
+
+    doc_buffer = components['doc_buffer']
+
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+        if field is None or field.name != 'file':
+            return web.json_response({'error': 'No file field'}, status=400)
+
+        filename = field.filename or 'upload'
+        ext = Path(filename).suffix.lower()
+        if ext in BINARY_EXTENSIONS:
+            return web.json_response({
+                'error': f'Binary file type not supported: {ext}',
+            }, status=400)
+
+        # Read content with size limit
+        content = b''
+        while True:
+            chunk = await field.read_chunk(8192)
+            if not chunk:
+                break
+            content += chunk
+            if len(content) > 500_000:
+                return web.json_response({
+                    'error': 'File too large (max 500KB)',
+                }, status=400)
+
+        text = content.decode('utf-8', errors='replace')
+        doc_buffer.load(text, f"file:{filename}")
+
+        return web.json_response({
+            'active': True,
+            'tokens': doc_buffer.token_estimate,
+            'source': doc_buffer.source,
+            'lines': text.count('\n') + 1,
+        })
+    except Exception as e:
+        logger.exception("Upload error")
+        return web.json_response({'error': str(e)}, status=500)
+
 
 async def index_handler(request):
     """Serve index.html for the root path."""
@@ -741,8 +1128,9 @@ def create_app(config) -> web.Application:
 
     web_dir = Path(__file__).parent / 'web'
 
-    # Routes: WebSocket, root index, then static assets
+    # Routes: WebSocket, upload, root index, then static assets
     app.router.add_get('/ws', websocket_handler)
+    app.router.add_post('/api/upload', upload_handler)
     app.router.add_get('/', index_handler)
     app.router.add_static('/', web_dir)
 

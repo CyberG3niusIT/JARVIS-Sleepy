@@ -27,10 +27,30 @@
     const pasteCancel = document.getElementById('paste-cancel');
     const pasteModalClose = document.getElementById('paste-modal-close');
 
+    // Append modal
+    const appendModal = document.getElementById('append-modal');
+    const appendTextarea = document.getElementById('append-textarea');
+    const appendSubmit = document.getElementById('append-submit');
+    const appendCancel = document.getElementById('append-cancel');
+    const appendModalClose = document.getElementById('append-modal-close');
+
+    // File path modal
+    const fileModal = document.getElementById('file-modal');
+    const filePathInput = document.getElementById('file-path-input');
+    const fileSubmit = document.getElementById('file-submit');
+    const fileCancel = document.getElementById('file-cancel');
+    const fileModalClose = document.getElementById('file-modal-close');
+
     // Help modal
     const helpModal = document.getElementById('help-modal');
     const helpModalClose = document.getElementById('help-modal-close');
     const helpClose = document.getElementById('help-close');
+
+    // New toolbar buttons
+    const btnAppend = document.getElementById('btn-append');
+    const btnFile = document.getElementById('btn-file');
+    const btnClipboard = document.getElementById('btn-clipboard');
+    const btnContext = document.getElementById('btn-context');
 
     // --- State ---
     let ws = null;
@@ -152,7 +172,7 @@
         sender.textContent = 'JARVIS';
 
         streamingBubble = document.createElement('div');
-        streamingBubble.className = 'message-bubble';
+        streamingBubble.className = 'message-bubble streaming';
         streamingBubble.textContent = '';
 
         messageDiv.appendChild(sender);
@@ -169,8 +189,11 @@
     }
 
     function endStreaming(fullResponse) {
-        if (streamingBubble && fullResponse) {
-            streamingBubble.textContent = fullResponse;
+        if (streamingBubble) {
+            streamingBubble.classList.remove('streaming');
+            if (fullResponse) {
+                streamingBubble.textContent = fullResponse;
+            }
         }
         streamingBubble = null;
         scrollToBottom();
@@ -490,8 +513,157 @@
         helpModal.classList.add('hidden');
     });
 
+    // --- New toolbar button handlers ---
+    btnAppend.addEventListener('click', function () {
+        appendTextarea.value = '';
+        appendModal.classList.remove('hidden');
+        appendTextarea.focus();
+    });
+
+    btnFile.addEventListener('click', function () {
+        filePathInput.value = '';
+        fileModal.classList.remove('hidden');
+        filePathInput.focus();
+    });
+
+    btnClipboard.addEventListener('click', function () {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'slash_command', command: '/clipboard' }));
+        }
+    });
+
+    btnContext.addEventListener('click', function () {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'slash_command', command: '/context' }));
+        }
+    });
+
+    // --- Append modal ---
+    appendSubmit.addEventListener('click', function () {
+        var text = appendTextarea.value.trim();
+        if (!text) return;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'slash_command', command: '/append', content: text }));
+        }
+        appendModal.classList.add('hidden');
+    });
+
+    appendCancel.addEventListener('click', function () {
+        appendModal.classList.add('hidden');
+    });
+
+    appendModalClose.addEventListener('click', function () {
+        appendModal.classList.add('hidden');
+    });
+
+    // --- File path modal ---
+    fileSubmit.addEventListener('click', function () {
+        var path = filePathInput.value.trim();
+        if (!path) return;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'slash_command', command: '/file', path: path }));
+        }
+        fileModal.classList.add('hidden');
+    });
+
+    fileCancel.addEventListener('click', function () {
+        fileModal.classList.add('hidden');
+    });
+
+    fileModalClose.addEventListener('click', function () {
+        fileModal.classList.add('hidden');
+    });
+
+    filePathInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            fileSubmit.click();
+        }
+    });
+
+    // --- Drag/drop file handling ---
+    var BINARY_EXTS = new Set([
+        '.exe', '.bin', '.so', '.dll', '.dylib', '.o', '.a',
+        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.tiff',
+        '.mp3', '.mp4', '.wav', '.flac', '.ogg', '.avi', '.mkv', '.mov', '.webm',
+        '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar', '.zst',
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.gguf', '.npy', '.npz', '.pt', '.pth', '.onnx', '.safetensors',
+        '.db', '.sqlite', '.sqlite3',
+        '.pyc', '.class', '.wasm',
+    ]);
+
+    function getFileExt(name) {
+        var idx = name.lastIndexOf('.');
+        return idx >= 0 ? name.slice(idx).toLowerCase() : '';
+    }
+
+    chatArea.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        chatArea.classList.add('dragover');
+    });
+
+    chatArea.addEventListener('dragleave', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        chatArea.classList.remove('dragover');
+    });
+
+    chatArea.addEventListener('drop', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        chatArea.classList.remove('dragover');
+
+        var files = e.dataTransfer.files;
+        if (!files || files.length === 0) return;
+
+        var file = files[0]; // Handle first file only
+        var ext = getFileExt(file.name);
+
+        if (BINARY_EXTS.has(ext)) {
+            addInfoMessage('Cannot load binary file (' + ext + '): ' + file.name);
+            return;
+        }
+
+        if (file.size > 500000) {
+            // Large file — upload via POST
+            var formData = new FormData();
+            formData.append('file', file);
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/upload');
+            xhr.onload = function () {
+                if (xhr.status === 200) {
+                    var resp = JSON.parse(xhr.responseText);
+                    updateDocIndicator(resp);
+                    addInfoMessage('Document loaded: ~' + resp.tokens + ' tokens, ' + resp.lines + ' lines (file:' + file.name + ')');
+                } else {
+                    var err = JSON.parse(xhr.responseText);
+                    addInfoMessage('Upload failed: ' + (err.error || 'unknown error'));
+                }
+            };
+            xhr.onerror = function () {
+                addInfoMessage('Upload failed: network error');
+            };
+            xhr.send(formData);
+        } else {
+            // Small file — read client-side, send via WebSocket
+            var reader = new FileReader();
+            reader.onload = function () {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'file_drop',
+                        filename: file.name,
+                        content: reader.result,
+                    }));
+                }
+            };
+            reader.readAsText(file);
+        }
+    });
+
     // Close modals on backdrop click
-    [pasteModal, helpModal].forEach(function (modal) {
+    [pasteModal, helpModal, appendModal, fileModal].forEach(function (modal) {
         modal.addEventListener('click', function (e) {
             if (e.target === modal) modal.classList.add('hidden');
         });
@@ -502,6 +674,8 @@
         if (e.key === 'Escape') {
             pasteModal.classList.add('hidden');
             helpModal.classList.add('hidden');
+            appendModal.classList.add('hidden');
+            fileModal.classList.add('hidden');
         }
     });
 

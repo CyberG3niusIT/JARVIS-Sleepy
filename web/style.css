@@ -539,6 +539,39 @@ header h1 {
     color: var(--text-primary);
 }
 
+/* File path modal */
+.modal-narrow {
+    max-width: 480px;
+}
+
+.file-modal-body {
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.file-modal-body label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.file-modal-body input[type="text"] {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.file-modal-body input[type="text"]:focus {
+    border-color: var(--accent);
+}
+
 /* Help modal specifics */
 .help-body {
     padding: 16px 20px;
@@ -581,6 +614,47 @@ header h1 {
     padding: 1px 6px;
     font-size: 0.8rem;
     font-family: inherit;
+}
+
+/* Streaming cursor */
+.message-bubble.streaming {
+    position: relative;
+}
+
+.message-bubble.streaming::after {
+    content: '\25cc';
+    color: var(--accent);
+    animation: blink 0.7s infinite;
+    margin-left: 2px;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* Drag/drop overlay */
+#chat-area.dragover {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+    background: rgba(56, 189, 248, 0.04);
+}
+
+.drop-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 14, 26, 0.85);
+    z-index: 50;
+    pointer-events: none;
+    font-size: 1.1rem;
+    color: var(--accent);
+    letter-spacing: 1px;
 }
 
 /* Thinking indicator */
