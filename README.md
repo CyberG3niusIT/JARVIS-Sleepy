@@ -18,6 +18,18 @@ A fully local, privacy-first voice assistant built on AMD ROCm, fine-tuned speec
 
 ---
 
+## Screenshots
+
+### Web UI
+![JARVIS Web UI](images/JARVIS_WEBUI.png)
+*Browser-based chat with streaming responses, health check HUD, web research, and file handling*
+
+### Console Mode
+![JARVIS Console](images/JARVIS_CONSOLE.png)
+*Terminal interface with rich stats panel showing match layer, skill routing, confidence, and timing*
+
+---
+
 ## Table of Contents
 
 - [Architecture](#architecture)
@@ -448,6 +460,17 @@ python3 jarvis_console.py --speech
 
 The console displays a stats panel after each command showing match layer, skill, confidence score, timing, and LLM token counts.
 
+### Web UI
+
+```bash
+# Start the web interface
+python3 jarvis_web.py
+
+# Then open http://127.0.0.1:8088 in your browser
+```
+
+The web UI provides the same full skill pipeline with streaming LLM responses, drag/drop file handling, web research, conversation history with scroll-back, and an optional voice toggle for spoken output.
+
 ---
 
 ## Project Structure
@@ -456,6 +479,7 @@ The console displays a stats panel after each command showing match layer, skill
 jarvis/
 ├── jarvis_continuous.py          # Production entry point (voice mode)
 ├── jarvis_console.py             # Console/debug entry point
+├── jarvis_web.py                 # Web UI entry point (browser-based chat)
 ├── config.yaml                   # Main configuration
 ├── .env                          # API keys (not in repo — see .env.example)
 ├── requirements.txt              # Python dependencies
@@ -498,6 +522,11 @@ jarvis/
 │       ├── reminders/            # Voice reminders + calendar
 │       └── news/                 # RSS headline delivery
 │
+├── web/                          # Web UI frontend
+│   ├── index.html                # Chat layout
+│   ├── style.css                 # Dark theme
+│   └── app.js                    # WebSocket client + rendering
+├── images/                       # Screenshots
 ├── extensions/                   # GNOME Shell extensions
 │   └── jarvis-desktop@jarvis/    # Desktop Bridge (D-Bus service for window/workspace control)
 ├── assets/                       # Audio cues (generate your own .wav files)
