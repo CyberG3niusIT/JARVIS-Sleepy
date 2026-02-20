@@ -264,7 +264,7 @@ header h1 {
 }
 
 .message-sender {
-    font-size: 0.7rem;
+    font-size: 0.82rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1px;
@@ -286,7 +286,7 @@ header h1 {
     padding: 10px 14px;
     border-radius: 12px;
     line-height: 1.5;
-    font-size: 0.9rem;
+    font-size: 1.0rem;
     white-space: pre-wrap;
     word-wrap: break-word;
 }
@@ -306,7 +306,7 @@ header h1 {
 /* Stats panel */
 .stats-panel {
     margin-top: 4px;
-    font-size: 0.72rem;
+    font-size: 0.82rem;
     color: var(--text-dim);
     display: flex;
     flex-wrap: wrap;
@@ -1175,7 +1175,7 @@ header h1 {
 
 /* Message timestamp */
 .message-timestamp {
-    font-size: 0.65rem;
+    font-size: 0.78rem;
     color: var(--text-dim);
     margin-top: 2px;
     padding-left: 2px;

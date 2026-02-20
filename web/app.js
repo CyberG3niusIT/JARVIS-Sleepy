@@ -208,7 +208,7 @@
 
         const sender = document.createElement('div');
         sender.className = 'message-sender';
-        sender.textContent = 'JARVIS';
+        sender.textContent = 'J.A.R.V.I.S.';
 
         streamingBubble = document.createElement('div');
         streamingBubble.className = 'message-bubble streaming';
@@ -256,7 +256,7 @@
         if (role !== 'error') {
             const sender = document.createElement('div');
             sender.className = 'message-sender';
-            sender.textContent = role === 'user' ? 'You' : 'JARVIS';
+            sender.textContent = role === 'user' ? 'YOU' : 'J.A.R.V.I.S.';
             messageDiv.appendChild(sender);
         }
 
@@ -521,7 +521,7 @@
         messageDiv.className = 'message jarvis thinking-msg';
         const sender = document.createElement('div');
         sender.className = 'message-sender';
-        sender.textContent = 'JARVIS';
+        sender.textContent = 'J.A.R.V.I.S.';
         const bubble = document.createElement('div');
         bubble.className = 'message-bubble';
         bubble.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
@@ -999,7 +999,7 @@
 
             var sender = document.createElement('div');
             sender.className = 'message-sender';
-            sender.textContent = role === 'user' ? 'You' : 'JARVIS';
+            sender.textContent = role === 'user' ? 'YOU' : 'J.A.R.V.I.S.';
             messageDiv.appendChild(sender);
 
             var bubble = document.createElement('div');
@@ -1045,7 +1045,7 @@
 
             var sender = document.createElement('div');
             sender.className = 'message-sender';
-            sender.textContent = role === 'user' ? 'You' : 'JARVIS';
+            sender.textContent = role === 'user' ? 'YOU' : 'J.A.R.V.I.S.';
             messageDiv.appendChild(sender);
 
             var bubble = document.createElement('div');
