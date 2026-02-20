@@ -437,13 +437,36 @@ class SkillManager:
     def execute_intent(self, user_text: str) -> Optional[str]:
         """
         Match and execute an intent
-        
+
         Args:
             user_text: User's input text
-            
+
         Returns:
             Response text or None if no match
         """
+        # Check for pending confirmations in any skill (e.g., file_editor delete/overwrite)
+        # Must run before routing — "yes, please delete it" would otherwise match delete_file
+        for skill_name, skill in self.skills.items():
+            pending = getattr(skill, '_pending_confirmation', None)
+            if pending:
+                action, detail, expiry = pending
+                import time as _time
+                if _time.time() <= expiry:
+                    handler = getattr(skill, 'confirm_action', None)
+                    if handler:
+                        self.logger.info(f"Pending confirmation for {skill_name}.{action}, routing to confirm_action")
+                        self._last_match_info = {
+                            "layer": "pending_confirmation",
+                            "skill_name": skill_name,
+                            "intent_id": f"confirm_{action}",
+                            "confidence": 1.0,
+                            "handler_name": "confirm_action"
+                        }
+                        response = handler(entities={'original_text': user_text})
+                        if isinstance(response, str):
+                            response = resolve_honorific(response)
+                        return response
+
         match_result = self.match_intent(user_text)
         
         if not match_result:
