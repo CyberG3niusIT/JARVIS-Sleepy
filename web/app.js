@@ -15,6 +15,7 @@
     const btnHelp = document.getElementById('btn-help');
     const statusEl = document.getElementById('connection-status');
     const voiceToggle = document.getElementById('voice-toggle');
+    const btnRestart = document.getElementById('btn-restart');
     const docIndicator = document.getElementById('doc-indicator');
     const docInfo = document.getElementById('doc-info');
     const docClearBtn = document.getElementById('doc-clear-btn');
@@ -321,6 +322,15 @@
 
     btnHelp.addEventListener('click', function () {
         helpModal.classList.remove('hidden');
+    });
+
+    btnRestart.addEventListener('click', function () {
+        if (!confirm('Restart JARVIS server?')) return;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'restart' }));
+        }
+        addInfoMessage('Server restarting — reconnecting...');
+        setStatus('connecting');
     });
 
     // --- Paste modal ---

@@ -551,6 +551,10 @@ async def websocket_handler(request):
                             result = await process_command(
                                 content, components, tts_proxy, config
                             )
+                            # Drain announcements queued during command processing
+                            # (skills call tts_proxy.speak() which would duplicate
+                            # the response as a gold announcement banner)
+                            tts_proxy.get_pending_announcements()
                             if result['response']:
                                 await ws.send_json({
                                     'type': 'response',
@@ -595,12 +599,24 @@ async def websocket_handler(request):
                         'enabled': tts_proxy.hybrid,
                     })
 
+                elif msg_type == 'restart':
+                    logger.info("Restart requested via web UI")
+                    await ws.send_json({'type': 'info', 'content': 'Restarting...'})
+                    # Schedule restart after WebSocket closes cleanly
+                    asyncio.get_event_loop().call_later(0.5, _restart_server)
+
             elif msg.type in (web.WSMsgType.ERROR, web.WSMsgType.CLOSE):
                 break
     finally:
         pump_task.cancel()
 
     return ws
+
+
+def _restart_server():
+    """Re-exec the server process. Client auto-reconnects."""
+    logger.info("Re-executing server process...")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer):

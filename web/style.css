@@ -100,6 +100,30 @@ header h1 {
     user-select: none;
 }
 
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.restart-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s;
+}
+
+.restart-btn:hover {
+    color: var(--warning);
+    border-color: var(--warning);
+    background: rgba(251, 191, 36, 0.1);
+}
+
 .voice-label {
     font-size: 0.8rem;
     color: var(--text-secondary);
