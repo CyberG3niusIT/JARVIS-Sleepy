@@ -30,9 +30,8 @@
 **Concept:** JARVIS reasons about what it knows about the user (location, preferences) during `stream_with_tools()`.
 **Risk:** History poisoning — needs careful scoping.
 
-### 5. Minimize Web Search Latency
-**Priority:** MEDIUM
-**Concept:** Forced search adds ~5-8s; explore caching, parallel fetch, snippet-only mode.
+### 5. ~~Minimize Web Search Latency~~ — Done (Feb 19-20)
+Parallel page fetches (`c93670a`), semantic embedding cache (`56f5037`), rate limit 2s→1s.
 
 ### 6. Email Skill (Gmail Integration)
 **Priority:** MEDIUM
@@ -133,6 +132,7 @@ None!
 | Document Ingestion Phase 3 | Feb 19 | Tab completion (slash commands + /file paths), doc-aware LLM hint, dynamic max_tokens=600 |
 | Document Ingestion Phase 2 | Feb 19 | /file (binary reject, --tail, 500KB warn), /clipboard (wl-paste), /append, drag-and-drop auto-detect |
 | Document Ingestion Phase 1 | Feb 19 | prompt_toolkit, DocumentBuffer, /paste + /context + /clear + /help, LLM injection |
+| Google Calendar Sync Token Fix | Feb 19 | `orderBy` in initial sync prevented `nextSyncToken` — full sync every 5min instead of incremental. Removed `orderBy` from `google_calendar.py` |
 | Embedding Cache + STT Warm-up | Feb 20 | Pre-compute semantic embeddings at load time (`_semantic_embedding_cache`), STT dummy transcription warm-up. Grok review items #8+#9 (`56f5037`) |
 | Publish Script Non-Interactive | Feb 20 | `--auto` flag for CI-friendly publish (auto-generate commit msg + push) |
 | GNOME Desktop Integration (5 phases) | Feb 19 | Extension (D-Bus bridge), desktop_manager, app launcher migration, volume, workspace, clipboard, notifications — 16 intents |

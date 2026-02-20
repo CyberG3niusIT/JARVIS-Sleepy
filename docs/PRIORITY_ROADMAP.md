@@ -38,7 +38,7 @@
 | # | Item | Effort | ROI | Notes |
 |---|------|--------|-----|-------|
 | 7 | **Inject user facts into web research** — surface stored facts (location, preferences) during `stream_with_tools()` | 3-4 hours | Personalized search results ("best coffee near me" uses stored location) | Risk: history poisoning needs careful scoping |
-| ~~8~~ | ~~**Minimize web search latency**~~ | ~~3-4 hours~~ | ~~Reduce 5-8s forced search overhead~~ | Done (Feb 19, `c93670a`). Parallel page fetches, rate limit 2s→1s |
+| ~~8~~ | ~~**Minimize web search latency**~~ | ~~3-4 hours~~ | ~~Reduce 5-8s forced search overhead~~ | Done (Feb 19-20). Parallel page fetches (`c93670a`), embedding cache (`56f5037`), rate limit 2s→1s |
 | 9 | **Email skill (Gmail)** — voice-composed email via Gmail API + OAuth | 6-8 hours | Major productivity — compose, read, reply, search, archive by voice | Same OAuth pattern as Calendar. Full schema in MASTER_DESIGN.md |
 | 10 | **Google Keep integration** — shared grocery/todo lists with secondary user | 4-6 hours | Daily household utility — "add milk to the grocery list" | Shared access w/ secondary user's account |
 | 11 | **"Onscreen please" — retroactive visual display** — buffer last raw output, display on command | 2-3 hours | Bridge voice→visual gap. "Show me that" after JARVIS speaks an answer | TODO |
@@ -110,6 +110,7 @@
 | ~~B3~~ | ~~Console logging broken~~ | ~~Resolved~~ | Fixed (Feb 19, logger.py). Was writing to jarvis.log instead of console.log |
 | ~~B4~~ | ~~Topic shift threshold~~ | ~~Resolved~~ | Already set to 0.35 in config.yaml, confirmed in production |
 | B5 | `_in_development/web_navigation/skill.py` has TODO: load prefs from YAML | None (archived prototype) | Not in production code |
+| ~~B6~~ | ~~Google Calendar sync token not saving~~ | ~~Resolved~~ | `orderBy` in initial sync prevented `nextSyncToken`. Fixed (Feb 19). Also: always restart JARVIS after DB migration commits |
 
 ---
 

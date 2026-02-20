@@ -336,9 +336,10 @@ class GoogleCalendarManager:
                 kwargs["syncToken"] = self._sync_token
             else:
                 # First sync: get events from today forward
+                # NOTE: Do NOT use orderBy here — it prevents Google from
+                # returning a nextSyncToken, breaking incremental sync.
                 now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S") + self._tz_offset()
                 kwargs["timeMin"] = now
-                kwargs["orderBy"] = "startTime"
 
             events_result = self.service.events().list(**kwargs).execute()
 
