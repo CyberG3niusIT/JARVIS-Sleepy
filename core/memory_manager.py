@@ -447,7 +447,7 @@ class MemoryManager:
 
     FORGET_PATTERNS = [
         r"(?:forget|delete|remove|erase) (?:what (?:i|you) (?:said|know) about|everything about|the fact about)\s+(.+)",
-        r"(?:forget|delete|remove) (?:that|the) (.+)",
+        r"forget (?:that|the) (.+)",
         r"(?:don't|do not) remember (.+?) (?:anymore|any more|any longer)",
     ]
 
