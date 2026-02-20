@@ -270,8 +270,8 @@ header h1 {
     color: var(--text-secondary);
 }
 
-/* Announcement banner */
-.announcement {
+/* Announcement — inline chat record */
+.announcement-inline {
     max-width: 85%;
     align-self: center;
     background: var(--announcement-bg);
@@ -280,12 +280,66 @@ header h1 {
     padding: 8px 14px;
     font-size: 0.85rem;
     color: var(--warning);
-    animation: slideIn 0.3s ease-out;
+    animation: fadeIn 0.2s ease-out;
 }
 
-@keyframes slideIn {
-    from { opacity: 0; transform: translateY(-10px); }
+/* Floating announcement banners */
+#announcement-container {
+    position: fixed;
+    top: 52px; /* below header */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 90%;
+    max-width: 600px;
+    pointer-events: none;
+}
+
+.announcement-banner {
+    background: var(--announcement-bg);
+    border: 1px solid var(--announcement-border);
+    border-radius: 8px;
+    padding: 10px 36px 10px 14px;
+    font-size: 0.85rem;
+    color: var(--warning);
+    animation: slideDown 0.3s ease-out;
+    pointer-events: auto;
+    position: relative;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.announcement-banner.dismissing {
+    animation: slideUp 0.3s ease-in forwards;
+}
+
+.announcement-close {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--warning);
+    font-size: 1.2rem;
+    cursor: pointer;
+    opacity: 0.6;
+    padding: 0 4px;
+}
+
+.announcement-close:hover {
+    opacity: 1;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-16px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-16px); }
 }
 
 /* Info messages */
@@ -893,6 +947,36 @@ header h1 {
         rgba(56, 189, 248, 0.015) 3px,
         rgba(56, 189, 248, 0.015) 4px
     );
+}
+
+/* History separator */
+.history-separator {
+    align-self: center;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    padding: 4px 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* History messages (slightly dimmed) */
+.message.history-msg .message-bubble {
+    opacity: 0.8;
+}
+
+/* Message timestamp */
+.message-timestamp {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin-top: 2px;
+    padding-left: 2px;
+}
+
+.message.user .message-timestamp {
+    text-align: right;
+    padding-right: 2px;
 }
 
 /* Scrollbar */

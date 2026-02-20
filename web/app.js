@@ -52,11 +52,17 @@
     const btnClipboard = document.getElementById('btn-clipboard');
     const btnContext = document.getElementById('btn-context');
 
+    // Announcement banner container
+    const announcementContainer = document.getElementById('announcement-container');
+
     // --- State ---
     let ws = null;
     let processing = false;
     let reconnectDelay = 1000;
     const MAX_RECONNECT_DELAY = 30000;
+    let historyLoaded = false;
+    let oldestTimestamp = null; // For scroll-to-load-more pagination
+    let loadingHistory = false;
 
     // Command history
     const commandHistory = [];
@@ -142,6 +148,10 @@
 
             case 'health_report':
                 addHealthReport(msg.data);
+                break;
+
+            case 'history':
+                loadHistory(msg.messages);
                 break;
 
             case 'stream_start':
@@ -250,11 +260,38 @@
     }
 
     function addAnnouncement(content) {
+        // Add inline record in chat
         const div = document.createElement('div');
-        div.className = 'announcement';
+        div.className = 'announcement-inline';
         div.textContent = content;
         messagesEl.appendChild(div);
         scrollToBottom();
+
+        // Show floating banner at top
+        var banner = document.createElement('div');
+        banner.className = 'announcement-banner';
+        banner.textContent = content;
+        var closeBtn = document.createElement('button');
+        closeBtn.className = 'announcement-close';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.addEventListener('click', function () {
+            dismissBanner(banner);
+        });
+        banner.appendChild(closeBtn);
+        announcementContainer.appendChild(banner);
+
+        // Auto-dismiss after 10s
+        setTimeout(function () {
+            dismissBanner(banner);
+        }, 10000);
+    }
+
+    function dismissBanner(banner) {
+        if (!banner.parentNode) return;
+        banner.classList.add('dismissing');
+        setTimeout(function () {
+            if (banner.parentNode) banner.parentNode.removeChild(banner);
+        }, 300);
     }
 
     function addInfoMessage(content) {
@@ -694,6 +731,153 @@
             ws.send(JSON.stringify({ type: 'toggle_voice', enabled: enabled }));
         }
     });
+
+    // --- History loading ---
+    function loadHistory(messages) {
+        if (!messages || messages.length === 0) return;
+
+        // Track oldest timestamp for pagination
+        oldestTimestamp = messages[0].timestamp || null;
+        historyLoaded = true;
+
+        // Build a document fragment for performance
+        var frag = document.createDocumentFragment();
+        var separator = document.createElement('div');
+        separator.className = 'history-separator';
+        separator.id = 'history-separator';
+        separator.textContent = 'Previous conversation';
+
+        frag.appendChild(separator);
+
+        messages.forEach(function (msg) {
+            var role = msg.role === 'user' ? 'user' : 'jarvis';
+            var messageDiv = document.createElement('div');
+            messageDiv.className = 'message ' + role + ' history-msg';
+
+            var sender = document.createElement('div');
+            sender.className = 'message-sender';
+            sender.textContent = role === 'user' ? 'You' : 'JARVIS';
+            messageDiv.appendChild(sender);
+
+            var bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.textContent = msg.content || '';
+            messageDiv.appendChild(bubble);
+
+            // Timestamp
+            if (msg.timestamp) {
+                var ts = document.createElement('div');
+                ts.className = 'message-timestamp';
+                ts.textContent = formatTimestamp(msg.timestamp);
+                messageDiv.appendChild(ts);
+            }
+
+            frag.appendChild(messageDiv);
+        });
+
+        // Insert before any existing messages
+        if (messagesEl.firstChild) {
+            messagesEl.insertBefore(frag, messagesEl.firstChild);
+        } else {
+            messagesEl.appendChild(frag);
+        }
+
+        scrollToBottom();
+    }
+
+    function prependHistory(messages) {
+        if (!messages || messages.length === 0) return;
+
+        oldestTimestamp = messages[0].timestamp || null;
+
+        var frag = document.createDocumentFragment();
+        messages.forEach(function (msg) {
+            var role = msg.role === 'user' ? 'user' : 'jarvis';
+            var messageDiv = document.createElement('div');
+            messageDiv.className = 'message ' + role + ' history-msg';
+
+            var sender = document.createElement('div');
+            sender.className = 'message-sender';
+            sender.textContent = role === 'user' ? 'You' : 'JARVIS';
+            messageDiv.appendChild(sender);
+
+            var bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.textContent = msg.content || '';
+            messageDiv.appendChild(bubble);
+
+            if (msg.timestamp) {
+                var ts = document.createElement('div');
+                ts.className = 'message-timestamp';
+                ts.textContent = formatTimestamp(msg.timestamp);
+                messageDiv.appendChild(ts);
+            }
+
+            frag.appendChild(messageDiv);
+        });
+
+        // Insert at the very top (before history separator)
+        var sep = document.getElementById('history-separator');
+        if (sep) {
+            messagesEl.insertBefore(frag, sep);
+        } else if (messagesEl.firstChild) {
+            messagesEl.insertBefore(frag, messagesEl.firstChild);
+        } else {
+            messagesEl.appendChild(frag);
+        }
+    }
+
+    function formatTimestamp(ts) {
+        var d = new Date(ts * 1000);
+        var now = new Date();
+        var diff = now - d;
+        var dayMs = 86400000;
+
+        if (diff < dayMs && d.getDate() === now.getDate()) {
+            return 'Today ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        } else if (diff < 2 * dayMs) {
+            return 'Yesterday ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        } else if (diff < 7 * dayMs) {
+            return d.toLocaleDateString('en-US', { weekday: 'long' }) + ' ' +
+                d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        }
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+            d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+
+    // --- Scroll-to-load-more ---
+    chatArea.addEventListener('scroll', function () {
+        if (loadingHistory || !historyLoaded || !oldestTimestamp) return;
+        // Trigger when scrolled near the top
+        if (chatArea.scrollTop < 80) {
+            loadOlderMessages();
+        }
+    });
+
+    function loadOlderMessages() {
+        if (loadingHistory || !oldestTimestamp) return;
+        loadingHistory = true;
+
+        var prevHeight = chatArea.scrollHeight;
+
+        fetch('/api/history?before=' + oldestTimestamp + '&limit=30')
+            .then(function (resp) { return resp.json(); })
+            .then(function (data) {
+                if (data.messages && data.messages.length > 0) {
+                    prependHistory(data.messages);
+                    // Maintain scroll position
+                    var newHeight = chatArea.scrollHeight;
+                    chatArea.scrollTop += (newHeight - prevHeight);
+                }
+                if (!data.has_more) {
+                    oldestTimestamp = null; // No more pages
+                }
+                loadingHistory = false;
+            })
+            .catch(function () {
+                loadingHistory = false;
+            });
+    }
 
     // --- Scroll ---
     function scrollToBottom() {

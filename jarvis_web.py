@@ -793,6 +793,15 @@ async def websocket_handler(request):
 
     pump_task = asyncio.create_task(announcement_pump())
 
+    # Send recent history on connect so the client can populate scroll-back
+    try:
+        conversation = components['conversation']
+        recent = await asyncio.to_thread(conversation.load_full_history, 50)
+        if recent:
+            await ws.send_json({'type': 'history', 'messages': recent})
+    except Exception:
+        logger.exception("Failed to send history on connect")
+
     try:
         async for msg in ws:
             if msg.type == web.WSMsgType.TEXT:
@@ -1070,6 +1079,38 @@ async def _load_file_into_buffer(ws, doc_buffer, file_path):
 # App setup
 # ---------------------------------------------------------------------------
 
+async def history_handler(request):
+    """GET /api/history — Return recent chat messages for scroll-back.
+
+    Query params:
+        before: Unix timestamp — return messages before this time (for pagination)
+        limit: Max messages to return (default 50, max 200)
+    """
+    components = request.app.get('components')
+    if not components:
+        return web.json_response({'error': 'Not initialized'}, status=503)
+
+    conversation = components['conversation']
+    before = request.query.get('before')
+    limit = min(int(request.query.get('limit', 50)), 200)
+
+    # Load all messages from disk (personal assistant — file is manageable)
+    all_messages = await asyncio.to_thread(conversation.load_full_history)
+
+    # Filter by timestamp if paginating
+    if before:
+        before_ts = float(before)
+        all_messages = [m for m in all_messages if m.get('timestamp', 0) < before_ts]
+
+    # Return the most recent `limit` messages
+    page = all_messages[-limit:] if len(all_messages) > limit else all_messages
+
+    return web.json_response({
+        'messages': page,
+        'has_more': len(all_messages) > limit,
+    })
+
+
 async def upload_handler(request):
     """Handle file upload via POST /api/upload."""
     components = request.app.get('components')
@@ -1128,8 +1169,9 @@ def create_app(config) -> web.Application:
 
     web_dir = Path(__file__).parent / 'web'
 
-    # Routes: WebSocket, upload, root index, then static assets
+    # Routes: WebSocket, API, root index, then static assets
     app.router.add_get('/ws', websocket_handler)
+    app.router.add_get('/api/history', history_handler)
     app.router.add_post('/api/upload', upload_handler)
     app.router.add_get('/', index_handler)
     app.router.add_static('/', web_dir)
