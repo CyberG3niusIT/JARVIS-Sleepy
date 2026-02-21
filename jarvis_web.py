@@ -45,6 +45,7 @@ from core.reminder_manager import get_reminder_manager
 from core.news_manager import get_news_manager
 from core import persona
 from core.conversation_state import ConversationState
+from core.conversation_router import ConversationRouter
 from core.context_window import get_context_window
 from core.document_buffer import DocumentBuffer, BINARY_EXTENSIONS
 from core.speech_chunker import SpeechChunker
@@ -175,27 +176,36 @@ def init_components(config, tts_proxy):
     # Centralized conversation state (Phase 2 of conversational flow refactor)
     components['conv_state'] = ConversationState()
 
+    # Shared command router (Phase 3 of conversational flow refactor)
+    components['router'] = ConversationRouter(
+        skill_manager=components['skill_manager'],
+        conversation=conversation,
+        llm=components['llm'],
+        reminder_manager=components['reminder_manager'],
+        memory_manager=components['memory_manager'],
+        news_manager=components['news_manager'],
+        context_window=components['context_window'],
+        conv_state=components['conv_state'],
+        config=config,
+        web_researcher=components['web_researcher'],
+    )
+
     return components
 
 
 # ---------------------------------------------------------------------------
-# Command processing — 6-priority pipeline (mirrors jarvis_console.py)
+# Command processing — shared router (Phase 3 of conversational flow refactor)
 # ---------------------------------------------------------------------------
 
 async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy,
                           config: dict, ws=None) -> dict:
-    """Process a user command through the full pipeline.
+    """Process a user command through the shared ConversationRouter.
 
     Returns dict with 'response', 'stats', 'used_llm', 'streamed', etc.
     When ws is provided, LLM responses are streamed token-by-token over WebSocket.
     """
     conversation = components['conversation']
     llm = components['llm']
-    skill_manager = components['skill_manager']
-    reminder_manager = components['reminder_manager']
-    news_manager = components['news_manager']
-    memory_manager = components['memory_manager']
-    context_window = components['context_window']
     doc_buffer = components['doc_buffer']
     web_researcher = components['web_researcher']
     conv_state = components['conv_state']
@@ -214,159 +224,40 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
     used_llm = False
     match_info = None
 
-    # Priority 1: Rundown acceptance
-    # NOTE: Only intercept when the rundown was explicitly triggered via web UI
-    # (not background polling, which duplicates the voice pipeline's offers).
-    if reminder_manager and reminder_manager.is_rundown_pending():
-        text_lower = command.strip().lower()
-        words = set(re.findall(r'\b\w+\b', text_lower))
-        negative = bool(
-            words & {"no", "later", "hold", "skip"}
-            or "not now" in text_lower
-            or "not yet" in text_lower
-        )
-        if negative:
-            reminder_manager.defer_rundown()
-            response = persona.rundown_defer()
-            skill_handled = True
-        elif words & {"yes", "yeah", "yep", "sure", "go", "ready", "proceed"}:
-            await asyncio.to_thread(reminder_manager.deliver_rundown)
-            response = ""
-            skill_handled = True
-        # If neither affirmative nor negative, fall through to normal routing
-        # (user typed an unrelated command while rundown was pending)
-
-    # Priority 2: Reminder acknowledgment
-    if not skill_handled and reminder_manager and reminder_manager.is_awaiting_ack():
-        reminder_manager.acknowledge_last()
-        response = persona.pick("reminder_ack")
-        skill_handled = True
-
-    # Priority 2.5: Memory forget confirmation
-    if not skill_handled and memory_manager and memory_manager._pending_forget:
-        cmd_lower = command.lower().strip()
-        affirm = ("yes", "yeah", "yep", "go ahead", "do it", "proceed", "confirm", "sure", "remove", "delete")
-        deny = ("no", "nope", "nah", "cancel", "nevermind", "never mind", "keep", "don't")
-        if any(w in cmd_lower for w in affirm):
-            response = memory_manager.confirm_forget()
-            skill_handled = True
-        elif any(w in cmd_lower for w in deny):
-            response = memory_manager.cancel_forget()
-            skill_handled = True
-
-    # Priority 3: Memory operations
-    if not skill_handled and memory_manager:
-        mm = memory_manager
-        user_id = "primary_user"
-
-        if mm.is_forget_request(command):
-            response = await asyncio.to_thread(mm.handle_forget, command, user_id)
-            skill_handled = True
-        elif mm.is_transparency_request(command):
-            response = await asyncio.to_thread(mm.handle_transparency, command, user_id)
-            skill_handled = True
-        elif mm.is_fact_request(command):
-            response = persona.pick("fact_stored")
-            skill_handled = True
-        elif mm.is_recall_query(command):
-            recall_context = await asyncio.to_thread(mm.handle_recall, command, user_id)
-            if recall_context:
-                history = conversation.format_history_for_llm(include_system_prompt=False)
-                response = await asyncio.to_thread(
-                    llm.chat,
-                    user_message=(
-                        f"The user is asking you to recall something. Here is what you found "
-                        f"in your memory:\n\n{recall_context}\n\n"
-                        f"Now answer naturally: {command}"
-                    ),
-                    conversation_history=history,
-                )
-                skill_handled = True
-                used_llm = True
-
-    # Priority 4: Skill routing (skip when document buffer is active)
-    if not skill_handled and not doc_buffer.active:
-        skill_response = await asyncio.to_thread(skill_manager.execute_intent, command)
-        match_info = skill_manager._last_match_info
-        if skill_response:
-            response = skill_response
-            skill_handled = True
-
+    # --- Route through shared priority chain ---
+    router = components['router']
+    result = await asyncio.to_thread(
+        router.route, command, in_conversation=False, doc_buffer=doc_buffer,
+    )
     t_match = time.perf_counter()
 
-    # Priority 5: News pull-up
-    if not skill_handled and news_manager and news_manager.get_last_read_url():
-        pull_phrases = ["pull that up", "show me that", "open that",
-                        "let me see", "show me the article", "open the article"]
-        if any(p in command.strip().lower() for p in pull_phrases):
-            url = news_manager.get_last_read_url()
-            browser = config.get("web_navigation.default_browser", "brave")
-            browser_cmd = f"{browser}-browser" if browser != "brave" else "brave-browser"
-            import subprocess as _sp
-            _sp.Popen([browser_cmd, url])
-            news_manager.clear_last_read()
-            response = persona.pick("news_pullup")
-            skill_handled = True
-
-    # Priority 6: News continue
-    if not skill_handled and news_manager:
-        continue_words = ["continue", "keep going", "more headlines", "go on", "read more"]
-        if any(w in command.strip().lower() for w in continue_words):
-            remaining = news_manager.get_unread_count()
-            if sum(remaining.values()) > 0:
-                response = await asyncio.to_thread(news_manager.read_headlines, limit=5)
-                skill_handled = True
-
-    # LLM fallback (streaming over WebSocket when ws is available)
     streamed = False
-    if not skill_handled:
+    if result.skip:
+        # Bare ack noise — return empty response
+        t_end = time.perf_counter()
+        return {'response': '', 'stats': {}, 'used_llm': False, 'streamed': False}
+
+    if result.handled:
+        response = result.text
+        skill_handled = True
+        used_llm = result.used_llm
+        match_info = result.match_info
+    else:
+        # LLM fallback (streaming over WebSocket when ws is available)
         used_llm = True
-        history = conversation.format_history_for_llm(include_system_prompt=False)
-
-        # Context assembly
-        context_messages = None
-        if context_window and context_window.enabled:
-            context_messages = context_window.assemble_context(command)
-
-        # Proactive memory
-        memory_context = None
-        if memory_manager:
-            memory_context = memory_manager.get_proactive_context(command, "primary_user")
-
-        # Document-aware hint
-        if doc_buffer.active:
-            doc_hint = ("The user has loaded a document into the context buffer. "
-                        "Refer to the <document> tags in their message. "
-                        "Be analytical and specific in your response.")
-            memory_context = f"{doc_hint}\n\n{memory_context}" if memory_context else doc_hint
-
-        # Fact-extraction acknowledgment
-        llm_command = command
-        if memory_manager and memory_manager.last_extracted:
-            subjects = ", ".join(f.get("subject", "") for f in memory_manager.last_extracted)
-            llm_command = (
-                f"{command}\n\n[System: you just stored these facts from the user's message: "
-                f"{subjects}. Briefly acknowledge you'll remember this.]"
-            )
-
-        # Document buffer injection
-        if doc_buffer.active:
-            llm_command = doc_buffer.build_augmented_message(llm_command)
-
-        # Streaming LLM over WebSocket
         if ws:
             response, streamed = await _stream_llm_ws(
-                ws, llm, llm_command, history, web_researcher,
-                memory_context=memory_context,
-                conversation_messages=context_messages,
-                max_tokens=600 if doc_buffer.active else None,
+                ws, llm, result.llm_command, result.llm_history, web_researcher,
+                memory_context=result.memory_context,
+                conversation_messages=result.context_messages,
+                max_tokens=result.llm_max_tokens,
             )
         else:
             response = await _llm_fallback(
-                llm, llm_command, history, web_researcher,
-                memory_context=memory_context,
-                conversation_messages=context_messages,
-                max_tokens=600 if doc_buffer.active else None,
+                llm, result.llm_command, result.llm_history, web_researcher,
+                memory_context=result.memory_context,
+                conversation_messages=result.context_messages,
+                max_tokens=result.llm_max_tokens,
             )
 
         if not response:

@@ -27,6 +27,7 @@ from core.logger import get_logger
 from core.honorific import set_honorific
 from core import persona
 from core.conversation_state import ConversationState
+from core.conversation_router import ConversationRouter, RouteResult
 from core.llm_router import ToolCallRequest
 from core.web_research import WebResearcher, format_search_results
 
@@ -453,14 +454,19 @@ class Coordinator:
             "hello", "hey", "hi", "bye", "goodbye",
         }
 
-        # Bare acknowledgments that should NOT trigger web search during
-        # conversation windows.  If JARVIS just asked a question, these are
-        # answers; otherwise they're background noise to ignore.
-        self._bare_acknowledgments = {
-            "yeah", "yep", "yes", "yup", "uh huh", "uh-huh", "uhuh",
-            "ok", "okay", "sure", "right", "mm hmm", "mmhmm", "hmm",
-            "no", "nah", "nope",
-        }
+        # Shared command router (Phase 3 of conversational flow refactor)
+        self.router = ConversationRouter(
+            skill_manager=skill_manager,
+            conversation=conversation,
+            llm=llm,
+            reminder_manager=reminder_manager,
+            memory_manager=memory_manager,
+            news_manager=news_manager,
+            context_window=context_window,
+            conv_state=self.conv_state,
+            config=config,
+            web_researcher=self.web_researcher,
+        )
 
     # ----- main loop -----
 
@@ -678,7 +684,7 @@ class Coordinator:
 
         self.logger.info(f"Command: {repr(command.strip())}")
 
-        # --- Minimal greeting ---
+        # --- Minimal greeting (voice-specific: adds "jarvis" to history) ---
         if command.strip() == "jarvis_only" or len(command.strip()) <= 2:
             self._handle_minimal_greeting(command, in_conversation)
             return
@@ -687,221 +693,38 @@ class Coordinator:
         print(f"📝 Processing: {command}")
         self.logger.info(f"Processing command: {command}")
         self.conversation.add_message("user", command)
-
-        skill_handled = False
-        response = ""
         self.tts._spoke = False
 
-        # Priority 1: Rundown acceptance
-        if self.reminder_manager and self.reminder_manager.is_rundown_pending():
-            text_lower = command.strip().lower()
-            negative = any(w in text_lower for w in [
-                "no", "not now", "later", "not yet", "hold", "skip",
-            ])
-            if negative:
-                self.reminder_manager.defer_rundown()
-                response = persona.rundown_defer()
-                skill_handled = True
-                self._speak_and_wait(response)
-            else:
-                self.reminder_manager.deliver_rundown()
-                response = ""
-                skill_handled = True
+        # --- Route through shared priority chain ---
+        result = self.router.route(command, in_conversation=in_conversation)
 
-        # Priority 2: Reminder acknowledgment
-        if not skill_handled and self.reminder_manager and self.reminder_manager.is_awaiting_ack():
-            self.logger.info("Treating response as reminder acknowledgment")
-            self.reminder_manager.acknowledge_last()
-            response = persona.pick("reminder_ack")
-            skill_handled = True
-            self._speak_and_wait(response)
+        # Skip: bare acknowledgment noise
+        if result.skip:
+            self.logger.info("Router: skip (bare ack noise)")
+            self.listener.resume_listening()
+            self.state = PipelineState.IDLE
+            return
 
-        # Priority 2.5: Memory forget confirmation/cancellation (must intercept before skill routing)
-        if not skill_handled and self.memory_manager and self.memory_manager._pending_forget:
-            cmd_lower = command.lower().strip()
-            affirm = ("yes", "yeah", "yep", "go ahead", "do it", "proceed", "confirm", "sure", "remove", "delete")
-            deny = ("no", "nope", "nah", "cancel", "nevermind", "never mind", "keep", "don't")
-            if any(w in cmd_lower for w in affirm):
-                response = self.memory_manager.confirm_forget()
-                skill_handled = True
-                self.logger.info("Handled by memory forget confirmation")
-                self._speak_and_wait(response)
-            elif any(w in cmd_lower for w in deny):
-                response = self.memory_manager.cancel_forget()
-                skill_handled = True
-                self.logger.info("Handled by memory forget cancellation")
+        if result.handled:
+            response = result.text
+
+            # Speak response (unless handler already spoke via TTS proxy,
+            # e.g. deliver_rundown or a skill that calls tts.speak directly)
+            if response and not self.tts._spoke:
                 self._speak_and_wait(response)
 
-        # Priority 2.7: Dismissal detection (conversation window only)
-        # Catches "no thanks", "that's all", "I'm good" etc. before they
-        # leak to skill routing or LLM (which misreads them as commands).
-        if not skill_handled and in_conversation and self._is_dismissal(command):
-            response = persona.pick("dismissal")
-            skill_handled = True
-            self._speak_and_wait(response)
-            self.listener.close_conversation_window()
-
-        # Priority 2.8: Bare acknowledgment filter (conversation window only)
-        # Words like "yeah", "ok", "uh huh" are noise UNLESS JARVIS just
-        # asked a question — in which case they're a legitimate answer.
-        if not skill_handled and in_conversation:
-            cmd_bare = command.strip().lower().rstrip(".,!?")
-            if cmd_bare in self._bare_acknowledgments:
-                if not self.conv_state.jarvis_asked_question:
-                    self.logger.info(
-                        f"Dropping bare acknowledgment as noise: '{command}' "
-                        f"(jarvis_asked_question={self.conv_state.jarvis_asked_question})"
-                    )
-                    self.listener.resume_listening()
-                    self.state = PipelineState.IDLE
-                    return
-                else:
-                    self.logger.info(
-                        f"Bare acknowledgment treated as answer: '{command}'"
-                    )
-
-        # Priority 3: Memory operations (recall, forget, transparency)
-        # Must run before skill routing — "forget my server ip" was matching network_info
-        if not skill_handled and self.memory_manager:
-            mm = self.memory_manager
-            user_id = getattr(self.conversation, 'current_user', None) or "primary_user"
-
-            if mm.is_forget_request(command):
-                response = mm.handle_forget(command, user_id)
-                skill_handled = True
-                self.logger.info("Handled by memory forget request")
-                self._speak_and_wait(response)
-                # Open follow-up window for confirmation
-                self.listener.open_conversation_window(30.0)
-
-            elif mm.is_transparency_request(command):
-                response = mm.handle_transparency(command, user_id)
-                skill_handled = True
-                self.logger.info("Handled by memory transparency")
-                self._speak_and_wait(response)
-                self.listener.open_conversation_window(15.0)
-
-            elif mm.is_fact_request(command):
-                # Fact already extracted by on_message() hook — just confirm
-                response = persona.pick("fact_stored")
-                skill_handled = True
-                self.logger.info("Handled by memory fact request")
-                self._speak_and_wait(response)
-
-            elif mm.is_recall_query(command):
-                recall_context = mm.handle_recall(command, user_id)
-                if recall_context:
-                    # Feed recall context + original query to LLM for natural response
-                    history = self.conversation.format_history_for_llm(include_system_prompt=False)
-                    augmented_prompt = (
-                        f"The user is asking you to recall something. Here is what you found "
-                        f"in your memory:\n\n{recall_context}\n\n"
-                        f"Now answer their question naturally based on this context. "
-                        f"If the context is relevant, reference it conversationally. "
-                        f"Be specific about dates and details."
-                    )
-                    response = self.llm.chat(
-                        user_message=f"{augmented_prompt}\n\nUser's question: {command}",
-                        conversation_history=history,
-                        max_tokens=200,
-                    )
-                    skill_handled = True
-                    self.logger.info("Handled by memory recall")
-                # If recall_context is None (nothing found), fall through to LLM
-                # which will naturally say "I don't recall that"
-
-        # Priority 3.5: Research follow-up ("tell me more about result 2")
-        # Must run BEFORE skill routing because "tell me more" semantically
-        # matches NewsSkill_continue_reading (score 0.58) and gets stolen.
-        if not skill_handled and self.conv_state.research_results and in_conversation:
-            follow_up = self._detect_research_followup(command)
-            if follow_up is not None:
-                skill_handled = True
-                response = follow_up
-                # _detect_research_followup() speaks an interim ack which sets
-                # tts._spoke = True.  Reset it so the main flow speaks the
-                # actual synthesized answer.
-                self.tts._spoke = False
-
-        # Priority 3.7: News article pull-up (before skill routing steals "open")
-        if not skill_handled and self.news_manager and self.news_manager.get_last_read_url():
-            pull_phrases = ["pull that up", "show me that", "open that",
-                            "let me see", "show me the article", "open the article"]
-            if any(p in command.strip().lower() for p in pull_phrases):
-                url = self.news_manager.get_last_read_url()
-                browser = self.config.get("web_navigation.default_browser", "brave")
-                browser_cmd = f"{browser}-browser" if browser != "brave" else "brave-browser"
-                import subprocess as _sp
-                _sp.Popen([browser_cmd, url])
-                self.news_manager.clear_last_read()
-                response = persona.pick("news_pullup")
-                skill_handled = True
-                self._speak_and_wait(response)
-
-        # Priority 4: Skill routing
-        if not skill_handled:
-            print("🔍 Checking skills...")
-            skill_response = self.skill_manager.execute_intent(command)
-            if skill_response:
-                response = skill_response
-                skill_handled = True
-                self.logger.info("Handled by skill")
-
-        # Priority 5: News continuation
-        if not skill_handled and self.news_manager and in_conversation:
-            continue_words = ["continue", "keep going", "more headlines",
-                              "go on", "read more"]
-            if any(w in command.strip().lower() for w in continue_words):
-                remaining = self.news_manager.get_unread_count()
-                if sum(remaining.values()) > 0:
-                    response = self.news_manager.read_headlines(limit=5)
-                    skill_handled = True
-                    self._speak_and_wait(response)
-                    self.listener.open_conversation_window(
-                        self.listener._extended_duration)
-
-
-        # Priority 7: LLM fallback (streaming)
-        if not skill_handled:
+            # Conversation window side effects
+            if result.close_window:
+                self._handle_close_conversation(None)
+            elif result.open_window is not None:
+                self.listener.open_conversation_window(result.open_window)
+        else:
+            # LLM fallback (streaming)
             print("🤖 Thinking...")
-
-            # Context assembly — use context window if enabled, else flat history
-            context_messages = None
-            if self.context_window and self.context_window.enabled:
-                context_messages = self.context_window.assemble_context(command)
-            history = self.conversation.format_history_for_llm(include_system_prompt=False)
-
-            # Proactive memory surfacing — inject relevant facts into LLM context
-            memory_context = None
-            if self.memory_manager:
-                memory_context = self.memory_manager.get_proactive_context(
-                    command,
-                    user_id=getattr(self.conversation, 'current_user', None) or "primary_user",
-                )
-
-            # Fact-extraction acknowledgment — let LLM know it just stored facts
-            llm_command = command
-            if self.memory_manager and self.memory_manager.last_extracted:
-                subjects = ", ".join(f.get("subject", "") for f in self.memory_manager.last_extracted)
-                llm_command = (
-                    f"{command}\n\n[System: you just stored these facts from the user's message: "
-                    f"{subjects}. Briefly acknowledge you'll remember this.]"
-                )
-
-            # Augment follow-ups with prior research context so the LLM
-            # knows what "the score" / "tell me more" / "try again" refers to.
-            # stream_with_tools strips all history, so we bake context into the query.
-            if in_conversation and self.conv_state.research_exchange:
-                prev = self.conv_state.research_exchange
-                llm_command = (
-                    f"Context: The user just asked '{prev['query']}' and I answered: "
-                    f"'{prev['answer']}'\n\n"
-                    f"Now the user asks: {llm_command}"
-                )
-
             response = self._stream_llm_response(
-                llm_command, history, memory_context,
-                conversation_messages=context_messages,
+                result.llm_command, result.llm_history,
+                memory_context=result.memory_context,
+                conversation_messages=result.context_messages,
                 raw_command=command,
             )
             if not response:
@@ -915,16 +738,18 @@ class Coordinator:
         if not self.tts._spoke:
             self._speak_and_wait(response)
 
-        # Update centralized conversation state — tracks last intent,
-        # response type, and auto-detects jarvis_asked_question from "?"
+        # Update centralized conversation state
         self.conv_state.update(
             command=command,
             response_text=response or "",
-            response_type="llm" if not skill_handled else "skill",
+            response_type="llm" if not result.handled else "skill",
         )
 
-        # Follow-up window — use full spoken response so question detection works
-        if self.conversation.request_follow_up:
+        # Follow-up window — handled results with explicit window instructions
+        # skip the default window management
+        if result.handled and (result.close_window or result.open_window is not None):
+            pass  # Already handled above
+        elif self.conversation.request_follow_up:
             duration = self.conversation.request_follow_up
             self.conversation.request_follow_up = None
             self.listener.open_conversation_window(duration)
@@ -1225,90 +1050,6 @@ class Coordinator:
 
         return chunks_spoken, first_chunk_checked, pending_chunk, audio_pipeline
 
-    # ----- research follow-up -----
-
-    def _detect_research_followup(self, command: str) -> Optional[str]:
-        """Detect and handle follow-up requests about previous search results.
-
-        Matches patterns like "tell me more about result 2", "what does
-        that article say?", "open result 3".
-
-        Returns:
-            LLM-synthesized response based on full page content, or None.
-        """
-        cmd = command.strip().lower()
-        results = self.conv_state.research_results
-        if not results:
-            return None
-
-        # Match "result N", "number N", "option N", "#N"
-        import re
-        num_match = re.search(r'(?:result|number|option|#)\s*(\d+)', cmd)
-        if num_match:
-            idx = int(num_match.group(1)) - 1
-            if 0 <= idx < len(results):
-                url = results[idx]["url"]
-                title = results[idx]["title"]
-                self.logger.info(f"Research follow-up: fetching result {idx+1}: {url}")
-                print(f"📄 Fetching: {title}")
-
-                self._speak_and_wait(persona.pick("news_pullup"))
-
-                content = self.web_researcher.fetch_page(url, max_chars=4000)
-                if not content:
-                    return persona.research_page_fail()
-
-                # Feed to LLM for synthesis
-                history = self.conversation.format_history_for_llm(
-                    include_system_prompt=False
-                )
-                prompt = (
-                    f"The user asked about a search result. Here is the full article "
-                    f"content from \"{title}\":\n\n{content}\n\n"
-                    f"Summarize the key information from this article, focusing on "
-                    f"what the user was originally asking about. Be thorough but concise."
-                )
-                response = self.llm.chat(
-                    user_message=f"{prompt}\n\nUser's request: {command}",
-                    conversation_history=history,
-                    max_tokens=400,
-                )
-                self.listener.open_conversation_window(15.0)
-                return response
-
-        # Generic follow-up about the article ("what does it say?", "tell me more")
-        more_phrases = ["tell me more", "more about that", "what does it say",
-                        "elaborate", "go into detail", "expand on that"]
-        if any(p in cmd for p in more_phrases) and len(results) > 0:
-            url = results[0]["url"]
-            title = results[0]["title"]
-            self.logger.info(f"Research follow-up (generic): fetching {url}")
-            print(f"📄 Fetching: {title}")
-
-            self._speak_and_wait(persona.pick("research_followup"))
-
-            content = self.web_researcher.fetch_page(url, max_chars=4000)
-            if not content:
-                return persona.research_page_fail()
-
-            history = self.conversation.format_history_for_llm(
-                include_system_prompt=False
-            )
-            prompt = (
-                f"The user wants more detail about this article: \"{title}\"\n\n"
-                f"Full content:\n{content}\n\n"
-                f"Provide a thorough but spoken-word-friendly summary."
-            )
-            response = self.llm.chat(
-                user_message=f"{prompt}\n\nUser's request: {command}",
-                conversation_history=history,
-                max_tokens=400,
-            )
-            self.listener.open_conversation_window(15.0)
-            return response
-
-        return None
-
     # ----- TTS helpers -----
 
     def _speak_and_wait(self, text: str):
@@ -1359,34 +1100,6 @@ class Coordinator:
             )
         except Exception as e:
             self.logger.error(f"Failed to play beep: {e}")
-
-    # ----- dismissal detection -----
-
-    _DISMISSAL_PHRASES = frozenset({
-        "no", "no thanks", "no thank you", "nah", "nope",
-        "not right now", "not at the moment", "not now",
-        "that's all", "that's it", "that'll be all", "that will be all",
-        "i'm good", "i'm fine", "all good", "all set",
-        "nothing", "nothing else", "nothing for now",
-        "never mind", "nevermind", "maybe later",
-    })
-
-    def _is_dismissal(self, command: str) -> bool:
-        """Detect short dismissal phrases during a conversation window."""
-        import re as _re
-        text = command.strip().lower().rstrip(".!,")
-        if len(text.split()) > 10:
-            return False
-        # Strip trailing courtesy phrases before matching
-        text = _re.sub(r',?\s*(?:thank you|thanks|thank you so much)$', '', text)
-        if text in self._DISMISSAL_PHRASES:
-            return True
-        # "no, that's all" / "nah, I'm good" — check after the comma
-        if text.startswith(("no,", "nah,", "nope,")):
-            rest = text.split(",", 1)[1].strip()
-            if not rest or rest in self._DISMISSAL_PHRASES:
-                return True
-        return False
 
     # ----- conversation helpers -----
 

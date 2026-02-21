@@ -53,6 +53,7 @@ from core.reminder_manager import get_reminder_manager
 from core.news_manager import get_news_manager
 from core import persona
 from core.conversation_state import ConversationState
+from core.conversation_router import ConversationRouter
 from core.speech_chunker import SpeechChunker
 from core.context_window import get_context_window, estimate_tokens, TOKEN_RATIO
 from core.document_buffer import DocumentBuffer, BINARY_EXTENSIONS
@@ -724,6 +725,21 @@ def run_console(config, mode):
                        f"threshold={context_window.topic_shift_threshold}, "
                        f"prior={cw_stats['segments']} seg(s))")
 
+    # Conversation state + shared router (Phase 2-3 of conversational flow refactor)
+    conv_state = ConversationState()
+    router = ConversationRouter(
+        skill_manager=skill_manager,
+        conversation=conversation,
+        llm=llm,
+        reminder_manager=reminder_manager,
+        memory_manager=memory_manager,
+        news_manager=news_manager,
+        context_window=context_window,
+        conv_state=conv_state,
+        config=config,
+        web_researcher=web_researcher,
+    )
+
     # Command history (persists across sessions) + document buffer
     history_file = Path(__file__).parent / ".console_history"
     pt_history = FileHistory(str(history_file))
@@ -753,7 +769,6 @@ def run_console(config, mode):
     ))
 
     session_stats = SessionStats()
-    conv_state = ConversationState()
 
     try:
         while True:
@@ -835,157 +850,40 @@ def run_console(config, mode):
             skill_already_spoke = False
             match_info = None
 
-            # Priority 1: Rundown acceptance (must intercept before skill routing)
-            if reminder_manager and reminder_manager.is_rundown_pending():
-                text_lower = command.strip().lower()
-                words = set(re.findall(r'\b\w+\b', text_lower))
-                negative = bool(
-                    words & {"no", "later", "hold", "skip"}
-                    or "not now" in text_lower
-                    or "not yet" in text_lower
-                )
-                if negative:
-                    reminder_manager.defer_rundown()
-                    response = persona.rundown_defer()
-                    skill_handled = True
-                else:
-                    reminder_manager.deliver_rundown()
-                    response = ""
-                    skill_handled = True
-
-            # Priority 2: Reminder acknowledgment
-            if not skill_handled and reminder_manager and reminder_manager.is_awaiting_ack():
-                reminder_manager.acknowledge_last()
-                response = persona.pick("reminder_ack")
-                skill_handled = True
-
-            # Priority 2.5: Memory forget confirmation/cancellation (must intercept before skill routing)
-            if not skill_handled and memory_manager and memory_manager._pending_forget:
-                cmd_lower = command.lower().strip()
-                affirm = ("yes", "yeah", "yep", "go ahead", "do it", "proceed", "confirm", "sure", "remove", "delete")
-                deny = ("no", "nope", "nah", "cancel", "nevermind", "never mind", "keep", "don't")
-                if any(w in cmd_lower for w in affirm):
-                    response = memory_manager.confirm_forget()
-                    skill_handled = True
-                elif any(w in cmd_lower for w in deny):
-                    response = memory_manager.cancel_forget()
-                    skill_handled = True
-
-            # Priority 3: Memory operations (recall, forget, transparency)
-            # Must run before skill routing — "forget my server ip" was matching network_info
-            if not skill_handled and memory_manager:
-                mm = memory_manager
-                user_id = "primary_user"
-
-                if mm.is_forget_request(command):
-                    response = mm.handle_forget(command, user_id)
-                    skill_handled = True
-                elif mm.is_transparency_request(command):
-                    response = mm.handle_transparency(command, user_id)
-                    skill_handled = True
-                elif mm.is_fact_request(command):
-                    # Fact already extracted by on_message() hook — just confirm
-                    response = persona.pick("fact_stored")
-                    skill_handled = True
-
-                elif mm.is_recall_query(command):
-                    recall_context = mm.handle_recall(command, user_id)
-                    if recall_context:
-                        history = conversation.format_history_for_llm(include_system_prompt=False)
-                        response = llm.chat(
-                            user_message=(
-                                f"The user is asking you to recall something. Here is what you found "
-                                f"in your memory:\n\n{recall_context}\n\n"
-                                f"Now answer naturally: {command}"
-                            ),
-                            conversation_history=history,
-                        )
-                        skill_handled = True
-                        used_llm = True
-
-            # Priority 3.7: News article pull-up (before skill routing steals "open")
-            if not skill_handled and news_manager and news_manager.get_last_read_url():
-                pull_phrases = ["pull that up", "show me that", "open that",
-                                "let me see", "show me the article", "open the article"]
-                if any(p in command.strip().lower() for p in pull_phrases):
-                    url = news_manager.get_last_read_url()
-                    browser = config.get("web_navigation.default_browser", "brave")
-                    browser_cmd = f"{browser}-browser" if browser != "brave" else "brave-browser"
-                    import subprocess as _sp
-                    _sp.Popen([browser_cmd, url])
-                    news_manager.clear_last_read()
-                    response = persona.pick("news_pullup")
-                    skill_handled = True
-
-            # Priority 4: Skill routing
-            # When document buffer is active, skip skill routing — the user
-            # is asking the LLM about their document, not invoking a skill.
-            # Priorities 1-3 (rundowns, reminders, memory) still work normally.
-            if not skill_handled and not doc_buffer.active:
-                skill_response = skill_manager.execute_intent(command)
-                skill_already_spoke = len(tts_proxy.get_pending_announcements()) > 0
-                match_info = skill_manager._last_match_info
-                if skill_response:
-                    response = skill_response
-                    skill_handled = True
-
+            # --- Route through shared priority chain ---
+            result = router.route(
+                command,
+                in_conversation=False,
+                doc_buffer=doc_buffer,
+            )
             t_match = time.perf_counter()
 
-            # Priority 5: News continue handler
-            if not skill_handled and news_manager:
-                continue_words = ["continue", "keep going", "more headlines", "go on", "read more"]
-                if any(w in command.strip().lower() for w in continue_words):
-                    remaining = news_manager.get_unread_count()
-                    if sum(remaining.values()) > 0:
-                        response = news_manager.read_headlines(limit=5)
-                        skill_handled = True
+            if result.skip:
+                continue
 
-            # LLM fallback (streaming with typewriter output)
-            if not skill_handled:
+            if result.handled:
+                response = result.text
+                skill_handled = True
+                used_llm = result.used_llm
+                match_info = result.match_info
+                skill_already_spoke = len(tts_proxy.get_pending_announcements()) > 0
+            else:
+                # LLM fallback (streaming with typewriter output)
                 used_llm = True
                 llm_streamed = True
-                history = conversation.format_history_for_llm(include_system_prompt=False)
 
-                # Context assembly — use context window if enabled, else flat history
-                context_messages = None
-                if context_window and context_window.enabled:
-                    context_messages = context_window.assemble_context(command)
-                    if context_messages:
-                        console.print(
-                            f"[dim]  ctx assembled: {len(context_messages)} messages "
-                            f"for LLM (max_tokens={llm._estimate_max_tokens(command)})[/dim]"
-                        )
-
-                # Proactive memory surfacing — inject relevant facts into LLM context
-                memory_context = None
-                if memory_manager:
-                    memory_context = memory_manager.get_proactive_context(command, "primary_user")
-
-                # Document-aware LLM hint — tell the LLM a document is loaded
-                if doc_buffer.active:
-                    doc_hint = ("The user has loaded a document into the context buffer. "
-                                "Refer to the <document> tags in their message. "
-                                "Be analytical and specific in your response.")
-                    memory_context = f"{doc_hint}\n\n{memory_context}" if memory_context else doc_hint
-
-                # Fact-extraction acknowledgment — let LLM know it just stored facts
-                llm_command = command
-                if memory_manager and memory_manager.last_extracted:
-                    subjects = ", ".join(f.get("subject", "") for f in memory_manager.last_extracted)
-                    llm_command = (
-                        f"{command}\n\n[System: you just stored these facts from the user's message: "
-                        f"{subjects}. Briefly acknowledge you'll remember this.]"
+                if result.context_messages:
+                    console.print(
+                        f"[dim]  ctx assembled: {len(result.context_messages)} messages "
+                        f"for LLM (max_tokens={llm._estimate_max_tokens(command)})[/dim]"
                     )
 
-                # Document buffer injection — prepend document in XML tags
-                if doc_buffer.active:
-                    llm_command = doc_buffer.build_augmented_message(llm_command)
-
                 response = _stream_llm_console(
-                    llm, llm_command, history, console, mode, real_tts,
-                    memory_context=memory_context,
-                    conversation_messages=context_messages,
-                    max_tokens=600 if doc_buffer.active else None,
+                    llm, result.llm_command, result.llm_history,
+                    console, mode, real_tts,
+                    memory_context=result.memory_context,
+                    conversation_messages=result.context_messages,
+                    max_tokens=result.llm_max_tokens,
                     web_researcher=web_researcher,
                 )
                 if not response:
