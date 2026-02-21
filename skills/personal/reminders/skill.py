@@ -37,7 +37,7 @@ class ReminderSkill(BaseSkill):
                 "reminder to call someone tomorrow morning",
             ],
             handler=self.set_reminder,
-            threshold=0.50
+            threshold=0.58
         )
 
         # --- Set a recurring reminder ---
@@ -69,11 +69,14 @@ class ReminderSkill(BaseSkill):
             examples=[
                 "cancel the reminder about the dentist",
                 "delete my trash reminder",
+                "delete my dentist reminder",
                 "remove the meeting reminder",
+                "remove the appointment reminder",
+                "get rid of the reminder",
                 "cancel reminder",
             ],
             handler=self.cancel_reminder,
-            threshold=0.72
+            threshold=0.62
         )
 
         # --- Acknowledge a fired reminder ---

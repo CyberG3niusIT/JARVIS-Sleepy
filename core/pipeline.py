@@ -840,16 +840,7 @@ class Coordinator:
                 # actual synthesized answer.
                 self.tts._spoke = False
 
-        # Priority 4: Skill routing
-        if not skill_handled:
-            print("🔍 Checking skills...")
-            skill_response = self.skill_manager.execute_intent(command)
-            if skill_response:
-                response = skill_response
-                skill_handled = True
-                self.logger.info("Handled by skill")
-
-        # Priority 5: News article pull-up
+        # Priority 3.7: News article pull-up (before skill routing steals "open")
         if not skill_handled and self.news_manager and self.news_manager.get_last_read_url():
             pull_phrases = ["pull that up", "show me that", "open that",
                             "let me see", "show me the article", "open the article"]
@@ -869,7 +860,16 @@ class Coordinator:
                 skill_handled = True
                 self._speak_and_wait(response)
 
-        # Priority 6: News continuation
+        # Priority 4: Skill routing
+        if not skill_handled:
+            print("🔍 Checking skills...")
+            skill_response = self.skill_manager.execute_intent(command)
+            if skill_response:
+                response = skill_response
+                skill_handled = True
+                self.logger.info("Handled by skill")
+
+        # Priority 5: News continuation
         if not skill_handled and self.news_manager and in_conversation:
             continue_words = ["continue", "keep going", "more headlines",
                               "go on", "read more"]

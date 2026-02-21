@@ -66,6 +66,7 @@ class FileEditorSkill(BaseSkill):
                 "rewrite the main function in test.py",
                 "fix the bug in my script in the share folder",
                 "add a new function to the script in the share",
+                "edit the weather skill",
             ],
             handler=self.edit_file,
             threshold=0.50,

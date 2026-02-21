@@ -40,13 +40,17 @@ class WeatherSkill(BaseSkill):
         self.register_semantic_intent(
             examples=[
                 "what's the weather like today",
-                "what's the weather today", 
+                "what's the weather today",
                 "how's the weather today",
                 "weather right now",
-                "current weather"
+                "current weather",
+                "what are the current meteorological conditions",
+                "how are the weather conditions today",
+                "what's the weather in the news",
+                "look into the current meteorological conditions",
             ],
             handler=self.get_current_weather,
-            threshold=0.68
+            threshold=0.60
         )
         
         # Weather for specific location

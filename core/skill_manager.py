@@ -18,6 +18,13 @@ from core.logger import get_logger
 from core.base_skill import BaseSkill, SkillMetadata
 from core.honorific import resolve_honorific
 
+# Generic keywords too ambiguous for suffix matching or bare-word routing
+_generic_keywords = {"search", "open", "find", "look", "browse", "navigate", "web",
+                     "file", "code", "directory", "count", "analyze", "amazon"}
+
+# Keywords with explicit handler aliases get a bonus so they win ties
+_keyword_aliases = {"google", "search", "codebase"}
+
 
 class SkillManager:
     """Manages skill discovery, loading, and execution"""
@@ -248,8 +255,15 @@ class SkillManager:
         normalized = user_text.strip().lower()
         # Remove ALL punctuation (not just trailing)
         normalized = normalized.translate(str.maketrans('', '', '?.!,;:'))
-        
+
         self.logger.debug(f"🔍 Normalized: '{normalized}'")
+
+        # Bare generic word guard — block ALL layers, not just keywords
+        _norm_words = normalized.split()
+        if len(_norm_words) == 1 and _norm_words[0] in _generic_keywords:
+            self.logger.info(f"Bare generic word '{_norm_words[0]}' — skipping to LLM")
+            self._last_match_info = None
+            return None
         
         # Debug: show first few patterns for system_info skill
         system_info_patterns = [
@@ -347,15 +361,15 @@ class SkillManager:
             Tuple of (skill_name, pattern, entities) or None
         """
         # Split text into words
-        words = set(normalized_text.split())
-        
-        # Check each skill's keywords
-        best_match = None
-        best_score = 0
+        input_words = normalized_text.split()
 
-        # Keywords with explicit handler aliases get a bonus so they win ties
-        # (e.g. "search" → search_web should beat "graphics" → gpu_info)
-        _keyword_aliases = {"google", "search"}
+        # Single generic word should not route — too ambiguous (e.g. bare "search", "open", "file")
+        if len(input_words) == 1 and input_words[0] in _generic_keywords:
+            return None
+
+        # Check each skill's keywords
+        best_score = 0
+        tied_skills = []
 
         for skill_name, metadata in self.skill_metadata.items():
             # Access keywords attribute directly
@@ -373,9 +387,16 @@ class SkillManager:
 
             if matches > best_score:
                 best_score = matches
-                best_match = skill_name
-        
-        if best_match and best_score > 0:
+                tied_skills = [skill_name]
+            elif matches == best_score and matches > 0:
+                tied_skills.append(skill_name)
+
+        # Ties fall through to semantic matching (Layer 4) for disambiguation
+        if len(tied_skills) != 1:
+            return None
+
+        best_match = tied_skills[0]
+        if best_score > 0:
             entities = {}
 
             if best_match == 'weather':
@@ -518,20 +539,18 @@ class SkillManager:
                 )
 
                 # Explicit keyword→handler aliases (keywords that don't suffix-match naturally)
-                _keyword_aliases = {
+                _handler_aliases = {
                     "google": "search_web",
                     "search": "search_web",
                 }
-                # Generic keywords too ambiguous for suffix matching
-                _generic_keywords = {"search", "open", "find", "look", "browse", "navigate", "web",
-                                         "file", "code", "directory", "count", "analyze"}
+                # _generic_keywords is module-level (shared with _match_by_keywords)
 
                 for kw in matched_kws:
                     kw_lower = kw.lower()
 
                     # Check explicit alias first
-                    if kw_lower in _keyword_aliases:
-                        alias_target = _keyword_aliases[kw_lower]
+                    if kw_lower in _handler_aliases:
+                        alias_target = _handler_aliases[kw_lower]
                         for intent_id, intent_data in skill.semantic_intents.items():
                             if intent_data['handler'].__name__.lower() == alias_target:
                                 self.logger.info(f"Keyword->intent alias match: {intent_id} (keyword={kw_lower} -> {alias_target})")
@@ -544,15 +563,41 @@ class SkillManager:
                     if kw_lower in _generic_keywords:
                         continue
 
-                    for intent_id, intent_data in skill.semantic_intents.items():
+                    suffix_matches = [
+                        (iid, idata)
+                        for iid, idata in skill.semantic_intents.items()
+                        if idata['handler'].__name__.lower().endswith(f"_{kw_lower}")
+                    ]
+                    if len(suffix_matches) == 1:
+                        intent_id, intent_data = suffix_matches[0]
                         handler_name = intent_data['handler'].__name__.lower()
-                        # Match keyword as a suffix: "search_amazon" ends with "_amazon"
-                        if handler_name.endswith(f"_{kw_lower}"):
-                            self.logger.info(f"Keyword->intent direct match: {intent_id} (keyword={kw_lower})")
-                            self._last_match_info = {"layer": "keyword_direct", "skill_name": skill_name, "intent_id": intent_id, "confidence": None, "handler_name": handler_name}
-                            h = intent_data['handler']
-                            response = h(entities=entities or {}) if 'entities' in inspect.signature(h).parameters else h()
-                            return response
+                        self.logger.info(f"Keyword->intent direct match: {intent_id} (keyword={kw_lower})")
+                        self._last_match_info = {"layer": "keyword_direct", "skill_name": skill_name, "intent_id": intent_id, "confidence": None, "handler_name": handler_name}
+                        h = intent_data['handler']
+                        response = h(entities=entities or {}) if 'entities' in inspect.signature(h).parameters else h()
+                        return response
+                    elif len(suffix_matches) > 1:
+                        # Ambiguous suffix (e.g. "reminder" matches set_reminder AND cancel_reminder)
+                        # Use semantic similarity to disambiguate
+                        from sentence_transformers import util as _st_util
+                        if hasattr(self, '_embedding_model'):
+                            _user_emb = self._embedding_model.encode(user_text, convert_to_tensor=True)
+                            _best_sim, _best_pair = -1.0, None
+                            for _sid, _sdata in suffix_matches:
+                                _ck = (skill_name, _sid)
+                                _ex = self._semantic_embedding_cache.get(_ck)
+                                if _ex is not None:
+                                    _sim = float(_st_util.cos_sim(_user_emb, _ex).max())
+                                    if _sim > _best_sim:
+                                        _best_sim, _best_pair = _sim, (_sid, _sdata)
+                            if _best_pair:
+                                intent_id, intent_data = _best_pair
+                                handler_name = intent_data['handler'].__name__.lower()
+                                self.logger.info(f"Keyword->intent disambiguated: {intent_id} (keyword={kw_lower}, score={_best_sim:.2f})")
+                                self._last_match_info = {"layer": "keyword_direct", "skill_name": skill_name, "intent_id": intent_id, "confidence": _best_sim, "handler_name": handler_name}
+                                h = intent_data['handler']
+                                response = h(entities=entities or {}) if 'entities' in inspect.signature(h).parameters else h()
+                                return response
 
                 # LAYER 4b: Semantic similarity within the matched skill
                 from sentence_transformers import util
@@ -614,6 +659,13 @@ class SkillManager:
                                             response = resolve_honorific(response)
                                         return response
                                 self.logger.info(f"Global semantic fallback also failed, falling through to LLM")
+                                self._last_match_info = {
+                                    "layer": "keyword_rejected",
+                                    "skill_name": skill_name,
+                                    "intent_id": "rejected",
+                                    "confidence": best_score,
+                                    "handler_name": "→ LLM fallback"
+                                }
                                 return None
 
             # Execute skill handler for pattern-based matches

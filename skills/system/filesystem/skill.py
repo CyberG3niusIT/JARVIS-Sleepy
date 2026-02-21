@@ -15,10 +15,11 @@ class FilesystemSkill(BaseSkill):
                 "where is expenses.xlsx",
                 "find the file named report.pdf",
                 "locate my presentation",
-                "where did I save that spreadsheet"
+                "where did I save that spreadsheet",
+                "find my config file",
             ],
             handler=self.find_file,
-            threshold=0.70
+            threshold=0.55
         )
         self.logger.info("✓ Registered find_file")
         

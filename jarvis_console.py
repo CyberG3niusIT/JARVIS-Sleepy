@@ -807,6 +807,11 @@ def run_console(config, mode):
             if not command:
                 command = "jarvis_only"
 
+            # Noise filter — skip filler words that voice mode filters in _is_conversation_noise()
+            _noise_words = {"um", "uh", "hmm", "hm", "ah", "er", "erm", "mm", "mhm"}
+            if command.lower().strip() in _noise_words:
+                continue
+
             conversation.add_message("user", command)
 
             # Show context window events inline
@@ -908,6 +913,20 @@ def run_console(config, mode):
                         skill_handled = True
                         used_llm = True
 
+            # Priority 3.7: News article pull-up (before skill routing steals "open")
+            if not skill_handled and news_manager and news_manager.get_last_read_url():
+                pull_phrases = ["pull that up", "show me that", "open that",
+                                "let me see", "show me the article", "open the article"]
+                if any(p in command.strip().lower() for p in pull_phrases):
+                    url = news_manager.get_last_read_url()
+                    browser = config.get("web_navigation.default_browser", "brave")
+                    browser_cmd = f"{browser}-browser" if browser != "brave" else "brave-browser"
+                    import subprocess as _sp
+                    _sp.Popen([browser_cmd, url])
+                    news_manager.clear_last_read()
+                    response = f"Pulling that up now, {get_honorific()}."
+                    skill_handled = True
+
             # Priority 4: Skill routing
             # When document buffer is active, skip skill routing — the user
             # is asking the LLM about their document, not invoking a skill.
@@ -922,21 +941,7 @@ def run_console(config, mode):
 
             t_match = time.perf_counter()
 
-            # Priority 5: News pull-up handler
-            if not skill_handled and news_manager and news_manager.get_last_read_url():
-                pull_phrases = ["pull that up", "show me that", "open that",
-                                "let me see", "show me the article", "open the article"]
-                if any(p in command.strip().lower() for p in pull_phrases):
-                    url = news_manager.get_last_read_url()
-                    browser = config.get("web_navigation.default_browser", "brave")
-                    browser_cmd = f"{browser}-browser" if browser != "brave" else "brave-browser"
-                    import subprocess as _sp
-                    _sp.Popen([browser_cmd, url])
-                    news_manager.clear_last_read()
-                    response = f"Pulling that up now, {get_honorific()}."
-                    skill_handled = True
-
-            # Priority 6: News continue handler
+            # Priority 5: News continue handler
             if not skill_handled and news_manager:
                 continue_words = ["continue", "keep going", "more headlines", "go on", "read more"]
                 if any(w in command.strip().lower() for w in continue_words):

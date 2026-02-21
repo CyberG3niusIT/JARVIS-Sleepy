@@ -67,5 +67,8 @@ experiments/
 # Console history
 .console_history
 
+# PID files
+*.pid
+
 # Environment
 .env

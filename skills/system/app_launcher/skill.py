@@ -47,11 +47,11 @@ class AppLauncherSkill(BaseSkill):
                 "close settings",
                 "shut down firefox",
                 "exit vs code",
-                "close that application",
+                "quit the program",
                 "kill the app",
             ],
             handler=self.close_app,
-            threshold=0.48,
+            threshold=0.55,
         )
 
         self.register_semantic_intent(
