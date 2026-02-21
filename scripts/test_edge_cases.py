@@ -31,11 +31,13 @@ import sys
 import time
 import json
 import argparse
+import subprocess
 import warnings
 from dataclasses import dataclass, field
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -974,6 +976,174 @@ TESTS += [
 
 
 # ===========================================================================
+# Process guard (block visual subprocess launches during tests)
+# ===========================================================================
+
+# Binaries that open visible windows/tabs — block even without start_new_session
+_VISUAL_BINARIES = {
+    'code', 'gnome-terminal', 'xterm', 'xdg-open',
+    'google-chrome-stable', 'brave-browser', 'firefox',
+}
+
+
+class _MockPopen:
+    """Minimal Popen stand-in for blocked subprocess calls."""
+    pid = 0
+    returncode = 0
+    stdout = None
+    stderr = None
+    args = []
+
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+    def communicate(self, *a, **kw): return (b'', b'')
+    def wait(self, *a, **kw): return 0
+    def poll(self): return 0
+    def kill(self): pass
+    def terminate(self): pass
+    def send_signal(self, sig): pass
+
+
+class ProcessGuard:
+    """Blocks visual subprocess launches during tests.
+
+    Two classes of artifact-creating Popen calls exist in JARVIS:
+    1. app_launcher / web_navigation — use start_new_session=True
+    2. developer_tools _display.py — use Popen without start_new_session
+       to open VS Code ('code') and gnome-terminal
+
+    This guard blocks BOTH: any Popen with start_new_session=True, and any
+    Popen whose command starts with a known visual binary (code,
+    gnome-terminal, browsers, etc.). Everything else passes through.
+    """
+
+    def __init__(self):
+        self._original_popen = subprocess.Popen
+        self.blocked = []
+        self._active = False
+
+    def start(self):
+        """Replace subprocess.Popen with guarded version."""
+        guard = self
+        OrigPopen = self._original_popen
+
+        def guarded_popen(*args, **kwargs):
+            if not guard._active:
+                return OrigPopen(*args, **kwargs)
+
+            cmd = args[0] if args else kwargs.get('args', ['?'])
+            if isinstance(cmd, (list, tuple)):
+                cmd_str = ' '.join(str(c) for c in cmd[:3])
+                first_bin = os.path.basename(str(cmd[0])) if cmd else ''
+            else:
+                cmd_str = str(cmd)[:60]
+                first_bin = os.path.basename(str(cmd).split()[0]) if cmd else ''
+
+            # Block: start_new_session=True OR known visual binary
+            if kwargs.get('start_new_session') or first_bin in _VISUAL_BINARIES:
+                guard.blocked.append(cmd_str)
+                return _MockPopen()
+
+            return OrigPopen(*args, **kwargs)
+
+        subprocess.Popen = guarded_popen
+        self._active = True
+
+    def stop(self):
+        """Restore original subprocess.Popen."""
+        self._active = False
+        subprocess.Popen = self._original_popen
+
+
+# ===========================================================================
+# Pre-test snapshot and post-test cleanup
+# ===========================================================================
+
+def snapshot_pre_state():
+    """Capture system state before tests for post-test cleanup."""
+    state = {}
+
+    # Snapshot share/ directory (file_editor sandbox)
+    share_dir = os.path.join(PROJECT_ROOT, "share")
+    if os.path.isdir(share_dir):
+        state["share_dir"] = share_dir
+        state["share_files"] = set(os.listdir(share_dir))
+
+    return state
+
+
+def cleanup_artifacts(pre_state, components, process_tracker,
+                      verbose=False, json_mode=False):
+    """Remove ALL artifacts created during test execution.
+
+    Cleans up:
+    - Spawned processes (browsers, terminals, apps launched by skill handlers)
+    - New files in share/ directory (file_editor sandbox)
+    - Pending state across all components (confirmations, forget flows, rundowns)
+    """
+    cleaned = []
+
+    # 1. Stop process guard and report blocked launches
+    if process_tracker:
+        process_tracker.stop()
+        for cmd in process_tracker.blocked:
+            cleaned.append(f"Blocked launch: {cmd}")
+
+    # 2. Remove new files from share/
+    share_dir = pre_state.get("share_dir")
+    if share_dir and os.path.isdir(share_dir):
+        current_files = set(os.listdir(share_dir))
+        new_files = current_files - pre_state.get("share_files", set())
+        new_files.discard(".gitkeep")
+        for f in sorted(new_files):
+            path = os.path.join(share_dir, f)
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                    cleaned.append(f"Removed share/{f}")
+            except OSError as e:
+                cleaned.append(f"Failed to remove share/{f}: {e}")
+
+    # 3. Reset all component state
+    if components:
+        skill_manager = components.get("skill_manager")
+        if skill_manager:
+            for sname, skill_obj in skill_manager.skills.items():
+                if hasattr(skill_obj, '_pending_confirmation') and skill_obj._pending_confirmation:
+                    skill_obj._pending_confirmation = None
+                    cleaned.append(f"Reset {sname}._pending_confirmation")
+
+        memory_manager = components.get("memory_manager")
+        if memory_manager and memory_manager._pending_forget:
+            memory_manager._pending_forget = None
+            cleaned.append("Reset memory_manager._pending_forget")
+
+        reminder_manager = components.get("reminder_manager")
+        if reminder_manager and reminder_manager._rundown_state:
+            reminder_manager._rundown_state = None
+            reminder_manager._rundown_cycle = 0
+            cleaned.append("Reset reminder_manager rundown state")
+
+        conv_state = components.get("conv_state")
+        if conv_state:
+            conv_state.conversation_active = False
+            conv_state.turn_count = 0
+            conv_state.jarvis_asked_question = False
+            conv_state.last_intent = ""
+
+    # 4. Report
+    if not json_mode and (verbose or cleaned):
+        if cleaned:
+            print(f"\n--- Cleanup: {len(cleaned)} artifact(s) removed ---")
+            for item in cleaned:
+                print(f"  {item}")
+        elif verbose:
+            print(f"\n--- Cleanup: no artifacts found ---")
+
+    return cleaned
+
+
+# ===========================================================================
 # CLI and main
 # ===========================================================================
 
@@ -1019,6 +1189,11 @@ def main():
     tiers_needed = set(t.tier for t in selected)
     components = None
 
+    # Snapshot pre-test state and block detached process launches
+    pre_state = snapshot_pre_state()
+    process_tracker = ProcessGuard()
+    process_tracker.start()
+
     # Load Tier 2 components if needed
     if 2 in tiers_needed:
         try:
@@ -1028,6 +1203,7 @@ def main():
             # Fall back to tier 1 only
             selected = [t for t in selected if t.tier == 1]
             if not selected:
+                process_tracker.stop()
                 return 1
 
     # Run tests
@@ -1069,6 +1245,10 @@ def main():
                     line += f"  → {last_detail[:60]}"
                 print(line)
 
+    # Cleanup artifacts created during testing
+    cleaned = cleanup_artifacts(pre_state, components, process_tracker,
+                                verbose=args.verbose, json_mode=args.json)
+
     # Summary
     if args.json:
         output = results.to_json()
@@ -1076,6 +1256,8 @@ def main():
             f"tier_{k}": {"passed": v[0], "failed": v[1]}
             for k, v in sorted(tier_counts.items())
         }
+        if cleaned:
+            output["cleanup"] = cleaned
         print(json.dumps(output, indent=2))
     else:
         print(f"\n{'=' * 65}")
