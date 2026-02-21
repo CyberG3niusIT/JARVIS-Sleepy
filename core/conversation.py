@@ -329,8 +329,8 @@ class ConversationManager:
         lines = []
         
         if include_system_prompt:
-            lines.append("You are JARVIS, a personal AI assistant.")
-            lines.append("You are helpful, professional, and concise.")
+            from core import persona
+            lines.append(persona.system_prompt_minimal())
             lines.append("")
         
         for msg in history:

@@ -19,7 +19,6 @@ import sys
 import re
 import time
 import json
-import random
 import asyncio
 import logging
 import argparse
@@ -44,7 +43,7 @@ from core.web_research import WebResearcher, format_search_results
 from core.skill_manager import SkillManager
 from core.reminder_manager import get_reminder_manager
 from core.news_manager import get_news_manager
-from core.honorific import get_honorific
+from core import persona
 from core.context_window import get_context_window
 from core.document_buffer import DocumentBuffer, BINARY_EXTENSIONS
 from core.speech_chunker import SpeechChunker
@@ -223,7 +222,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
         )
         if negative:
             reminder_manager.defer_rundown()
-            response = f"Very well, {get_honorific()}. Just say 'daily rundown' whenever you're ready."
+            response = persona.rundown_defer()
             skill_handled = True
         elif words & {"yes", "yeah", "yep", "sure", "go", "ready", "proceed"}:
             await asyncio.to_thread(reminder_manager.deliver_rundown)
@@ -235,11 +234,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
     # Priority 2: Reminder acknowledgment
     if not skill_handled and reminder_manager and reminder_manager.is_awaiting_ack():
         reminder_manager.acknowledge_last()
-        h = get_honorific()
-        response = random.choice([
-            f"Very good, {h}.", f"Noted, {h}.",
-            f"Of course, {h}.", f"Absolutely, {h}.",
-        ])
+        response = persona.pick("reminder_ack")
         skill_handled = True
 
     # Priority 2.5: Memory forget confirmation
@@ -266,10 +261,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
             response = await asyncio.to_thread(mm.handle_transparency, command, user_id)
             skill_handled = True
         elif mm.is_fact_request(command):
-            response = random.choice([
-                "Noted, sir.", "Very good, sir.", "Understood, sir.",
-                "I'll remember that, sir.", "Committed to memory, sir.",
-            ])
+            response = persona.pick("fact_stored")
             skill_handled = True
         elif mm.is_recall_query(command):
             recall_context = await asyncio.to_thread(mm.handle_recall, command, user_id)
@@ -308,7 +300,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
             import subprocess as _sp
             _sp.Popen([browser_cmd, url])
             news_manager.clear_last_read()
-            response = f"Pulling that up now, {get_honorific()}."
+            response = persona.pick("news_pullup")
             skill_handled = True
 
     # Priority 6: News continue

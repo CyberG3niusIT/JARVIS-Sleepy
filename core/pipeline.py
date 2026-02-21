@@ -17,7 +17,6 @@ import re
 import threading
 import time
 import logging
-import random
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
 from typing import Optional
@@ -25,7 +24,8 @@ from typing import Optional
 from core.events import Event, EventType, PipelineState
 from core.speech_chunker import SpeechChunker
 from core.logger import get_logger
-from core.honorific import get_honorific, set_honorific
+from core.honorific import set_honorific
+from core import persona
 from core.llm_router import ToolCallRequest
 from core.web_research import WebResearcher, format_search_results
 
@@ -701,7 +701,7 @@ class Coordinator:
             ])
             if negative:
                 self.reminder_manager.defer_rundown()
-                response = f"Very well, {get_honorific()}. Just say 'daily rundown' whenever you're ready."
+                response = persona.rundown_defer()
                 skill_handled = True
                 self._speak_and_wait(response)
             else:
@@ -713,11 +713,7 @@ class Coordinator:
         if not skill_handled and self.reminder_manager and self.reminder_manager.is_awaiting_ack():
             self.logger.info("Treating response as reminder acknowledgment")
             self.reminder_manager.acknowledge_last()
-            h = get_honorific()
-            response = random.choice([
-                f"Very good, {h}.", f"Noted, {h}.",
-                f"Of course, {h}.", f"Absolutely, {h}.",
-            ])
+            response = persona.pick("reminder_ack")
             skill_handled = True
             self._speak_and_wait(response)
 
@@ -741,14 +737,7 @@ class Coordinator:
         # Catches "no thanks", "that's all", "I'm good" etc. before they
         # leak to skill routing or LLM (which misreads them as commands).
         if not skill_handled and in_conversation and self._is_dismissal(command):
-            h = get_honorific()
-            response = random.choice([
-                f"Very good, {h}.",
-                f"Of course, {h}.",
-                f"As you wish, {h}.",
-                f"Understood, {h}.",
-                f"Very well, {h}.",
-            ])
+            response = persona.pick("dismissal")
             skill_handled = True
             self._speak_and_wait(response)
             self.listener.close_conversation_window()
@@ -795,12 +784,7 @@ class Coordinator:
 
             elif mm.is_fact_request(command):
                 # Fact already extracted by on_message() hook — just confirm
-                h = get_honorific()
-                response = random.choice([
-                    f"Noted, {h}.", f"Very good, {h}.", f"Understood, {h}.",
-                    f"I'll remember that, {h}.", f"Committed to memory, {h}.",
-                    f"Duly noted, {h}.", f"Of course, {h}.",
-                ])
+                response = persona.pick("fact_stored")
                 skill_handled = True
                 self.logger.info("Handled by memory fact request")
                 self._speak_and_wait(response)
@@ -851,12 +835,7 @@ class Coordinator:
                 import subprocess as _sp
                 _sp.Popen([browser_cmd, url])
                 self.news_manager.clear_last_read()
-                h = get_honorific()
-                response = random.choice([
-                    f"Right away, {h}.",
-                    f"Pulling that up now, {h}.",
-                    f"Opening that article for you, {h}.",
-                ])
+                response = persona.pick("news_pullup")
                 skill_handled = True
                 self._speak_and_wait(response)
 
@@ -964,18 +943,9 @@ class Coordinator:
         self.logger.info("Minimal greeting - just wake word")
         if self.reminder_manager and self.reminder_manager.has_rundown_mention():
             self.reminder_manager.clear_rundown_mention()
-            response = f"Good morning, {get_honorific()}. I have your daily rundown whenever you're ready."
+            response = persona.rundown_mention()
         else:
-            h = get_honorific()
-            responses = [
-                f"At your service, {h}.",
-                f"How may I assist you, {h}?",
-                f"You rang, {h}?",
-                f"I'm listening, {h}.",
-                f"Ready when you are, {h}.",
-                f"Standing by, {h}.",
-            ]
-            response = random.choice(responses)
+            response = persona.pick("greeting")
 
         self.conversation.add_message("user", "jarvis")
         if response:
@@ -1281,12 +1251,11 @@ class Coordinator:
                 self.logger.info(f"Research follow-up: fetching result {idx+1}: {url}")
                 print(f"📄 Fetching: {title}")
 
-                h = get_honorific()
-                self._speak_and_wait(f"Pulling up that article now, {h}.")
+                self._speak_and_wait(persona.pick("news_pullup"))
 
                 content = self.web_researcher.fetch_page(url, max_chars=4000)
                 if not content:
-                    return f"I'm sorry, {h}, I wasn't able to retrieve that page."
+                    return persona.research_page_fail()
 
                 # Feed to LLM for synthesis
                 history = self.conversation.format_history_for_llm(
@@ -1315,21 +1284,11 @@ class Coordinator:
             self.logger.info(f"Research follow-up (generic): fetching {url}")
             print(f"📄 Fetching: {title}")
 
-            h = get_honorific()
-            follow_up_acks = [
-                f"Pulling up more info, {h}, please give me a moment.",
-                f"I'll dig up a bit more for you, {h}, give me a moment.",
-                f"Let me see what else I can find, {h}, one moment.",
-                f"I'll see what else I can find on it, {h}, one moment.",
-                f"I'll check to see what else there is on that, {h}, one moment.",
-                f"Let me look, {h}, I'll see what else I can find, one moment.",
-                f"Let me look into that, {h}, please give me a moment.",
-            ]
-            self._speak_and_wait(random.choice(follow_up_acks))
+            self._speak_and_wait(persona.pick("research_followup"))
 
             content = self.web_researcher.fetch_page(url, max_chars=4000)
             if not content:
-                return f"I'm sorry, {h}, I wasn't able to retrieve that page."
+                return persona.research_page_fail()
 
             history = self.conversation.format_history_for_llm(
                 include_system_prompt=False

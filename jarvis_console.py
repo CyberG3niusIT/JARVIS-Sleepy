@@ -18,7 +18,6 @@ os.environ['ROCM_PATH'] = '/opt/rocm-7.2.0'
 
 import sys
 import time
-import random
 import argparse
 import threading
 import warnings
@@ -52,7 +51,7 @@ from core.web_research import WebResearcher, format_search_results
 from core.skill_manager import SkillManager
 from core.reminder_manager import get_reminder_manager
 from core.news_manager import get_news_manager
-from core.honorific import get_honorific
+from core import persona
 from core.speech_chunker import SpeechChunker
 from core.context_window import get_context_window, estimate_tokens, TOKEN_RATIO
 from core.document_buffer import DocumentBuffer, BINARY_EXTENSIONS
@@ -845,7 +844,7 @@ def run_console(config, mode):
                 )
                 if negative:
                     reminder_manager.defer_rundown()
-                    response = f"Very well, {get_honorific()}. Just say 'daily rundown' whenever you're ready."
+                    response = persona.rundown_defer()
                     skill_handled = True
                 else:
                     reminder_manager.deliver_rundown()
@@ -855,13 +854,7 @@ def run_console(config, mode):
             # Priority 2: Reminder acknowledgment
             if not skill_handled and reminder_manager and reminder_manager.is_awaiting_ack():
                 reminder_manager.acknowledge_last()
-                h = get_honorific()
-                response = random.choice([
-                    f"Very good, {h}.",
-                    f"Noted, {h}.",
-                    f"Of course, {h}.",
-                    f"Absolutely, {h}.",
-                ])
+                response = persona.pick("reminder_ack")
                 skill_handled = True
 
             # Priority 2.5: Memory forget confirmation/cancellation (must intercept before skill routing)
@@ -890,12 +883,7 @@ def run_console(config, mode):
                     skill_handled = True
                 elif mm.is_fact_request(command):
                     # Fact already extracted by on_message() hook — just confirm
-                    import random
-                    response = random.choice([
-                        "Noted, sir.", "Very good, sir.", "Understood, sir.",
-                        "I'll remember that, sir.", "Committed to memory, sir.",
-                        "Duly noted, sir.", "Of course, sir.",
-                    ])
+                    response = persona.pick("fact_stored")
                     skill_handled = True
 
                 elif mm.is_recall_query(command):
@@ -924,7 +912,7 @@ def run_console(config, mode):
                     import subprocess as _sp
                     _sp.Popen([browser_cmd, url])
                     news_manager.clear_last_read()
-                    response = f"Pulling that up now, {get_honorific()}."
+                    response = persona.pick("news_pullup")
                     skill_handled = True
 
             # Priority 4: Skill routing

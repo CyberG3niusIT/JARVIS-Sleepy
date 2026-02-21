@@ -173,12 +173,8 @@ class TextToSpeech:
 
     def _build_ack_cache(self):
         """Pre-synthesize short phrases as raw PCM for instant playback."""
-        phrases = [
-            "One moment.",
-            "Just a moment.",
-            "Give me just a moment.",
-            "One second.",
-        ]
+        from core import persona
+        phrases = persona.pool("ack_cache")
         t0 = time.time()
         for phrase in phrases:
             try:
