@@ -7,6 +7,46 @@
 
 ---
 
+## Automated Test Suite
+
+The automated test harness (`scripts/test_edge_cases.py`) validates routing and unit-level behavior
+by injecting text directly into the pipeline — no voice/mic/TTS needed.
+
+**Current results: 122/122 (100%) — Tier 1: 39/39 | Tier 2: 83/83**
+
+### Quick Reference
+
+```bash
+python3 scripts/test_edge_cases.py              # Tiers 1+2 (default)
+python3 scripts/test_edge_cases.py --tier 1     # Unit tests only (<1s)
+python3 scripts/test_edge_cases.py --tier 2     # Routing tests only (~5s load)
+python3 scripts/test_edge_cases.py --phase 1A   # Single phase
+python3 scripts/test_edge_cases.py --id 1A-01   # Single test
+python3 scripts/test_edge_cases.py --verbose     # Show all tests (not just failures)
+python3 scripts/test_edge_cases.py --json        # JSON output
+```
+
+### Tiers
+
+| Tier | Scope | Tests | Load Time | Description |
+|------|-------|-------|-----------|-------------|
+| 1 | Unit | 39 | <1s | Ambient filter (13), noise filter (7), TTS normalizer (14), speech chunker (5) |
+| 2 | Routing | 83 | ~5s | Intent routing (40), priority chain/state machines (18), skill validation (23), priority ordering (2) |
+| 3 | Execution | — | Future | Run skill handlers, validate response content |
+| 4 | Pipeline | — | Future | Full pipeline with LLM server running |
+
+### Production Bug Found
+
+The automated suite uncovered a **crash bug** in `skill_manager.py:execute_intent()`:
+developer_tools uses a 2-tuple `(command, expiry)` for `_pending_confirmation` while
+`execute_intent()` assumed all skills use file_editor's 3-tuple `(action, detail, expiry)`.
+When developer_tools ran a handler that set a 2-tuple confirmation, the next call to
+`execute_intent()` crashed with `ValueError: not enough values to unpack (expected 3, got 2)`.
+**Fixed:** Added tuple-length guard at line 472 — only processes 3-tuple confirmations via the
+centralized path; skills with other formats handle confirmations internally.
+
+---
+
 ## Phase 1: Intent Routing Stress Test
 
 The routing system (4 layers + priority chain) is the most historically buggy area. These tests probe ambiguous commands, keyword conflicts, and layer transitions.

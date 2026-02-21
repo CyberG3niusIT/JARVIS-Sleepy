@@ -469,7 +469,9 @@ class SkillManager:
         # Must run before routing — "yes, please delete it" would otherwise match delete_file
         for skill_name, skill in self.skills.items():
             pending = getattr(skill, '_pending_confirmation', None)
-            if pending:
+            # Only handle 3-tuple confirmations (action, detail, expiry) via centralized path.
+            # Skills with other formats (e.g. developer_tools 2-tuple) handle confirmations internally.
+            if pending and isinstance(pending, tuple) and len(pending) == 3:
                 action, detail, expiry = pending
                 import time as _time
                 if _time.time() <= expiry:
