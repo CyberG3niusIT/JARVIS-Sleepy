@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""
+Standalone test for ConversationRouter — Phase 3 of conversational flow refactor.
+
+Loads real JARVIS components and runs commands through the router,
+asserting on RouteResult fields. Tests priority chain ordering,
+skill routing, dismissals, bare ack filtering, memory ops, and LLM fallback.
+
+Usage:
+    python3 scripts/test_router.py
+"""
+
+import os
+os.environ['HSA_OVERRIDE_GFX_VERSION'] = '11.0.0'
+os.environ['ROCM_PATH'] = '/opt/rocm-7.2.0'
+os.environ['JARVIS_LOG_FILE_ONLY'] = '1'
+
+import sys
+import time
+import warnings
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+
+# ---------------------------------------------------------------------------
+# Minimal TTS stub
+# ---------------------------------------------------------------------------
+
+class TTSStub:
+    """No-op TTS for testing — skills may call tts.speak()."""
+    _spoke = False
+
+    def speak(self, text, normalize=True):
+        self._spoke = True
+        return True
+
+    def get_pending_announcements(self):
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+_total_passed = 0
+_total_failed = 0
+
+
+def check(label, condition, detail=""):
+    """Print PASS/FAIL and update global counters."""
+    global _total_passed, _total_failed
+    if condition:
+        print(f"  [PASS] {label}")
+        _total_passed += 1
+    else:
+        msg = f"  [FAIL] {label}"
+        if detail:
+            msg += f"  ({detail})"
+        print(msg)
+        _total_failed += 1
+    return condition
+
+
+def section(title):
+    print(f"\n--- {title} ---")
+
+
+# ---------------------------------------------------------------------------
+# Component initialization (one-time, ~5s)
+# ---------------------------------------------------------------------------
+
+def init_components():
+    """Load real JARVIS components for testing."""
+    from core.config import load_config
+    from core.conversation import ConversationManager
+    from core.llm_router import LLMRouter
+    from core.skill_manager import SkillManager
+    from core.responses import get_response_library
+    from core.conversation_state import ConversationState
+    from core.conversation_router import ConversationRouter
+
+    print("Loading components...")
+    t0 = time.perf_counter()
+
+    config = load_config()
+    tts = TTSStub()
+    conversation = ConversationManager(config)
+    conversation.current_user = "user"
+    responses = get_response_library()
+    llm = LLMRouter(config)
+    skill_manager = SkillManager(config, conversation, tts, responses, llm)
+    skill_manager.load_all_skills()
+
+    # Reminder manager
+    reminder_manager = None
+    if config.get("reminders.enabled", True):
+        from core.reminder_manager import get_reminder_manager
+        reminder_manager = get_reminder_manager(config, tts, conversation)
+        reminder_manager.set_ack_window_callback(lambda rid: None)
+        reminder_manager.set_window_callback(lambda d: None)
+        reminder_manager.set_listener_callbacks(pause=lambda: None, resume=lambda: None)
+
+    # Memory manager
+    memory_manager = None
+    if config.get("conversational_memory.enabled", False):
+        from core.memory_manager import get_memory_manager
+        memory_manager = get_memory_manager(
+            config=config,
+            conversation=conversation,
+            embedding_model=skill_manager._embedding_model,
+        )
+        conversation.set_memory_manager(memory_manager)
+
+    # News manager
+    news_manager = None
+    if config.get("news.enabled", False):
+        from core.news_manager import get_news_manager
+        news_manager = get_news_manager(config, tts, conversation, llm)
+        news_manager.set_listener_callbacks(pause=lambda: None, resume=lambda: None)
+        news_manager.set_window_callback(lambda d: None)
+
+    # Context window
+    context_window = None
+    if config.get("context_window.enabled", False):
+        from core.context_window import get_context_window
+        context_window = get_context_window(
+            config=config,
+            embedding_model=skill_manager._embedding_model,
+            llm=llm,
+        )
+        conversation.set_context_window(context_window)
+
+    # Web researcher
+    web_researcher = None
+    if config.get("llm.local.tool_calling", False):
+        from core.web_research import WebResearcher
+        web_researcher = WebResearcher(config)
+
+    conv_state = ConversationState()
+    router = ConversationRouter(
+        skill_manager=skill_manager,
+        conversation=conversation,
+        llm=llm,
+        reminder_manager=reminder_manager,
+        memory_manager=memory_manager,
+        news_manager=news_manager,
+        context_window=context_window,
+        conv_state=conv_state,
+        config=config,
+        web_researcher=web_researcher,
+    )
+
+    elapsed = time.perf_counter() - t0
+    skill_count = len(skill_manager.skills)
+    print(f"Ready — {skill_count} skills loaded in {elapsed:.1f}s\n")
+
+    return router, conv_state, memory_manager, reminder_manager, news_manager
+
+
+# ---------------------------------------------------------------------------
+# Test categories
+# ---------------------------------------------------------------------------
+
+def test_greetings(router):
+    section("Greetings")
+
+    r = router.route("jarvis_only")
+    check("jarvis_only → greeting", r.handled and r.intent == "greeting" and r.source == "canned")
+    check("  opens 8s window", r.open_window == 8.0)
+    check("  has text", len(r.text) > 0, f"text={r.text!r}")
+
+    r = router.route("hi")
+    check("'hi' (2 chars) → greeting", r.handled and r.intent == "greeting")
+
+    r = router.route("a")
+    check("'a' (1 char) → greeting", r.handled and r.intent == "greeting")
+
+
+def test_dismissals(router):
+    section("Dismissals (in_conversation=True)")
+
+    for phrase in ["no thanks", "that's all", "i'm good", "nevermind", "maybe later"]:
+        r = router.route(phrase, in_conversation=True)
+        check(f"'{phrase}' → dismissal",
+              r.handled and r.intent == "dismissal" and r.close_window,
+              f"handled={r.handled}, intent={r.intent}, close={r.close_window}")
+
+    # Courtesy suffix stripping
+    r = router.route("no, that's all, thank you", in_conversation=True)
+    check("'no, that's all, thank you' → dismissal",
+          r.handled and r.intent == "dismissal")
+
+    # Should NOT dismiss outside conversation window
+    r = router.route("no thanks", in_conversation=False)
+    check("'no thanks' outside conversation → NOT dismissal",
+          r.intent != "dismissal",
+          f"intent={r.intent}")
+
+
+def test_bare_ack_filter(router, conv_state):
+    section("Bare Ack Filter (in_conversation=True)")
+
+    # Reset state
+    conv_state.jarvis_asked_question = False
+
+    for word in ["yeah", "okay", "sure", "hmm", "yep"]:
+        r = router.route(word, in_conversation=True)
+        check(f"'{word}' → skip (noise)",
+              r.skip,
+              f"skip={r.skip}, handled={r.handled}, intent={r.intent}")
+
+    # When JARVIS asked a question, bare acks should pass through
+    conv_state.jarvis_asked_question = True
+    r = router.route("yeah", in_conversation=True)
+    check("'yeah' with jarvis_asked_question=True → NOT skip",
+          not r.skip,
+          f"skip={r.skip}")
+    conv_state.jarvis_asked_question = False
+
+    # Non-bare-ack should never skip
+    r = router.route("tell me about python", in_conversation=True)
+    check("'tell me about python' → NOT skip", not r.skip)
+
+    # Outside conversation, bare acks should route normally
+    r = router.route("yeah", in_conversation=False)
+    check("'yeah' outside conversation → NOT skip", not r.skip)
+
+
+def test_skill_routing(router):
+    section("Skill Routing")
+
+    tests = [
+        ("what time is it", "time_info"),
+        ("what's the weather", "weather"),
+        ("how are you", "conversation"),
+        ("how are you feeling this morning", "conversation"),
+        ("thank you", "conversation"),
+        ("goodbye", "conversation"),
+    ]
+    for cmd, expected_skill in tests:
+        r = router.route(cmd)
+        skill_name = r.match_info.get("skill_name", "") if r.match_info else ""
+        check(f"'{cmd}' → {expected_skill}",
+              r.handled and r.source == "skill" and expected_skill in skill_name.lower(),
+              f"handled={r.handled}, source={r.source}, skill={skill_name}")
+
+
+def test_memory_ops(router, memory_manager):
+    section("Memory Operations")
+
+    if not memory_manager:
+        print("  [SKIP] Memory manager not available")
+        return
+
+    # Transparency request
+    r = router.route("what do you know about me")
+    check("'what do you know about me' → memory_transparency",
+          r.handled and r.intent == "memory_transparency",
+          f"intent={r.intent}")
+
+    # Fact store (explicit "remember" phrasing)
+    r = router.route("remember that my favorite color is blue")
+    check("'remember that...' → fact_stored",
+          r.handled and r.intent == "fact_stored",
+          f"intent={r.intent}")
+
+
+def test_forget_confirmation(router, memory_manager, conv_state):
+    section("Forget Confirmation (P2.5)")
+
+    if not memory_manager:
+        print("  [SKIP] Memory manager not available")
+        return
+
+    # Simulate pending forget state
+    original_pending = memory_manager._pending_forget
+    # Build a realistic _pending_forget with a fake fact that won't exist in DB
+    fake_pending = {
+        "facts": [{"fact_id": -1, "content": "test fact"}],
+        "user_id": "test",
+        "expires": time.time() + 300,
+    }
+    memory_manager._pending_forget = fake_pending.copy()
+
+    try:
+        r = router.route("yes")
+        check("'yes' with pending forget → forget_confirm",
+              r.handled and r.intent == "forget_confirm",
+              f"intent={r.intent}")
+    except Exception as e:
+        check("'yes' with pending forget → forget_confirm", False, f"crashed: {e}")
+
+    # Reset and test cancel
+    memory_manager._pending_forget = fake_pending.copy()
+    r = router.route("no")
+    check("'no' with pending forget → forget_cancel",
+          r.handled and r.intent == "forget_cancel",
+          f"intent={r.intent}")
+
+    # Restore
+    memory_manager._pending_forget = original_pending
+
+
+def test_priority_ordering(router, memory_manager, conv_state):
+    section("Priority Ordering")
+
+    if not memory_manager:
+        print("  [SKIP] Memory manager not available")
+        return
+
+    # P2.5 (forget confirm) should beat P2.8 (bare ack filter)
+    original_pending = memory_manager._pending_forget
+    memory_manager._pending_forget = {
+        "facts": [{"fact_id": -1, "content": "test"}],
+        "user_id": "test",
+        "expires": time.time() + 300,
+    }
+    conv_state.jarvis_asked_question = False
+
+    r = router.route("yes", in_conversation=True)
+    check("P2.5 beats P2.8: 'yes' with pending forget → forget_confirm (not bare ack skip)",
+          r.handled and r.intent == "forget_confirm" and not r.skip,
+          f"intent={r.intent}, skip={r.skip}")
+
+    memory_manager._pending_forget = original_pending
+
+    # P2.7 (dismissal) should beat P4 (skill routing)
+    # "no" could match conversation skill, but should dismiss in conversation
+    r = router.route("no thanks", in_conversation=True)
+    check("P2.7 beats P4: 'no thanks' in conversation → dismissal (not skill)",
+          r.intent == "dismissal" and r.source == "canned",
+          f"intent={r.intent}, source={r.source}")
+
+
+def test_llm_fallback(router):
+    section("LLM Fallback")
+
+    r = router.route("explain quantum entanglement in simple terms")
+    check("unhandled query → LLM fallback",
+          not r.handled and r.llm_command != "",
+          f"handled={r.handled}")
+    check("  has llm_command",
+          "quantum" in r.llm_command.lower(),
+          f"llm_command={r.llm_command[:50]!r}")
+    check("  has llm_history (string)",
+          isinstance(r.llm_history, str))
+
+    # Document buffer test
+    from core.document_buffer import DocumentBuffer
+    doc = DocumentBuffer()
+    doc.load("This is a test document about Python decorators.", "test")
+
+    r = router.route("summarize this document", doc_buffer=doc)
+    check("with doc_buffer → llm_max_tokens=600",
+          r.llm_max_tokens == 600,
+          f"max_tokens={r.llm_max_tokens}")
+    check("  doc_buffer skips skill routing → LLM fallback",
+          not r.handled,
+          f"handled={r.handled}")
+
+    doc.clear()
+
+
+def test_news_continuation(router, news_manager):
+    section("News Continuation")
+
+    if not news_manager:
+        print("  [SKIP] News manager not available")
+        return
+
+    remaining = news_manager.get_unread_count()
+    total_unread = sum(remaining.values()) if remaining else 0
+
+    # News continuation phrases may be caught by the news skill at P4
+    # (keyword "headlines") OR by P5 news continuation handler. Either
+    # way, the command should be handled and produce a response.
+    if total_unread == 0:
+        r = router.route("read more")
+        check("'read more' with no unread → falls through to LLM or skill",
+              not (r.intent == "news_continue"),
+              f"intent={r.intent}")
+    else:
+        # "read more" should be handled by either news skill (P4) or P5
+        r = router.route("read more")
+        check("'read more' with unread → handled (skill or news_continue)",
+              r.handled,
+              f"handled={r.handled}, intent={r.intent}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    print("=" * 60)
+    print("  ConversationRouter Test Suite")
+    print("=" * 60)
+
+    router, conv_state, memory_manager, reminder_manager, news_manager = init_components()
+
+    test_greetings(router)
+    test_dismissals(router)
+    test_bare_ack_filter(router, conv_state)
+    test_skill_routing(router)
+    test_memory_ops(router, memory_manager)
+    test_forget_confirmation(router, memory_manager, conv_state)
+    test_priority_ordering(router, memory_manager, conv_state)
+    test_llm_fallback(router)
+    test_news_continuation(router, news_manager)
+
+    # Summary
+    total = _total_passed + _total_failed
+    print(f"\n{'=' * 60}")
+    print(f"  SUMMARY: {_total_passed} passed, {_total_failed} failed out of {total}")
+    print(f"{'=' * 60}")
+
+    return 0 if _total_failed == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

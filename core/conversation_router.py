@@ -138,10 +138,6 @@ class ConversationRouter:
         Returns:
             RouteResult with response text, metadata, and side-effect signals.
         """
-        # --- Minimal greeting ---
-        if command.strip() == "jarvis_only" or len(command.strip()) <= 2:
-            return self._route_greeting()
-
         # --- Priority 1: Rundown acceptance ---
         result = self._handle_rundown(command)
         if result:
@@ -156,6 +152,10 @@ class ConversationRouter:
         result = self._handle_forget_confirm(command)
         if result:
             return result
+
+        # --- Minimal greeting (after pending-state priorities) ---
+        if command.strip() == "jarvis_only" or len(command.strip()) <= 2:
+            return self._route_greeting()
 
         # --- Priority 2.7: Dismissal (conversation window only) ---
         if in_conversation:
