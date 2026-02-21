@@ -250,7 +250,7 @@ def _do_web_search(query, web_researcher, llm, console):
     ]
 
     full_response = ""
-    console.print("[bold cyan]JARVIS:[/bold cyan] ", end="")
+    console.print("[bold cyan]J.A.R.V.I.S.:[/bold cyan] ", end="")
     for token in llm.continue_after_tool_call(forced_call, tool_result):
         full_response += token
         sys.stdout.write(token)
@@ -273,7 +273,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
     use_tools = llm.tool_calling and web_researcher
 
     # Print prefix for typewriter output
-    console.print("[bold cyan]JARVIS:[/bold cyan] ", end="")
+    console.print("[bold cyan]J.A.R.V.I.S.:[/bold cyan] ", end="")
 
     try:
         # Choose tool-aware or plain streaming
@@ -344,7 +344,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
                 tool_result = f"Unknown tool: {tool_call_request.name}"
 
             # Stream synthesized answer
-            console.print("[bold cyan]JARVIS:[/bold cyan] ", end="")
+            console.print("[bold cyan]J.A.R.V.I.S.:[/bold cyan] ", end="")
             for token in llm.continue_after_tool_call(
                 tool_call_request, tool_result
             ):
@@ -762,7 +762,7 @@ def run_console(config, mode):
     )
 
     console.print(Panel(
-        f"[bold]JARVIS Console[/bold] — {mode} mode\n"
+        f"[bold]J.A.R.V.I.S. Console[/bold] — {mode} mode\n"
         f"Type commands directly. Type [bold]quit[/bold] to exit.\n"
         f"Slash commands: /paste /file /clipboard /context /clear /help",
         border_style="cyan"
@@ -897,7 +897,7 @@ def run_console(config, mode):
 
             # Display response (skip if LLM streaming already printed it)
             if response and not llm_streamed:
-                console.print(f"\n[bold cyan]JARVIS:[/bold cyan] {response}\n")
+                console.print(f"\n[bold cyan]J.A.R.V.I.S.:[/bold cyan] {response}\n")
 
             # Speak in hybrid mode — skip if skill already spoke or LLM streaming handled it
             if mode == "hybrid" and real_tts and response and not skill_already_spoke and not llm_streamed:
@@ -931,7 +931,7 @@ def run_console(config, mode):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="JARVIS Console — Keyboard interaction mode")
+    parser = argparse.ArgumentParser(description="J.A.R.V.I.S. Console — Keyboard interaction mode")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--text", action="store_true", default=True, help="Text mode (default)")
     group.add_argument("--speech", action="store_true", help="Launch voice mode")

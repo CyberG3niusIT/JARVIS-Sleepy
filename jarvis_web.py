@@ -956,7 +956,7 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer)
     elif cmd == '/help':
         await ws.send_json({
             'type': 'info',
-            'content': "JARVIS Web UI — type naturally to interact. "
+            'content': "J.A.R.V.I.S. Web UI — type naturally to interact. "
                        "Use the toolbar buttons for paste, clear, file, clipboard, and help.",
         })
 
@@ -1430,7 +1430,7 @@ async def on_shutdown(app):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="JARVIS Web UI")
+    parser = argparse.ArgumentParser(description="J.A.R.V.I.S. Web UI")
     parser.add_argument("--port", type=int, default=None, help="Port to listen on")
     parser.add_argument("--host", default=None, help="Host to bind to")
     parser.add_argument("--voice", action="store_true", help="Start with voice enabled")
@@ -1458,7 +1458,7 @@ def main():
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
-    print(f"\n  JARVIS Web UI → http://{host}:{port}\n")
+    print(f"\n  J.A.R.V.I.S. Web UI → http://{host}:{port}\n")
     web.run_app(app, host=host, port=port, print=None)
 
 

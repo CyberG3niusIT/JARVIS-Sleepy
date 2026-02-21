@@ -445,7 +445,7 @@
     const LAYER_TITLES = {
         bare_metal: 'Layer 1 — Bare Metal',
         services: 'Layer 2 — Services & Processes',
-        internals: 'Layer 3 — JARVIS Internals',
+        internals: 'Layer 3 — J.A.R.V.I.S. Internals',
         data_stores: 'Layer 4 — Data Stores',
         self_assessment: 'Layer 5 — Self-Assessment',
     };
@@ -651,7 +651,7 @@
     });
 
     btnRestart.addEventListener('click', function () {
-        if (!confirm('Restart JARVIS server?')) return;
+        if (!confirm('Restart J.A.R.V.I.S. server?')) return;
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'restart' }));
         }
