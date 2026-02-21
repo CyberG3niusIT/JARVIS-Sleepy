@@ -1,9 +1,9 @@
 # Whisper Voice Training Guide - Custom Accent Model
 
-> **Status (Feb 17):** Initial training complete and deployed (Feb 12). Model runs via CTranslate2 on GPU (0.1-0.2s). Retraining scheduled Feb 21 using log analysis from Feb 14-21 to expand the dataset. The `venv-tts` environment referenced below is broken (CUDA build, won't work on AMD GPU) — use system Python 3.12 for any future training work.
+> **Status (Feb 21):** Second training complete and deployed. 198 phrases recorded with FIFINE K669B USB condenser mic. GPU training (fp16, 89 seconds). Live voice testing: **17/18 phrases correct (94.4% phrase accuracy)**. Wake word 100%, "what's" contractions 100%, cybersecurity jargon 100%. Only miss: "how's" → "house" (contraction gap in training data). Model runs via CTranslate2 on GPU (0.1-0.2s latency).
 
 ## Overview
-This guide documents the complete process for training a custom Whisper model on your Southern accent, achieving 88%+ accuracy (2-12% WER).
+This guide documents the complete process for training a custom Whisper model on your Southern accent, achieving 94%+ accuracy.
 
 ---
 
@@ -29,7 +29,7 @@ This guide documents the complete process for training a custom Whisper model on
 
 **1. Create Training Phrases File**
 
-Location: `/mnt/models/voice_training/training_phrases.txt`
+Location: `/mnt/jarvis-models/voice_training/training_phrases.txt`
 
 Include 150+ phrases covering:
 - Wake word variations (Jarvis, Hey Jarvis, etc.)
@@ -65,13 +65,13 @@ done < training_phrases.txt
 **Recording specs:**
 - Format: S16_LE (16-bit signed integer)
 - Sample rate: 16000 Hz
-- Channels: 2 (stereo)
+- Channels: 1 (mono — matches production STT pipeline)
 - Duration: 5 seconds per phrase
-- **DO NOT trim after recording** - 5 seconds is correct length
+- Trim first 0.1s (1600 samples) to remove mic activation click
 
 **3. Record All Phrases**
 
-Time required: 45-60 minutes for 150 phrases
+Time required: 45-60 minutes for 200 phrases
 
 Tips:
 - Quiet environment
@@ -121,24 +121,15 @@ Expected output: `Created metadata for 150 files`
 
 ---
 
-### Phase 3: Model Training (15-20 minutes)
+### Phase 3: Model Training (~90 seconds on GPU)
 
-**1. Activate Virtual Environment**
-```bash
-cd ~/jarvis
-source venv-tts/bin/activate
-```
+**1. Use System Python 3.12** (NOT venv-tts — that's broken/unused)
 
-**Critical versions:**
-- transformers==4.36.0 (NOT 4.41.0!)
-- torch==2.10.0
-- datasets==4.5.0
-- numpy==1.26.4 (NOT 2.x!)
-- fsspec==2024.6.1
+**Key packages:** `transformers`, `datasets`, `torch` (2.10.0+rocm7.1), `accelerate`, `evaluate`
 
 **2. Training Script Configuration**
 
-Key settings:
+Key settings in `train_whisper.py`:
 ```python
 # Force English-only (prevents Welsh hallucination!)
 processor = WhisperProcessor.from_pretrained(
@@ -146,43 +137,40 @@ processor = WhisperProcessor.from_pretrained(
     language="english",
     task="transcribe"
 )
-model.config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-    language="en",
-    task="transcribe"
-)
 
-# Training arguments
+# Training arguments — GPU-accelerated
 Seq2SeqTrainingArguments(
     output_dir="./whisper_finetuned",
-    per_device_train_batch_size=4,
+    per_device_train_batch_size=8,   # 8 on GPU, 4 on CPU
     gradient_accumulation_steps=2,
     learning_rate=1e-5,
     warmup_steps=50,
     num_train_epochs=10,
-    fp16=False,  # CPU training (AMD GPU not CUDA)
-    dataloader_num_workers=12,  # Use all cores
+    fp16=True,                       # GPU fp16 (auto-detected)
+    dataloader_num_workers=12,
+    load_best_model_at_end=True,
+    metric_for_best_model="wer",
 )
-
-# Dataset split
-train_test_split(test_size=0.1)  # 90% train, 10% test
 ```
 
-**3. Run Training**
+**3. Run Training (End-to-End Pipeline)**
 ```bash
-cd /mnt/models/voice_training
-python3 train_whisper.py
+cd /mnt/jarvis-models/voice_training
+./retrain.sh              # Full: stop services → train → convert → restart
+./retrain.sh --skip-stop  # If services already stopped
 ```
 
-**Expected timeline:**
-- Epoch 1: WER ~50%
-- Epoch 5: WER ~7%
-- Epoch 10: WER 2-12% (88-98% accuracy)
+**Expected timeline (GPU fp16):**
+- Epoch 1: WER ~37%
+- Epoch 4: WER ~15%
+- Epoch 6-10: WER ~12% (plateaus)
+- Total training time: ~90 seconds on RX 7900 XT
 
 **Training output:**
 ```
-Train: 135 samples
-Test: 15 samples
-Training time: ~15-20 minutes
+Train: 178 samples (90%)
+Test: 20 samples (10%)
+Training time: 89 seconds (GPU fp16)
 Final model: whisper_finetuned/final/
 ```
 
@@ -229,7 +217,7 @@ vi config.yaml
 # Enable fine-tuned model
 stt_finetuned:
   enabled: true
-  model_path: /mnt/models/voice_training/whisper_finetuned/final
+  model_path: /mnt/jarvis-models/voice_training/whisper_finetuned/final
 
 # Restart JARVIS
 restartjarvis
@@ -273,13 +261,12 @@ model.config.forced_decoder_ids = processor.get_decoder_prompt_ids(
 ### Issue: High WER (>20%)
 
 **Possible causes:**
-1. Wrong library versions (especially transformers 4.41 vs 4.36)
-2. Not using venv-tts
-3. Multilingual mode enabled
-4. Poor audio quality
-5. Inconsistent recording environment
+1. Multilingual mode enabled (most common)
+2. Poor audio quality or wrong channel count
+3. Inconsistent recording environment
+4. Too few training samples
 
-**Solution:** Verify all versions, use venv-tts, force English-only
+**Solution:** Force English-only, use mono audio, increase dataset size
 
 ---
 
@@ -302,13 +289,15 @@ pip install --force-reinstall numpy==1.26.4 pandas
 
 ---
 
-### Issue: Audio Too Short After Trimming
+### Issue: Mic Activation Click/Pop
 
-**Symptom:** Model performs poorly with 4.7s clips
+**Symptom:** Soft click at start of each recording from FIFINE K669B mic activation
 
-**Reality:** 4.7s clips work fine! The issue was elsewhere (likely multilingual mode)
-
-**Conclusion:** DO NOT trim keypress pops. Record directly at 5 seconds.
+**Solution:** Trim first 0.1s (1600 samples at 16kHz) from all recordings after the recording session:
+```python
+import wave
+# Read WAV, skip first 1600 frames, write back
+```
 
 ---
 
@@ -316,43 +305,41 @@ pip install --force-reinstall numpy==1.26.4 pandas
 
 **Critical files to backup:**
 
-1. **Training data** (~750MB):
-   - `/mnt/models/voice_training/audio/` (150 WAV files)
-   - `/mnt/models/voice_training/transcripts/` (150 TXT files)
-   - `/mnt/models/voice_training/training_phrases.txt`
+1. **Training data** (~1GB):
+   - `/mnt/jarvis-models/voice_training/audio/` (198 WAV files)
+   - `/mnt/jarvis-models/voice_training/transcripts/` (198 TXT files)
+   - `/mnt/jarvis-models/voice_training/training_phrases.txt`
 
-2. **Trained model (HuggingFace source)** (~290MB):
-   - `/mnt/models/voice_training/whisper_finetuned/final/`
+2. **Old mic recordings** (historical):
+   - `/mnt/jarvis-models/voice_training/audio_backup_old_mic/` (150 WAV files from webcam mic)
+   - `/mnt/jarvis-models/voice_training/transcripts_backup_old_mic/`
 
-3. **Production model (CTranslate2 GPU-optimized)** (~73MB):
-   - `/mnt/models/voice_training/whisper_finetuned_ct2/`
-   - This is what JARVIS actually loads at runtime (converted from final/ for GPU inference)
+3. **Trained model (HuggingFace source)** (~290MB):
+   - `/mnt/jarvis-models/voice_training/whisper_finetuned/final/`
 
-4. **Backup locations:**
+4. **Production model (CTranslate2 GPU-optimized)** (~143MB):
+   - `/mnt/jarvis-models/voice_training/whisper_finetuned_ct2/`
+   - This is what JARVIS actually loads at runtime (float16 quantization)
+
+5. **Backup locations:**
    - Primary: Local system backup
-   - Secondary: `/mnt/storage/whisper_finetuned_backup/`
-   - Tertiary: `/mnt/models/whisper_finetuned_backup/`
-
-**Backup command:**
-```bash
-rsync -av /mnt/models/voice_training/whisper_finetuned/ \
-  /mnt/storage/whisper_finetuned_backup/
-```
+   - Secondary: `/mnt/jarvis-storage/whisper_finetuned_backup/`
+   - Tertiary: `/mnt/jarvis-models/whisper_finetuned_backup/`
 
 ---
 
 ## Performance Expectations
 
-**Training metrics:**
-- Train time: 15-20 minutes (CPU)
-- Final WER: 2-12%
-- Accuracy: 88-98%
-- Model size: ~290MB
+**Training metrics (GPU fp16):**
+- Train time: ~90 seconds (RX 7900 XT), 15-20 minutes (CPU)
+- Final WER: ~12% (held-out test set)
+- Live accuracy: 94%+ (17/18 phrases correct in voice testing)
+- Model size: ~290MB (HuggingFace), 143MB (CTranslate2 float16)
 
 **Runtime performance:**
-- Transcription: ~2 seconds per 5s clip
-- Memory: ~2GB additional RAM
-- CPU: Normal usage during inference
+- Transcription: 0.1-0.2s per utterance (GPU CTranslate2)
+- Memory: ~2GB additional VRAM
+- Latency: Unchanged from base Whisper
 
 ---
 
@@ -366,103 +353,73 @@ rsync -av /mnt/models/voice_training/whisper_finetuned/ \
 
 **Quick retrain:**
 1. Add new phrases to training_phrases.txt
-2. Record only new phrases (script resumes)
-3. Retrain (15-20 min)
-4. Test and deploy
+2. Record new phrases (`./record_training_data.sh` — resumes where you left off)
+3. Run `./retrain.sh` (stops services → train → convert → restart, ~2 min total)
+4. Test with voice commands
 
 ---
 
 ## Success Criteria Checklist
 
-- [ ] 150+ training phrases recorded
-- [ ] All audio files 5 seconds, 16kHz, stereo
-- [ ] Dataset metadata created successfully
-- [ ] Training completes without errors
-- [ ] Final WER < 15%
-- [ ] Wake word "Jarvis" 100% accurate
-- [ ] Domain terms recognized correctly
-- [ ] Model integrated and tested in JARVIS
-- [ ] Backups created in 3 locations
+- [x] 198 training phrases recorded (FIFINE K669B, mono, 16kHz)
+- [x] All audio trimmed (0.1s mic activation click removed)
+- [x] Dataset metadata created successfully
+- [x] Training completes without errors (89s GPU fp16)
+- [x] Final WER < 15% (12.3% on held-out test set)
+- [x] Wake word "Jarvis" 100% accurate
+- [x] Domain terms recognized correctly (cybersecurity, technical)
+- [x] Model integrated and tested in JARVIS
+- [x] Old recordings backed up to audio_backup_old_mic/
 
 ---
 
-**Last successful training:** February 12, 2026
-**Training time:** 20 minutes  
-**Final WER:** 11.67%
-**Accuracy:** 88.3%
-**Status:** ✅ Production Ready
+**Last successful training:** February 21, 2026
+**Training time:** 89 seconds (GPU fp16)
+**Final WER:** 12.3% (held-out test), 5.6% (live voice testing — 1/18 miss)
+**Live Accuracy:** 94.4% (17/18 phrases correct)
+**Status:** ✅ Production Ready — FIFINE K669B + GPU pipeline
 
 ---
 
-## ADDENDUM: CTranslate2 Conversion (February 12, 2026)
+## ADDENDUM: CTranslate2 Conversion
 
 ### Ultra-Fast Inference with faster-whisper
 
-After initial training, we converted the model to CTranslate2 format for 6x faster inference.
+The trained HuggingFace model is converted to CTranslate2 format for GPU-accelerated inference via faster-whisper.
 
 **Performance Comparison:**
 - Python transformers: ~2.0s transcription
-- faster-whisper (CTranslate2): ~0.3-0.5s transcription
-- Accuracy: Identical (88-98%)
+- faster-whisper (CTranslate2): 0.1-0.2s transcription (GPU)
+- Accuracy: Identical
 
 ### Conversion Process
 
-**1. Install faster-whisper**
-```bash
-pip install --break-system-packages faster-whisper ctranslate2
-```
-
-**2. Convert Model (with dtype bug workaround)**
+Conversion is now automated via `convert_to_ct2.py` (called by `retrain.sh`):
 ```python
-# Activate training venv
-# NOTE: venv-tts is broken (CUDA build). Use system Python 3.12 instead.
-# source ~/jarvis/venv-tts/bin/activate  # DO NOT USE
-
-# Monkey-patch the converter to fix dtype bug
-import ctranslate2.converters.transformers as ct2_trans
-
-original_load_model = ct2_trans.TransformersConverter.load_model
-
-def patched_load_model(self, model_class, model_name_or_path, **kwargs):
-    kwargs.pop('dtype', None)
-    kwargs.pop('torch_dtype', None)
-    return original_load_model(self, model_class, model_name_or_path, **kwargs)
-
-ct2_trans.TransformersConverter.load_model = patched_load_model
-
-# Convert
 from ctranslate2.converters import TransformersConverter
-converter = TransformersConverter("whisper_finetuned/final")
-converter.convert("whisper_finetuned_ct2", quantization="int8", force=True)
-```
-
-**3. Update STT to use faster-whisper**
-
-Modified `core/stt.py` to use `faster_whisper.WhisperModel` instead of transformers library.
-
-**Key Configuration:**
-```python
-self.model = WhisperModel(
-    model_path,
-    device="cpu",
-    compute_type="int8",
-    cpu_threads=4
+converter = TransformersConverter(
+    "whisper_finetuned/final",
+    copy_files=["tokenizer.json", "preprocessor_config.json"],
+    load_as_float16=True,
 )
+converter.convert("whisper_finetuned_ct2", quantization="float16", force=True)
 ```
+
+No more monkey-patching needed — the dtype bug was in older ctranslate2 versions.
 
 ### Result
 
-- ✅ 6x faster inference
+- ✅ 10-20x faster inference (vs CPU transformers)
 - ✅ Same accuracy as Python transformers
-- ✅ Lower memory usage (INT8 quantization)
+- ✅ GPU float16 quantization
 - ✅ Production-ready performance
 
 **Model Sizes:**
-- HuggingFace format: 279MB
-- CTranslate2 INT8: 73MB
+- HuggingFace format: ~290MB
+- CTranslate2 float16: 143MB
 
 ---
 
-**Updated:** February 17, 2026
-**Status:** ✅ Production — faster-whisper (CTranslate2) on GPU active
-**Next retraining:** Scheduled Feb 21 (log analysis from Feb 14-21)
+**Updated:** February 21, 2026
+**Status:** ✅ Production — faster-whisper (CTranslate2) on GPU, 94%+ accuracy
+**Known gap:** "how's" contraction → add to next training round
