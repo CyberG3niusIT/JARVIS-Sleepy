@@ -145,4 +145,4 @@
 
 ---
 
-**Total: 48 development ideas + 4 bugs, sourced from 12+ documents across the entire project.**
+**Total: 48 development ideas, sourced from 12+ documents across the entire project.**
