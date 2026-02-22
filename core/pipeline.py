@@ -729,6 +729,7 @@ class Coordinator:
                 memory_context=result.memory_context,
                 conversation_messages=result.context_messages,
                 raw_command=command,
+                in_conversation=in_conversation,
             )
             if not response:
                 response = "I'm sorry, I'm having trouble processing that right now."
@@ -791,7 +792,8 @@ class Coordinator:
     def _stream_llm_response(self, command: str, history: str,
                               memory_context: str = None,
                               conversation_messages: list = None,
-                              raw_command: str = None) -> str:
+                              raw_command: str = None,
+                              in_conversation: bool = False) -> str:
         """Stream LLM response with first-chunk quality gating and tool calling.
 
         Streams tokens from Qwen, accumulates into sentence chunks,
@@ -815,14 +817,25 @@ class Coordinator:
         chunks_spoken = 0
         first_chunk_checked = False
 
-        # Fire ack timer in case streaming is slow to start
-        ack_style = self._classify_ack_style(raw_command)
-        ack_timer = threading.Timer(
-            0.3, self._play_ack_if_still_thinking, args=(ack_style,)
+        # Decide whether to play an ack while LLM streams
+        ack_style, suppress_ack = self._classify_ack(
+            raw_command,
+            in_conversation=in_conversation,
+            jarvis_asked_question=self.conv_state.jarvis_asked_question,
         )
         self._llm_responded = False
-        ack_timer.daemon = True
-        ack_timer.start()
+        ack_timer = None
+
+        if suppress_ack:
+            # Skip ack entirely — mark as already responded so callback never fires
+            self._llm_responded = True
+            self.logger.debug(f"Ack suppressed for: {raw_command!r} (style={ack_style})")
+        else:
+            ack_timer = threading.Timer(
+                0.3, self._play_ack_if_still_thinking, args=(ack_style,)
+            )
+            ack_timer.daemon = True
+            ack_timer.start()
 
         # Gapless audio pipeline (Kokoro only; Piper falls back to blocking)
         use_pipeline = (self.tts.engine == "kokoro")
@@ -858,14 +871,16 @@ class Coordinator:
                     tool_call_request = item
                     if not self._llm_responded:
                         self._llm_responded = True
-                        ack_timer.cancel()
+                        if ack_timer:
+                            ack_timer.cancel()
                     break
 
                 # Regular token
                 token = item
                 if not self._llm_responded:
                     self._llm_responded = True
-                    ack_timer.cancel()
+                    if ack_timer:
+                        ack_timer.cancel()
 
                 full_response += token
                 chunk = chunker.feed(token)
@@ -967,7 +982,8 @@ class Coordinator:
         except Exception as e:
             self.logger.error(f"Streaming LLM error: {e}")
             self._llm_responded = True
-            ack_timer.cancel()
+            if ack_timer:
+                ack_timer.cancel()
             if audio_pipeline:
                 audio_pipeline.finish()
             if not full_response:
@@ -981,7 +997,8 @@ class Coordinator:
         # Cancel ack timer if stream was empty
         if not self._llm_responded:
             self._llm_responded = True
-            ack_timer.cancel()
+            if ack_timer:
+                ack_timer.cancel()
 
         if chunks_spoken > 0:
             self.logger.info(f"Streamed LLM response in {chunks_spoken} chunks")
@@ -1077,22 +1094,61 @@ class Coordinator:
 
     @staticmethod
     def _classify_ack_style(command: str) -> str:
-        """Classify query into an ack style for contextual acknowledgments."""
+        """Classify query into an ack style for contextual acknowledgments.
+
+        Legacy wrapper — use _classify_ack() for new code.
+        """
+        style, _ = Coordinator._classify_ack(command)
+        return style
+
+    @staticmethod
+    def _classify_ack(command: str, in_conversation: bool = False,
+                      jarvis_asked_question: bool = False) -> tuple:
+        """Classify query style and decide whether to suppress the ack.
+
+        Returns:
+            (style: str, suppress: bool)
+            style — one of "research", "checking", "working", "neutral"
+            suppress — True if the ack should be skipped entirely
+        """
         cl = command.lower().strip()
+        word_count = len(cl.split())
+
+        # --- Classify style ---
         # Research / current events
         if any(w in cl for w in ("search", "look up", "find out", "latest", "current", "news about")):
-            return "research"
+            style = "research"
         # Factual lookup
-        if any(cl.startswith(w) for w in (
+        elif any(cl.startswith(w) for w in (
             "what ", "who ", "when ", "where ", "how many ", "how much ", "is ", "are ", "was ", "does ",
         )):
-            return "checking"
+            style = "checking"
         # Complex / explanatory
-        if any(cl.startswith(w) for w in (
+        elif any(cl.startswith(w) for w in (
             "explain ", "tell me about ", "describe ", "compare ", "why ", "how do ", "how does ",
         )):
-            return "working"
-        return "neutral"
+            style = "working"
+        else:
+            style = "neutral"
+
+        # --- Suppression rules ---
+        # NEVER suppress research or working/complex queries — they benefit from acks
+        if style in ("research", "working"):
+            return style, False
+
+        # Very short query (<=5 words) — likely conversational, Qwen responds fast
+        if word_count <= 5:
+            return style, True
+
+        # JARVIS just asked a question and user is answering — no ack needed
+        if jarvis_asked_question:
+            return style, True
+
+        # In-conversation + short query (<=12 words) — fast follow-up
+        if in_conversation and word_count <= 12:
+            return style, True
+
+        return style, False
 
     def _play_ack_if_still_thinking(self, style_hint: str = None):
         """Timer callback — plays ack if LLM hasn't responded yet."""

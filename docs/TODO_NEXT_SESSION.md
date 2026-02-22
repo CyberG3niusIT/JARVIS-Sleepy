@@ -100,6 +100,7 @@ None!
 
 ## Minor Loose Ends
 
+- **VOICE TEST: Smart ack suppression** — Implemented (Feb 22). Needs live voice restart + verification: conversational queries → no ack, research/complex → ack fires. See `memory/handoff_session40_feb22.md`.
 - **Voice testing: bare ack as answer** — JARVIS asks question → "yeah" → treated as answer (needs reliable trigger)
 - **Batch extraction (Phase 4) untested** — conversational memory batch fact extraction needs 25+ messages in one session to trigger
 
@@ -111,6 +112,7 @@ None!
 
 | Feature | Date | Notes |
 |---------|------|-------|
+| Smart Ack Suppression | Feb 22 | Skip acks for fast queries (<=5 words, in-conversation <=12 words, answering JARVIS question). Research/working never suppressed. Needs live voice testing. |
 | Edge Case Phase 2 Complete (132 tests) | Feb 22 | +10 tests: reminder ack, forget edge cases, compound dismissal, file editor. 28/30 Phase 2 automated, 4 deferred (mid-rundown = future feature) |
 | Automated Test Suite (122 tests) | Feb 21 | Tier 1: 39 unit + Tier 2: 83 routing. Post-test cleanup (process guard + file removal + state reset). Phase 2 automated: 18/30 |
 | Conversational Flow Refactor (4 phases) | Feb 21 | Persona → State → Router → Polish. 10 response pools, 38 router tests, contextual acks, adaptive windows |
