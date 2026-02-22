@@ -2,12 +2,17 @@
 File Editor Skill
 
 Voice-driven file creation and editing, sandboxed to ~/jarvis/share/.
-Supports write, edit, read, list, and delete operations with LLM-powered
-content generation and safety guardrails.
+Supports write, edit, read, list, delete, and document generation
+(PPTX/DOCX/PDF) with LLM-powered content generation, web research,
+and image sourcing via Pexels API.
 """
 
+import importlib.util
+import json
 import os
 import re
+import shutil
+import tempfile
 import time
 import random
 from pathlib import Path
@@ -15,6 +20,22 @@ from typing import Optional
 
 from core.base_skill import BaseSkill
 from core.llm_router import LLMRouter
+from core.web_research import WebResearcher
+
+
+def _import_sibling(name: str):
+    """Import a module from the same directory as this file."""
+    path = Path(__file__).parent / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, str(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_doc_gen_mod = _import_sibling("document_generator")
+_img_search_mod = _import_sibling("image_search")
+DocumentGenerator = _doc_gen_mod.DocumentGenerator
+ImageSearch = _img_search_mod.ImageSearch
 
 
 # Sandboxed directory — all file operations restricted here
@@ -35,6 +56,9 @@ class FileEditorSkill(BaseSkill):
         self.logger.info("File editor skill initializing...")
 
         self._llm = LLMRouter(self.config)
+        self._web_researcher = WebResearcher(self.config)
+        self._doc_generator = DocumentGenerator(self.config)
+        self._image_search = ImageSearch(config=self.config)
         self._pending_confirmation = None  # (action, detail, expiry_time)
 
         # Ensure share directory exists
@@ -117,6 +141,36 @@ class FileEditorSkill(BaseSkill):
 
         self.register_semantic_intent(
             examples=[
+                "create a presentation about renewable energy",
+                "make a PowerPoint comparing AWS and Azure",
+                "prepare a 7 slide presentation on cybersecurity trends",
+                "build me a slide deck about machine learning",
+                "put together a presentation on the top 5 programming languages",
+                "look up cloud providers and make a PowerPoint about them",
+                "generate a pptx about network security best practices",
+                "create slides comparing Docker and Kubernetes",
+            ],
+            handler=self.create_presentation,
+            threshold=0.50,
+        )
+
+        self.register_semantic_intent(
+            examples=[
+                "write a report about climate change impacts",
+                "create a document summarizing the project status",
+                "prepare a Word document about network architecture",
+                "generate a docx outlining our security policies",
+                "write up a comparison of database technologies",
+                "create a PDF report on quarterly performance",
+                "put together a document about Python best practices",
+                "draft a report comparing React and Vue",
+            ],
+            handler=self.create_document,
+            threshold=0.50,
+        )
+
+        self.register_semantic_intent(
+            examples=[
                 "yes", "go ahead", "proceed", "do it", "confirmed",
                 "no", "cancel", "abort", "never mind",
             ],
@@ -124,7 +178,7 @@ class FileEditorSkill(BaseSkill):
             threshold=0.80,
         )
 
-        self.logger.info("File editor skill initialized (5 intents + confirmation)")
+        self.logger.info("File editor skill initialized (7 intents + confirmation)")
         return True
 
     def handle_intent(self, intent: str, entities: dict) -> str:
@@ -444,6 +498,354 @@ class FileEditorSkill(BaseSkill):
         self._pending_confirmation = ('delete', {'filename': filename}, time.time() + 30)
         self.conversation.request_follow_up = 30.0
         return f"Delete {filename} from the share, {self.honorific}? This cannot be undone."
+
+    # ------------------------------------------------------------------
+    # Intent: create_presentation
+    # ------------------------------------------------------------------
+
+    def create_presentation(self, entities: dict) -> str:
+        """Create a PPTX presentation via multi-step pipeline:
+        parse request → optional web research → LLM synthesis → slide generation."""
+        user_text = entities.get('original_text', '')
+        self.logger.info(f"[file_editor] create_presentation request: {user_text[:80]}")
+
+        # Step 1: Parse the request
+        params = self._parse_document_request(user_text)
+        if not params:
+            return f"I couldn't understand that document request, {self.honorific}. Could you rephrase it?"
+
+        # Override to presentation type
+        params["doc_type"] = "presentation"
+        if not params.get("filename"):
+            params["filename"] = "presentation.pptx"
+        if not params["filename"].endswith(".pptx"):
+            params["filename"] = Path(params["filename"]).stem + ".pptx"
+
+        return self._generate_document(params)
+
+    # ------------------------------------------------------------------
+    # Intent: create_document
+    # ------------------------------------------------------------------
+
+    def create_document(self, entities: dict) -> str:
+        """Create a DOCX document or PDF via multi-step pipeline."""
+        user_text = entities.get('original_text', '')
+        self.logger.info(f"[file_editor] create_document request: {user_text[:80]}")
+
+        # Step 1: Parse the request
+        params = self._parse_document_request(user_text)
+        if not params:
+            return f"I couldn't understand that document request, {self.honorific}. Could you rephrase it?"
+
+        # Determine format
+        text_lower = user_text.lower()
+        if params.get("doc_type") == "presentation":
+            # User said "presentation" but routed here — redirect
+            params["doc_type"] = "presentation"
+            if not params.get("filename"):
+                params["filename"] = "presentation.pptx"
+            if not params["filename"].endswith(".pptx"):
+                params["filename"] = Path(params["filename"]).stem + ".pptx"
+        elif "pdf" in text_lower or (params.get("filename", "").endswith(".pdf")):
+            params["doc_type"] = "pdf"
+            if not params.get("filename"):
+                params["filename"] = "document.pdf"
+        else:
+            params["doc_type"] = "document"
+            if not params.get("filename"):
+                params["filename"] = "document.docx"
+            if not params["filename"].endswith(".docx"):
+                params["filename"] = Path(params["filename"]).stem + ".docx"
+
+        return self._generate_document(params)
+
+    # ------------------------------------------------------------------
+    # Document generation pipeline (shared by both intents)
+    # ------------------------------------------------------------------
+
+    def _parse_document_request(self, user_text: str) -> Optional[dict]:
+        """Parse a document creation request into structured parameters via LLM."""
+        parse_prompt = (
+            'Analyze this document creation request.\n\n'
+            f'REQUEST: "{user_text}"\n\n'
+            'Output EXACTLY this format (one field per line, nothing else):\n'
+            'DOC_TYPE: presentation|document\n'
+            'TOPIC: <main topic — what to research/write about>\n'
+            'RESEARCH_NEEDED: yes|no\n'
+            'SLIDE_COUNT: <number, default 7 for presentations, 5 for documents>\n'
+            'FILENAME: <filename with extension, invent if not specified>\n'
+            'ANALYSIS_TYPE: overview|comparison|deep-dive|tutorial|summary\n'
+            'KEY_POINTS: <comma-separated areas to cover, or "auto" to let AI decide>'
+        )
+
+        result = self._llm.generate(parse_prompt, max_tokens=256)
+        self.logger.debug(f"[file_editor] parse result: {result}")
+
+        params = {}
+        for line in result.strip().splitlines():
+            line = line.strip()
+            if ':' not in line:
+                continue
+            key, _, value = line.partition(':')
+            key = key.strip().lower().replace(' ', '_')
+            value = value.strip()
+
+            if key == 'doc_type':
+                params['doc_type'] = value.lower()
+            elif key == 'topic':
+                params['topic'] = value
+            elif key == 'research_needed':
+                params['research_needed'] = value.lower() in ('yes', 'true', '1')
+            elif key == 'slide_count':
+                try:
+                    params['slide_count'] = max(3, min(15, int(value)))
+                except ValueError:
+                    params['slide_count'] = 7
+            elif key == 'filename':
+                params['filename'] = Path(value).name if value else None
+            elif key == 'analysis_type':
+                params['analysis_type'] = value.lower()
+            elif key == 'key_points':
+                params['key_points'] = value
+
+        # Require at least a topic
+        if not params.get('topic'):
+            return None
+
+        # Defaults
+        params.setdefault('doc_type', 'presentation')
+        params.setdefault('research_needed', True)
+        params.setdefault('slide_count', 7)
+        params.setdefault('analysis_type', 'overview')
+        params.setdefault('key_points', 'auto')
+
+        return params
+
+    def _generate_document(self, params: dict) -> str:
+        """Execute the full document generation pipeline.
+
+        Steps: research → structure → images → assemble → save
+        """
+        topic = params['topic']
+        doc_type = params.get('doc_type', 'presentation')
+        slide_count = params.get('slide_count', 7)
+        filename = params.get('filename', 'output.pptx')
+        analysis_type = params.get('analysis_type', 'overview')
+        key_points = params.get('key_points', 'auto')
+
+        self.logger.info(f"[file_editor] generating {doc_type}: topic={topic!r}, "
+                         f"slides={slide_count}, file={filename}")
+
+        # Step 2: Web research (if needed)
+        research_context = ""
+        if params.get('research_needed', False):
+            research_context = self._do_research(topic, key_points)
+
+        # Step 3: Generate structure via LLM
+        structure = self._generate_structure(
+            topic, slide_count, analysis_type, key_points, research_context
+        )
+        if not structure:
+            return (f"I had trouble generating the document structure, {self.honorific}. "
+                    "Could you try rephrasing your request?")
+
+        # Step 4: Search for images (Pexels)
+        images = {}
+        temp_dir = None
+        if self._image_search.available:
+            temp_dir = tempfile.mkdtemp(prefix="jarvis_doc_")
+            images = self._fetch_images(structure, temp_dir)
+
+        # Step 5: Assemble document
+        try:
+            if doc_type == 'presentation':
+                output_path = self._doc_generator.create_presentation(
+                    structure, filename=filename, images=images
+                )
+            elif doc_type == 'pdf':
+                # Generate DOCX first, then convert
+                docx_name = Path(filename).stem + ".docx"
+                docx_path = self._doc_generator.create_document(
+                    structure, filename=docx_name, images=images
+                )
+                if docx_path:
+                    output_path = self._doc_generator.convert_to_pdf(docx_path)
+                    if output_path:
+                        # Clean up intermediate DOCX
+                        docx_path.unlink(missing_ok=True)
+                    else:
+                        # PDF conversion failed — keep the DOCX
+                        output_path = docx_path
+                        self.logger.warning("[file_editor] PDF conversion failed, keeping DOCX")
+                else:
+                    output_path = None
+            else:
+                output_path = self._doc_generator.create_document(
+                    structure, filename=filename, images=images
+                )
+        finally:
+            # Clean up temp images
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        if not output_path:
+            return (f"I encountered an error creating the document, {self.honorific}. "
+                    "Please try again.")
+
+        slide_count_actual = len(structure.get('slides', []))
+        img_count = len(images)
+        img_note = f" with {img_count} images" if img_count > 0 else ""
+
+        if doc_type == 'presentation':
+            return (f"Done, {self.honorific}. I've created {output_path.name} — "
+                    f"{slide_count_actual} slides{img_note} in the share folder.")
+        elif doc_type == 'pdf':
+            if output_path.suffix == '.pdf':
+                return (f"Done, {self.honorific}. I've created {output_path.name} — "
+                        f"{slide_count_actual} sections{img_note} in the share folder.")
+            else:
+                return (f"I couldn't convert to PDF, {self.honorific}, but I've saved it as "
+                        f"{output_path.name} — {slide_count_actual} sections{img_note} "
+                        "in the share folder.")
+        else:
+            return (f"Done, {self.honorific}. I've created {output_path.name} — "
+                    f"{slide_count_actual} sections{img_note} in the share folder.")
+
+    def _do_research(self, topic: str, key_points: str = "auto") -> str:
+        """Perform web research on the topic and return formatted context."""
+        self.logger.info(f"[file_editor] researching: {topic}")
+
+        # Build search query
+        search_query = topic
+        if key_points and key_points != "auto":
+            search_query += f" {key_points.split(',')[0].strip()}"
+
+        results = self._web_researcher.search(search_query, max_results=5)
+        if not results:
+            self.logger.warning(f"[file_editor] no search results for: {search_query}")
+            return ""
+
+        pages = self._web_researcher.fetch_pages_parallel(
+            results, max_results=3, max_chars=3000, timeout=5.0
+        )
+
+        if not pages:
+            # Use snippets as fallback
+            snippets = []
+            for r in results[:5]:
+                title = r.get('title', '')
+                snippet = r.get('snippet', '')
+                if snippet:
+                    snippets.append(f"[{title}]: {snippet}")
+            return "\n\n".join(snippets) if snippets else ""
+
+        return "\n\n".join(pages)
+
+    def _generate_structure(self, topic: str, slide_count: int,
+                            analysis_type: str, key_points: str,
+                            research_context: str) -> Optional[dict]:
+        """Generate document structure via LLM, returning parsed JSON."""
+        research_block = ""
+        if research_context:
+            # Truncate to avoid blowing up context
+            if len(research_context) > 8000:
+                research_context = research_context[:8000] + "\n[...truncated]"
+            research_block = (
+                f"\nRESEARCH DATA (use this as your primary source):\n"
+                f"{research_context}\n"
+            )
+
+        key_points_instruction = ""
+        if key_points and key_points != "auto":
+            key_points_instruction = f"\nKEY AREAS TO COVER: {key_points}\n"
+
+        structure_prompt = (
+            f'Create a structured outline for a {slide_count}-slide '
+            f'{analysis_type} about "{topic}".\n'
+            f'{research_block}'
+            f'{key_points_instruction}\n'
+            'Output valid JSON only — no other text, no markdown fences:\n'
+            '{\n'
+            '  "title": "Presentation Title",\n'
+            '  "subtitle": "Brief subtitle",\n'
+            '  "slides": [\n'
+            '    {\n'
+            '      "title": "Slide Title",\n'
+            '      "bullets": ["Point 1", "Point 2", "Point 3"],\n'
+            '      "image_query": "search term for a relevant image"\n'
+            '    }\n'
+            '  ]\n'
+            '}\n\n'
+            'RULES:\n'
+            '1. First slide is title/intro (may have few or no bullets). '
+            'Last slide is conclusion/summary.\n'
+            '2. Each content slide has 3-5 bullet points — concise, not full sentences.\n'
+            '3. image_query should be a simple 2-4 word search for a relevant stock photo.\n'
+            f'4. Generate exactly {slide_count} slides total.\n'
+            '5. If comparing items, dedicate one slide per item.\n'
+            '6. Base your content on the research data when available.\n'
+            '7. Output ONLY valid JSON. No markdown fences, no explanations.\n'
+        )
+
+        raw = self._llm.generate(structure_prompt, max_tokens=2048)
+        raw = self._strip_markdown_fences(raw)
+
+        # Try to extract JSON from the response
+        structure = self._parse_json_response(raw)
+
+        if not structure or 'slides' not in structure:
+            self.logger.error(f"[file_editor] failed to parse structure JSON: {raw[:200]}")
+            return None
+
+        return structure
+
+    def _parse_json_response(self, text: str) -> Optional[dict]:
+        """Extract and parse JSON from LLM response, handling common issues."""
+        text = text.strip()
+
+        # Remove markdown fences if present
+        text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+        text = re.sub(r'\n?```\s*$', '', text)
+
+        # Try direct parse first
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to find JSON object in the text
+        match = re.search(r'\{[\s\S]*\}', text)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def _fetch_images(self, structure: dict, temp_dir: str) -> dict:
+        """Fetch images for each slide that has an image_query.
+
+        Returns: {slide_index: image_path} mapping
+        """
+        images = {}
+        slides = structure.get('slides', [])
+
+        for i, slide in enumerate(slides):
+            # Skip title slide (first) and conclusion (last)
+            if i == 0 or i == len(slides) - 1:
+                continue
+
+            query = slide.get('image_query', '')
+            if not query:
+                continue
+
+            image_path = self._image_search.search_and_download(query, Path(temp_dir))
+            if image_path:
+                images[i] = str(image_path)
+                self.logger.debug(f"[file_editor] image for slide {i}: {image_path.name}")
+
+        return images
 
     # ------------------------------------------------------------------
     # Confirmation handler
