@@ -171,16 +171,23 @@ class WebResearcher:
                 pool.submit(self.fetch_page, url, max_chars): (title, url)
                 for title, url in urls
             }
-            for future in as_completed(future_to_info, timeout=timeout + 1):
-                title, url = future_to_info[future]
-                try:
-                    page_text = future.result(timeout=timeout)
-                    if page_text and len(page_text) >= min_chars:
-                        page_sections.append(
-                            f"[{title}] ({url}):\n{page_text}"
-                        )
-                except Exception as e:
-                    self.logger.debug(f"Page fetch skipped ({url}): {e}")
+            try:
+                for future in as_completed(future_to_info, timeout=timeout + 1):
+                    title, url = future_to_info[future]
+                    try:
+                        page_text = future.result(timeout=timeout)
+                        if page_text and len(page_text) >= min_chars:
+                            page_sections.append(
+                                f"[{title}] ({url}):\n{page_text}"
+                            )
+                    except Exception as e:
+                        self.logger.debug(f"Page fetch skipped ({url}): {e}")
+            except TimeoutError:
+                timed_out = len(future_to_info) - len(page_sections)
+                self.logger.warning(
+                    f"Parallel fetch: {timed_out} page(s) timed out, "
+                    f"continuing with {len(page_sections)} collected"
+                )
 
         elapsed = time.time() - start
         self.logger.info(
