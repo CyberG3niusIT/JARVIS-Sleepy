@@ -643,7 +643,8 @@ class FileEditorSkill(BaseSkill):
 
         # Step 3: Generate structure via LLM
         structure = self._generate_structure(
-            topic, slide_count, analysis_type, key_points, research_context
+            topic, slide_count, analysis_type, key_points, research_context,
+            doc_type=doc_type,
         )
         if not structure:
             return (f"I had trouble generating the document structure, {self.honorific}. "
@@ -743,7 +744,8 @@ class FileEditorSkill(BaseSkill):
 
     def _generate_structure(self, topic: str, slide_count: int,
                             analysis_type: str, key_points: str,
-                            research_context: str) -> Optional[dict]:
+                            research_context: str,
+                            doc_type: str = "presentation") -> Optional[dict]:
         """Generate document structure via LLM, returning parsed JSON."""
         research_block = ""
         if research_context:
@@ -759,32 +761,58 @@ class FileEditorSkill(BaseSkill):
         if key_points and key_points != "auto":
             key_points_instruction = f"\nKEY AREAS TO COVER: {key_points}\n"
 
+        # Format-aware bullet guidance
+        if doc_type == "presentation":
+            bullet_guidance = (
+                '2. Each content slide MUST have 4-6 bullet points.\n'
+                '3. Each bullet MUST be an informative phrase (10-20 words) '
+                'containing at least one specific fact: a number, statistic, '
+                'dollar figure, percentage, named entity, or concrete example.\n'
+                '   GOOD: "Ransomware cost enterprises $20B globally in 2025 — up 40% from 2023"\n'
+                '   GOOD: "Colonial Pipeline attack (2021) shut down 5,500 miles of fuel supply"\n'
+                '   BAD: "Ransomware is increasing"\n'
+                '   BAD: "Critical infrastructure is at risk"\n'
+            )
+        else:
+            bullet_guidance = (
+                '2. Each section MUST have 4-6 bullet points.\n'
+                '3. Each bullet MUST be a complete, informative sentence (15-30 words) '
+                'containing specific facts: numbers, statistics, dollar figures, '
+                'named examples, dates, or concrete evidence.\n'
+                '   GOOD: "The average cost of a data breach reached $4.45M in 2024, with healthcare breaches averaging $10.93M according to IBM."\n'
+                '   BAD: "Data breaches are becoming more expensive."\n'
+            )
+
         structure_prompt = (
             f'Create a structured outline for a {slide_count}-slide '
             f'{analysis_type} about "{topic}".\n'
+            f'Today\'s date: February 2026.\n'
             f'{research_block}'
             f'{key_points_instruction}\n'
             'Output valid JSON only — no other text, no markdown fences:\n'
             '{\n'
             '  "title": "Presentation Title",\n'
-            '  "subtitle": "Brief subtitle",\n'
+            '  "subtitle": "Brief subtitle with year/scope",\n'
             '  "slides": [\n'
             '    {\n'
             '      "title": "Slide Title",\n'
-            '      "bullets": ["Point 1", "Point 2", "Point 3"],\n'
+            '      "bullets": ["Informative point with specific data", "Another point with a named example"],\n'
             '      "image_query": "search term for a relevant image"\n'
             '    }\n'
             '  ]\n'
             '}\n\n'
             'RULES:\n'
             '1. First slide is title/intro (may have few or no bullets). '
-            'Last slide is conclusion/summary.\n'
-            '2. Each content slide has 3-5 bullet points — concise, not full sentences.\n'
-            '3. image_query should be a simple 2-4 word search for a relevant stock photo.\n'
-            f'4. Generate exactly {slide_count} slides total.\n'
-            '5. If comparing items, dedicate one slide per item.\n'
-            '6. Base your content on the research data when available.\n'
-            '7. Output ONLY valid JSON. No markdown fences, no explanations.\n'
+            'Last slide is conclusion/summary with key takeaways.\n'
+            f'{bullet_guidance}'
+            '4. MUST extract and use specific facts, names, statistics, and examples '
+            'from the RESEARCH DATA above. Do NOT ignore the research and write generic content.\n'
+            '5. image_query should be a simple 2-4 word search for a relevant stock photo.\n'
+            f'6. Generate exactly {slide_count} slides total.\n'
+            '7. If comparing items, dedicate one slide per item with specific pros/cons/metrics.\n'
+            '8. NEVER write vague filler bullets like "X is important" or "Y is growing". '
+            'Every bullet must teach the reader something specific.\n'
+            '9. Output ONLY valid JSON. No markdown fences, no explanations.\n'
         )
 
         raw = self._llm.generate(structure_prompt, max_tokens=2048)
