@@ -1,6 +1,6 @@
 # JARVIS System-Specific Configuration Notes
 
-**IMPORTANT:** These are Christopher's system-specific settings that differ from defaults.
+**IMPORTANT:** These are system-specific settings that differ from defaults.
 
 ## TTS Configuration
 
@@ -10,7 +10,7 @@
 
 **Fallback:** Piper TTS at:
 ```
-/home/christopher/.local/bin/piper
+/home/user/.local/bin/piper
 ```
 
 **NOT** at `/usr/bin/piper`
@@ -18,7 +18,7 @@
 This must be reflected in `config.yaml`:
 ```yaml
 tts:
-  piper_bin: "/home/christopher/.local/bin/piper"  # CORRECT
+  piper_bin: "/home/user/.local/bin/piper"  # CORRECT
 ```
 
 **Why this matters:**
@@ -30,13 +30,13 @@ tts:
 
 **CURRENT:** Fine-tuned Whisper via faster-whisper (CTranslate2) with GPU acceleration:
 ```
-/mnt/jarvis-models/voice_training/whisper_finetuned_ct2    (production - GPU-optimized CTranslate2 format)
-/mnt/jarvis-models/voice_training/whisper_finetuned/final  (source - HuggingFace format, used for conversion)
+/mnt/models/voice_training/whisper_finetuned_ct2    (production - GPU-optimized CTranslate2 format)
+/mnt/models/voice_training/whisper_finetuned/final  (source - HuggingFace format, used for conversion)
 ```
 
 Fallback base model (CPU only):
 ```
-/mnt/jarvis-models/whisper/ggml-base.bin
+/mnt/models/whisper/ggml-base.bin
 ```
 
 **GPU Performance:** 0.1-0.2s transcription (10-20x faster than CPU)
@@ -45,7 +45,7 @@ Fallback base model (CPU only):
 
 **Model:** Qwen3-VL-8B (Q5_K_M, self-quantized from F16, vision-capable)
 ```
-/mnt/jarvis-models/llm/Qwen3VL-8B-Instruct-Q5_K_M.gguf
+/mnt/models/llm/Qwen3VL-8B-Instruct-Q5_K_M.gguf
 ```
 
 **Server:** llama.cpp via systemd service
@@ -62,20 +62,20 @@ Fallback base model (CPU only):
 
 ### Jarvis Home
 ```
-/home/christopher/jarvis/
+/home/user/jarvis/
 ```
 
 ### Storage Mount
 ```
-/mnt/jarvis-storage/jarvis/
+/mnt/storage/jarvis/
 ```
 
 ### Models
-- **Whisper (fine-tuned, production):** `/mnt/jarvis-models/voice_training/whisper_finetuned_ct2`
-- **Whisper (fine-tuned, source):** `/mnt/jarvis-models/voice_training/whisper_finetuned/final`
-- **Whisper (base fallback):** `/mnt/jarvis-models/whisper/ggml-base.bin`
-- **Piper TTS:** `/mnt/jarvis-models/piper/en_GB-northern_english_male-medium.onnx`
-- **Qwen LLM:** `/mnt/jarvis-models/llm/Qwen3VL-8B-Instruct-Q5_K_M.gguf`
+- **Whisper (fine-tuned, production):** `/mnt/models/voice_training/whisper_finetuned_ct2`
+- **Whisper (fine-tuned, source):** `/mnt/models/voice_training/whisper_finetuned/final`
+- **Whisper (base fallback):** `/mnt/models/whisper/ggml-base.bin`
+- **Piper TTS:** `/mnt/models/piper/en_GB-northern_english_male-medium.onnx`
+- **Qwen LLM:** `/mnt/models/llm/Qwen3VL-8B-Instruct-Q5_K_M.gguf`
 
 ### Audio Devices
 - **Microphone:** FIFINE K669B USB condenser mic (hw:fifine,0 via udev rule)
@@ -85,12 +85,12 @@ Fallback base model (CPU only):
 ## Configuration Checklist
 
 When updating `config.yaml`, always verify:
-- [ ] Piper path is `/home/christopher/.local/bin/piper`
+- [ ] Piper path is `/home/user/.local/bin/piper`
 - [ ] Fine-tuned Whisper model path is correct (CTranslate2 format)
 - [ ] LLM path points to `Qwen3VL-8B-Instruct-Q5_K_M.gguf`
-- [ ] All paths use correct username (christopher, not generic)
-- [ ] Model paths point to `/mnt/jarvis-models/`
-- [ ] Skills/storage paths point to `/mnt/jarvis-storage/jarvis/`
+- [ ] All paths use correct username (your_username, not generic)
+- [ ] Model paths point to `/mnt/models/`
+- [ ] Skills/storage paths point to `/mnt/storage/jarvis/`
 - [ ] Audio devices are correct (plughw:0,0 for output)
 - [ ] llama-server systemd service is running
 
@@ -108,4 +108,4 @@ When updating `config.yaml`, always verify:
 ---
 
 **Last Updated:** February 22, 2026
-**System:** ubuntu2404 (Christopher's workstation)
+**System:** ubuntu2404 (the user's workstation)
