@@ -71,6 +71,7 @@ class TTSNormalizer:
             "years": self.normalize_years,
             "file_sizes": self.normalize_file_sizes,
             "timestamps": self.normalize_timestamps,
+            "date_ordinals": self.normalize_date_ordinals,  # "February 22" → "February twenty-second"
             "urls": self.normalize_urls,
             "paths": self.normalize_paths,
             "filenames": self.normalize_filenames,  # Standalone filenames (after paths)
@@ -425,6 +426,48 @@ class TTSNormalizer:
         else:
             return f"{self._two_digit_words(display_hour)} {self._two_digit_words(minute)} {period}"
     
+    # ========== Date Ordinals ==========
+
+    _MONTHS = (
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    )
+    _MONTH_PATTERN = "|".join(_MONTHS)
+
+    def normalize_date_ordinals(self, text: str) -> str:
+        """Convert 'February 22' → 'February twenty-second', etc.
+
+        Matches full month names followed by a 1-2 digit day number.
+        Handles optional comma after the day ('February 22, 2026').
+        """
+        pattern = rf"\b({self._MONTH_PATTERN})\s+(\d{{1,2}})\b"
+
+        def _replace(match):
+            month = match.group(1)
+            day = int(match.group(2))
+            if 1 <= day <= 31:
+                return f"{month} {self._day_to_ordinal(day)}"
+            return match.group(0)
+
+        return re.sub(pattern, _replace, text)
+
+    @staticmethod
+    def _day_to_ordinal(day: int) -> str:
+        """Convert day number to spoken ordinal: 1→'first', 22→'twenty-second'."""
+        special = {
+            1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
+            6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth",
+            11: "eleventh", 12: "twelfth", 13: "thirteenth", 14: "fourteenth",
+            15: "fifteenth", 16: "sixteenth", 17: "seventeenth", 18: "eighteenth",
+            19: "nineteenth", 20: "twentieth", 30: "thirtieth",
+        }
+        if day in special:
+            return special[day]
+        # 21-29, 31
+        tens_word = {20: "twenty", 30: "thirty"}
+        t, o = divmod(day, 10)
+        return f"{tens_word[t * 10]}-{special[o]}"
+
     # ========== URLs ==========
     def normalize_urls(self, text: str) -> str:
         """
