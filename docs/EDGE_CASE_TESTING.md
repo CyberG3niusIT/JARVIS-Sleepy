@@ -31,7 +31,7 @@ python3 scripts/test_edge_cases.py --json        # JSON output
 | Tier | Scope | Tests | Load Time | Description |
 |------|-------|-------|-----------|-------------|
 | 1 | Unit | 39 | <1s | Ambient filter (13), noise filter (7), TTS normalizer (14), speech chunker (5) |
-| 2 | Routing | 83 | ~5s | Intent routing (40), priority chain/state machines (18), skill validation (23), priority ordering (2) |
+| 2 | Routing | 93 | ~5s | Intent routing (40), priority chain/state machines (28), skill validation (23), priority ordering (2) |
 | 3 | Execution | — | Future | Run skill handlers, validate response content |
 | 4 | Pipeline | — | Future | Full pipeline with LLM server running |
 
@@ -138,8 +138,8 @@ Commands that should escalate through routing layers (exact → fuzzy → keywor
 
 Tests for the 7-priority command handling chain in `ConversationRouter.route()`.
 
-**Automated coverage: 18/30 tests** — covered by `scripts/test_edge_cases.py` Tier 2 (marked `[P]` below).
-Remaining 12 tests require live voice/hybrid mode (mid-rundown flow, reminder ack, multi-step sequences).
+**Automated coverage: 28/30 tests** — covered by `scripts/test_edge_cases.py` Tier 2 (marked `[P]` below).
+Remaining 4 tests (2A-05..08) require a mid-rundown interruption feature that doesn't exist yet — see Future Features below.
 
 ### 2A. Rundown State Machine (Priority 1)
 
@@ -148,20 +148,20 @@ Remaining 12 tests require live voice/hybrid mode (mid-rundown flow, reminder ac
 | 2A-01 | "yes" | Rundown pending | Accept rundown, start reading | [P] | Automated |
 | 2A-02 | "no thanks" | Rundown pending | Decline rundown | [P] | Automated |
 | 2A-03 | "what time is it" | Rundown pending | **Intercepted by rundown** (P1 traps ALL input) | [P] | Automated. Original expectation "fall through" was wrong — rundown intercepts everything by design |
-| 2A-04 | "no" | Rundown pending | Decline (not trapped by diagnostic) | [ ] | Needs live test — historical substring bug |
-| 2A-05 | "continue" | Mid-rundown | Next item | [ ] | Needs live — also news keyword, priority should win |
-| 2A-06 | "skip" | Mid-rundown | Skip current item | [ ] | Needs live |
-| 2A-07 | "stop" / "that's enough" | Mid-rundown | End rundown early | [ ] | Needs live |
-| 2A-08 | "defer that" | Mid-rundown item | Defer reminder | [ ] | Needs live |
+| 2A-04 | "no" | Rundown pending | Decline (word-boundary match, not substring) | [P] | Automated. Historical substring bug was fixed |
+| 2A-05 | "continue" | Mid-rundown | Next item | [F] | **Future feature** — no mid-rundown state exists. `deliver_rundown()` clears state, pauses listener, blocks on TTS |
+| 2A-06 | "skip" | Mid-rundown | Skip current item | [F] | **Future feature** — requires item-by-item delivery state machine |
+| 2A-07 | "stop" / "that's enough" | Mid-rundown | End rundown early | [F] | **Future feature** — requires interruptible delivery |
+| 2A-08 | "defer that" | Mid-rundown item | Defer reminder | [F] | **Future feature** — requires per-item state during delivery |
 
 ### 2B. Reminder Acknowledgment (Priority 2)
 
 | ID | Test Input | Context | Expected | Status | Notes |
 |----|-----------|---------|----------|--------|-------|
-| 2B-01 | "got it" | Reminder nagging | Acknowledge, stop nagging | [ ] | Needs live — requires active reminder nag |
-| 2B-02 | "snooze 10 minutes" | Reminder nagging | Snooze, reschedule | [ ] | Needs live |
-| 2B-03 | "what reminder is that" | Reminder nagging | Repeat reminder text | [ ] | Needs live |
-| 2B-04 | "yes" | No reminder pending | Should NOT trigger ack | [ ] | Needs live — verify no false positive |
+| 2B-01 | "got it" | Reminder nagging | Acknowledge, stop nagging | [P] | Automated. P2 intercepts all input when `is_awaiting_ack()` is True |
+| 2B-02 | "snooze 10 minutes" | Reminder nagging | **Acked** (snooze intent lost) | [P] | Automated. P2 acks ALL input — snooze is not separately handled at router level |
+| 2B-03 | "what reminder is that" | Reminder nagging | **Acked** (query intent lost) | [P] | Automated. Same as 2B-02 — P2 is a blanket ack |
+| 2B-04 | "yes" | No reminder pending | NOT intercepted — falls to LLM | [P] | Automated. No false positive |
 
 ### 2C. Memory Forget Confirmation (Priority 2.5)
 
@@ -169,8 +169,8 @@ Remaining 12 tests require live voice/hybrid mode (mid-rundown flow, reminder ac
 |----|-----------|---------|----------|--------|-------|
 | 2C-01 | "yes" | `_pending_forget` set | Execute forget | [P] | Automated |
 | 2C-02 | "no" | `_pending_forget` set | Cancel forget | [P] | Automated |
-| 2C-03 | "yes, delete it" | `_pending_forget` set | Execute forget (not re-routed to delete handler) | [ ] | Needs live — historical re-routing bug |
-| 2C-04 | "forget my birthday" | No pending | Start forget flow (Priority 3) | [ ] | Note: requires "forget that..." prefix to match FORGET_PATTERNS. "forget my birthday" alone does NOT match |
+| 2C-03 | "yes, delete it" | `_pending_forget` set | Execute forget (P2.5 intercepts before file_editor P4) | [P] | Automated. Historical re-routing bug confirmed fixed |
+| 2C-04 | "forget my birthday" | No pending | Does NOT match FORGET_PATTERNS | [P] | Automated. Requires "forget that..." prefix — "forget my birthday" alone falls to skill routing |
 
 ### 2D. Dismissal Detection (Priority 2.7)
 
@@ -179,7 +179,7 @@ Remaining 12 tests require live voice/hybrid mode (mid-rundown flow, reminder ac
 | 2D-01 | "no thanks" | After JARVIS offer | Dismiss, close convo window | [P] | Automated |
 | 2D-02 | "that's all" | Active conversation | End conversation | [P] | Automated |
 | 2D-03 | "never mind" | Active conversation | Dismiss | [P] | Automated |
-| 2D-04 | "no thanks, but what time is it" | Active conversation | Should this dismiss + answer, or just answer? | [ ] | Edge: compound statement. Needs live |
+| 2D-04 | "no thanks, but what time is it" | Active conversation | **Not dismissed** — routes to conversation ("thanks" keyword) | [P] | Automated. Compound: comma content isn't a dismissal phrase, falls through |
 
 ### 2E. Bare Acknowledgment Filter (Priority 2.8)
 
@@ -196,10 +196,19 @@ Remaining 12 tests require live voice/hybrid mode (mid-rundown flow, reminder ac
 |----|-----------|---------|----------|--------|-------|
 | 2F-01 | "yes" | File delete pending (30s) | Confirm delete | [P] | Automated |
 | 2F-02 | "no" | File delete pending (30s) | Cancel delete | [P] | Automated |
-| 2F-03 | "go ahead" | Delete pending | Execute delete | [ ] | Needs live |
+| 2F-03 | "go ahead" | Delete pending | Execute delete | [P] | Automated. "go ahead" is in affirmatives set |
 | 2F-04 | "yes" | No confirmation pending | NOT intercepted — falls to LLM | [P] | Automated |
-| 2F-05 | "delete that file" → "yes" | After delete prompt | Confirm delete (30s expiry) | [ ] | Needs live — multi-step sequence |
+| 2F-05 | "yes" | Delete pending (simulated step 2) | Confirm delete (30s expiry) | [P] | Automated. Multi-step: setup sets pending confirmation, "yes" confirms |
 | 2F-06 | (expired) → "yes" | After delete prompt | Expired — no action, falls to LLM | [P] | Automated
+
+### Future Features Identified During Testing
+
+These test cases (2A-05..08) describe **mid-rundown interruption** — a feature that does not yet exist:
+
+- **Current behavior:** `deliver_rundown()` clears `_rundown_state` to `None`, pauses the listener via callback, then blocks on synchronous `tts.speak()`. There is no "reading" state in the state machine and no code path to receive commands during delivery.
+- **Proposed feature:** Item-by-item rundown delivery with an interruptible state machine. Would enable "continue"/"skip"/"stop"/"defer that" commands during rundown reading.
+- **Implementation notes:** Requires refactoring `deliver_rundown()` from a single blocking TTS call to an item-at-a-time loop with state checks between items. The listener would need to remain active during delivery.
+- **Also discovered:** P2 reminder ack is a blanket handler — `_handle_reminder_ack()` acks ALL input when `is_awaiting_ack()` is True. "Snooze 10 minutes" and "what reminder is that" are both treated as simple acks, losing the snooze/query intent. A future enhancement could parse the input at P2 to distinguish ack/snooze/query.
 
 ---
 
@@ -592,6 +601,7 @@ Track session-by-session execution here:
 | 33 | Feb 21 | Phase 1 R3 | 37 | 0+3 | **ALL PASS.** 3 reclassified (not bugs). Weather intent_id collision found & fixed. |
 | 36 | Feb 21 | Automated suite | 122 | 0 | Tier 1: 39 unit + Tier 2: 83 routing (Phase 1 + Phase 2 + Phase 5). Production bug found & fixed (`c053805`). |
 | 37 | Feb 21 | Cleanup + docs | — | — | Post-test artifact cleanup added. Phase 2 doc updated with automated coverage (18/30). |
+| 39 | Feb 22 | Phase 2 expansion | 132 | 0 | +10 tests: 2A-04, 2B-01..04, 2C-03, 2C-04b, 2D-05, 2F-03, 2F-05. Phase 2: 28/30, 4 deferred (mid-rundown = future feature). |
 
 ---
 
@@ -627,5 +637,6 @@ Look for these log patterns:
 ---
 
 **Total: ~200 test cases across 9 phases, 30+ subsections**
-**Automated: 122 tests (Tier 1 + Tier 2) via `scripts/test_edge_cases.py` — includes post-test artifact cleanup**
+**Automated: 132 tests (Tier 1: 39 unit + Tier 2: 93 routing) via `scripts/test_edge_cases.py` — includes post-test artifact cleanup**
+**Phase 2: 28/30 automated, 4 deferred (mid-rundown interruption — future feature)**
 **Remaining: Phases 3-9 require live voice/hybrid/web testing**

@@ -226,8 +226,13 @@ def init_tier2_components():
 # State setup helper (reset + configure before each test)
 # ===========================================================================
 
+_original_is_awaiting_ack = None  # saved on first call
+
+
 def setup_state(components, case):
     """Reset all state and apply case-specific setup."""
+    global _original_is_awaiting_ack
+
     router = components["router"]
     conv_state = components["conv_state"]
     memory_manager = components["memory_manager"]
@@ -244,10 +249,14 @@ def setup_state(components, case):
     if memory_manager:
         memory_manager._pending_forget = None
 
-    # Reset reminder manager rundown state
+    # Reset reminder manager rundown state + restore original ack method
     if reminder_manager:
         reminder_manager._rundown_state = None
         reminder_manager._rundown_cycle = 0
+        if _original_is_awaiting_ack is None:
+            _original_is_awaiting_ack = reminder_manager.is_awaiting_ack
+        else:
+            reminder_manager.is_awaiting_ack = _original_is_awaiting_ack
 
     # Reset ALL pending confirmations (file_editor, developer_tools, etc.)
     for sname, skill_obj in skill_manager.skills.items():
@@ -275,6 +284,10 @@ def setup_state(components, case):
             reminder_manager._rundown_state = "offered"
             from datetime import datetime
             reminder_manager._rundown_offered_at = datetime.now()
+
+    if setup.get("awaiting_ack"):
+        if reminder_manager:
+            reminder_manager.is_awaiting_ack = lambda: True
 
     if setup.get("pending_confirmation"):
         fe = skill_manager.skills.get("file_editor")
@@ -782,6 +795,32 @@ TESTS += [
              setup={"rundown_pending": True},
              expect_intent="rundown_accept", expect_handled=True,
              notes="Rundown intercepts ALL input when pending — by design (P1 priority)"),
+    TestCase("2A-04", "no", 2, "2A", "Rundown State Machine",
+             setup={"rundown_pending": True},
+             expect_intent="rundown_defer", expect_handled=True,
+             notes="Bare 'no' should decline — word-boundary match, not substring"),
+]
+
+# ---------------------------------------------------------------------------
+# TIER 2: Phase 2B — Reminder Acknowledgment
+# ---------------------------------------------------------------------------
+
+TESTS += [
+    TestCase("2B-01", "got it", 2, "2B", "Reminder Ack",
+             setup={"awaiting_ack": True},
+             expect_intent="reminder_ack", expect_handled=True,
+             notes="Ack reminder — P2 intercepts any input when awaiting ack"),
+    TestCase("2B-02", "snooze 10 minutes", 2, "2B", "Reminder Ack",
+             setup={"awaiting_ack": True},
+             expect_intent="reminder_ack", expect_handled=True,
+             notes="P2 acks ALL input when awaiting — snooze intent is lost (current behavior)"),
+    TestCase("2B-03", "what reminder is that", 2, "2B", "Reminder Ack",
+             setup={"awaiting_ack": True},
+             expect_intent="reminder_ack", expect_handled=True,
+             notes="P2 intercepts ALL input when awaiting ack"),
+    TestCase("2B-04", "yes", 2, "2B", "Reminder Ack — no pending",
+             expect_handled=False,
+             notes="No reminder pending — 'yes' (3 chars) falls to LLM. NOT intercepted at P2"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -795,9 +834,16 @@ TESTS += [
     TestCase("2C-02", "no", 2, "2C", "Forget Confirmation",
              setup={"pending_forget": True},
              expect_intent="forget_cancel", expect_handled=True),
+    TestCase("2C-03", "yes, delete it", 2, "2C", "Forget Confirmation",
+             setup={"pending_forget": True},
+             expect_intent="forget_confirm", expect_handled=True,
+             notes="P2.5 intercepts before 'delete' reaches file_editor at P4"),
     TestCase("2C-04", "forget that my birthday is in June", 2, "2C", "Forget Confirmation",
              expect_intent="memory_forget", expect_handled=True,
              notes="Start forget flow — matches FORGET_PATTERNS 'forget that ...'"),
+    TestCase("2C-04b", "forget my birthday", 2, "2C", "Forget Confirmation",
+             expect_not_skill="memory",
+             notes="Does NOT match FORGET_PATTERNS — lacks 'that/the' prefix. Falls to LLM or skill"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -817,6 +863,10 @@ TESTS += [
     TestCase("2D-04", "no thanks", 2, "2D", "Dismissal — outside window",
              in_conversation=False,
              notes="Should NOT dismiss outside conversation window"),
+    TestCase("2D-05", "no thanks, but what time is it", 2, "2D", "Dismissal — compound",
+             in_conversation=True,
+             expect_skill="conversation", expect_handled=True,
+             notes="Compound: dismissal NOT detected. 'thanks' keyword routes to conversation, not time_info"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -853,9 +903,17 @@ TESTS += [
              setup={"pending_confirmation": ("delete", {"filename": "test.txt"}, time.time() + 30)},
              expect_handled=True,
              notes="Cancel delete"),
+    TestCase("2F-03", "go ahead", 2, "2F", "File Editor Confirm",
+             setup={"pending_confirmation": ("delete", {"filename": "test.txt"}, time.time() + 30)},
+             expect_handled=True,
+             notes="'go ahead' is in affirmatives set — confirms delete"),
     TestCase("2F-04", "yes", 2, "2F", "File Editor Confirm — no pending",
              expect_handled=False,
              notes="No pending confirmation — 'yes' (3 chars) passes greeting, falls to LLM"),
+    TestCase("2F-05", "yes", 2, "2F", "File Editor Confirm — multi-step",
+             setup={"pending_confirmation": ("delete", {"filename": "temp.txt"}, time.time() + 30)},
+             expect_handled=True,
+             notes="Simulates step 2 of 'delete file' → 'yes' sequence"),
     TestCase("2F-06", "yes", 2, "2F", "File Editor Confirm — expired",
              setup={"pending_confirmation": ("delete", {"filename": "test.txt"}, time.time() - 5)},
              expect_handled=False,

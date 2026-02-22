@@ -1,17 +1,14 @@
 # TODO — Next Session
 
-**Updated:** February 21, 2026
+**Updated:** February 22, 2026
 
 ---
 
 ## Tier 1: High ROI — Do Now/Soon
 
-### 1. Edge Case Testing Phase 2 — Live Testing (12 remaining)
-**Priority:** HIGH
-**Plan:** `docs/EDGE_CASE_TESTING.md` — 18/30 Phase 2 tests automated (Tier 2), 12 require live testing
-**Automated:** Rundown accept/decline (2A-01..03), forget confirm/cancel (2C-01..02), dismissal (2D-01..03), bare ack filter (2E-01..04), file editor confirm/cancel/expire (2F-01..06)
-**Remaining live tests:** Mid-rundown flow (2A-04..08), reminder ack (2B-01..04), compound dismissal (2D-04), forget pattern edge case (2C-03..04)
-**Notes:** Needs hybrid mode (`jarvis_console.py --hybrid`) for voice output testing
+### ~~1. Edge Case Testing Phase 2~~ — COMPLETE (28/30 automated)
+**Status:** DONE. 132 tests total (39 unit + 93 routing). 4 deferred to future feature (mid-rundown interruption).
+**See:** `docs/EDGE_CASE_TESTING.md` for full results.
 
 ### 2. Inject User Facts into Web Research
 **Priority:** HIGH
@@ -108,13 +105,14 @@ None!
 
 ---
 
-## Completed (Feb 10-21)
+## Completed (Feb 10-22)
 
 *Brief summary. Full details in git history.*
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Automated Test Suite (122 tests) | Feb 21 | Tier 1: 39 unit + Tier 2: 83 routing. Post-test cleanup (process kill + file removal + state reset). Phase 2 automated: 18/30 |
+| Edge Case Phase 2 Complete (132 tests) | Feb 22 | +10 tests: reminder ack, forget edge cases, compound dismissal, file editor. 28/30 Phase 2 automated, 4 deferred (mid-rundown = future feature) |
+| Automated Test Suite (122 tests) | Feb 21 | Tier 1: 39 unit + Tier 2: 83 routing. Post-test cleanup (process guard + file removal + state reset). Phase 2 automated: 18/30 |
 | Conversational Flow Refactor (4 phases) | Feb 21 | Persona → State → Router → Polish. 10 response pools, 38 router tests, contextual acks, adaptive windows |
 | Response Pool Expansion | Feb 21 | reminder_ack 4→6, dismissal 5→7, greeting 6→8, news_pullup 3→5, ack_cache 8→10 |
 | Whisper v2 Fine-Tuning | Feb 21 | 198 phrases, FIFINE K669B, GPU fp16, 94.4% live accuracy |

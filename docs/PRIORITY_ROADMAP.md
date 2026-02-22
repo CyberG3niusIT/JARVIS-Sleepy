@@ -59,6 +59,8 @@
 | 40 | ~~**News headline trimming**~~ — DONE (Feb 20). Keep 25 most recent per category, replaces 7-day retention | ✅ | `_cleanup_old()` rewritten, `max_per_category: 25` in config | news_manager.py |
 | 18 | **Bare ack as answer** — detect "yeah"/"no" as answers to JARVIS questions vs new commands | 3-4 hours | Conversational naturalness. Currently "yeah" after a question = treated as command | TODO |
 | 19 | **Web query memory** — SQLite DB of last 100 web queries + results, "what did we look up?" | 3-4 hours | Some functionality in conversational memory already. Dedicated lookup is cleaner | MASTER_DESIGN.md |
+| 43 | **Mid-rundown interruption** — item-by-item delivery with "continue"/"skip"/"stop"/"defer" commands | 4-6 hours | Currently `deliver_rundown()` blocks on single TTS call. Needs item-at-a-time loop + active listener during delivery | Identified during Phase 2 testing (2A-05..08). See `docs/EDGE_CASE_TESTING.md` |
+| 44 | **Reminder ack intent parsing** — distinguish "got it" (ack) vs "snooze 10 min" (snooze) vs "what reminder" (query) at P2 | 2-3 hours | Currently P2 `_handle_reminder_ack()` is a blanket ack — loses snooze/query intent | Identified during Phase 2 testing (2B-02..03) |
 
 ---
 
@@ -135,4 +137,4 @@
 
 ---
 
-**Total: 42 development ideas + 5 bugs, sourced from 12+ documents across the entire project.**
+**Total: 44 development ideas + 5 bugs, sourced from 12+ documents across the entire project.**
