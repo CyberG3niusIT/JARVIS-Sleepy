@@ -634,7 +634,17 @@ class AppLauncherSkill(BaseSkill):
                 return win
 
         # Fall back to the active window
-        return self._desktop.get_active_window()
+        active = self._desktop.get_active_window()
+        if active:
+            return active
+
+        # Last resort: pick the topmost window from the window list
+        # (handles cases where get_active_window returns None, e.g. an app
+        # was just launched and hasn't taken focus yet)
+        windows = self._desktop.list_windows()
+        if windows:
+            return windows[-1]
+        return None
 
     def _no_window_response(self, action: str) -> str:
         """Response when no window can be found for the requested action."""

@@ -698,8 +698,32 @@ class Coordinator:
         self.conversation.add_message("user", command)
         self.tts._spoke = False
 
+        # --- Pre-route ack decision (must happen BEFORE routing, which blocks) ---
+        ack_style, suppress_ack = self._classify_ack(
+            command,
+            in_conversation=in_conversation,
+            jarvis_asked_question=self.conv_state.jarvis_asked_question,
+        )
+
         # --- Route through shared priority chain ---
+        # For skill-handled commands, play an ack if warranted (the skill
+        # handler may take tens of seconds, e.g. document generation).
+        # The ack fires on a short timer so fast skills finish before it plays.
+        self._llm_responded = False
+        ack_timer = None
+        if not suppress_ack:
+            ack_timer = threading.Timer(
+                0.3, self._play_ack_if_still_thinking, args=(ack_style,)
+            )
+            ack_timer.daemon = True
+            ack_timer.start()
+
         result = self.router.route(command, in_conversation=in_conversation)
+
+        # Cancel ack timer if skill returned before it fired
+        if ack_timer:
+            ack_timer.cancel()
+            self._llm_responded = True
 
         # Skip: bare acknowledgment noise
         if result.skip:
