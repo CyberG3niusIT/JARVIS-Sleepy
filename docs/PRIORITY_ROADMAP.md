@@ -29,6 +29,7 @@
 | 11 | **"Onscreen please" — retroactive visual display** — buffer last raw output, display on command | 2-3 hours | Bridge voice-to-visual gap. "Show me that" after JARVIS speaks an answer | TODO |
 | 12 | **Profile-aware commands (multi-user)** — "my calendar" loads correct user's data based on who spoke | 3-4 hours | Infrastructure already built (speaker ID + profiles). Just needs skill-level integration | MASTER_DESIGN.md |
 | 46 | **Dual-model voice recognition** — speaker-ID routes to user-specific fine-tuned vs stock Whisper | 4-6 hours | Multi-user STT without degrading primary user's accuracy | Waiting for secondary user enrollment. See `memory/plan_erica_voice_windows_port.md` |
+| 49 | **Document refinement follow-ups** — cache last structure/research, add `refine_document` intent for iterative revision | 3-4 hours | "Make slide 3 more detailed" / "add more statistics" after doc gen. Currently stumps JARVIS — no pipeline state persistence | Cache structure JSON + research context on skill instance, 10-min expiry, LLM modifies cached structure on follow-up |
 
 ---
 
