@@ -76,6 +76,7 @@ class ContinuousListener:
         self._monitor_interval = config.get("audio.device_monitor_interval", 5.0)
         self._mic_lost_announced = False
         self._on_mic_state_change = None  # Callback: (available: bool) -> None
+        self._using_fallback_device = False  # True when preferred mic wasn't found at start
 
         # Speech collection
         self.collecting_speech = False
@@ -367,6 +368,7 @@ class ContinuousListener:
 
         Mirrors the pattern in wake_word.py:_find_mic_device().
         Returns device index or None if no input device exists at all.
+        Sets self._using_fallback_device when preferred mic isn't found.
         """
         devices = sd.query_devices()
 
@@ -375,6 +377,7 @@ class ContinuousListener:
             for i, dev in enumerate(devices):
                 if (self.device in dev['name'] and
                         dev.get('max_input_channels', 0) > 0):
+                    self._using_fallback_device = False
                     return i
             self.logger.warning(f"Configured mic '{self.device}' not found, trying default")
 
@@ -385,6 +388,8 @@ class ContinuousListener:
                 dev = sd.query_devices(default_idx)
                 if dev.get('max_input_channels', 0) > 0:
                     self.logger.info(f"Using default input device: {dev['name']}")
+                    if self.device:
+                        self._using_fallback_device = True
                     return default_idx
         except Exception:
             pass
@@ -512,6 +517,7 @@ class ContinuousListener:
 
         When stream is alive, checks stream.active (cheap).
         When stream is dead, calls start() to try reconnection.
+        When running on fallback device, checks if preferred mic appeared.
         """
         self.logger.info("Device monitor started")
 
@@ -534,6 +540,25 @@ class ContinuousListener:
                 except Exception as e:
                     self.logger.warning(f"Stream health check failed: {e}")
                     self._handle_stream_lost()
+
+                # Case 1b: Stream alive but on fallback — check if preferred mic appeared
+                if self._using_fallback_device and self.device and self.stream is not None:
+                    try:
+                        devices = sd.query_devices()
+                        for dev in devices:
+                            if (self.device in dev.get('name', '') and
+                                    dev.get('max_input_channels', 0) > 0):
+                                self.logger.info(
+                                    f"🎤 Preferred mic '{self.device}' appeared — switching..."
+                                )
+                                # Tear down fallback stream and restart on preferred device
+                                self._handle_stream_lost()
+                                if self.start():
+                                    self.logger.info("🎤 Switched to preferred microphone!")
+                                    print("🎤 Preferred microphone connected!")
+                                break
+                    except Exception as e:
+                        self.logger.debug(f"Preferred mic check failed: {e}")
 
             # Case 2: No stream — try to reconnect
             else:
