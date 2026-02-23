@@ -1,7 +1,7 @@
 # JARVIS - Personal AI Assistant
 
 **Version:** 2.5.0 (Production Ready)
-**Last Updated:** February 23, 2026
+**Last Updated:** February 21, 2026
 **Status:** ✅ Stable, Feature-Rich, Voice-Controlled
 
 ---
@@ -42,8 +42,8 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - **Natural Language Understanding** - Semantic intent matching (sentence-transformers)
 - **Conversational Flow Engine** - Persona module (10 response pools, ~50 templates), ConversationState (turn tracking), ConversationRouter (shared priority chain)
 - **Text-to-Speech** - Kokoro 82M (primary, CPU, fable+george blend) + Piper ONNX fallback
-- **LLM Intelligence** - Qwen3-VL-8B (Q5_K_M) via llama.cpp + Claude API fallback with quality gating
-- **Web Research** - Qwen3-VL-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
+- **LLM Intelligence** - Qwen 3-8B (Q5_K_M) via llama.cpp + Claude API fallback with quality gating
+- **Web Research** - Qwen 3-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
 - **Event-Driven Pipeline** - Coordinator with STT/TTS workers, streaming LLM, contextual ack cache (10 tagged phrases)
 - **Gapless TTS Streaming** - StreamingAudioPipeline with single persistent aplay, background Kokoro generation
 - **Adaptive Conversation Windows** - 4-7s duration, extends with conversation depth, timeout cleanup, noise filtering, dismissal detection
@@ -112,7 +112,7 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - **Context Window** - Topic-segmented working memory, relevance-scored assembly, cross-session persistence
 - **User Profiles** - Speaker identification (resemblyzer d-vectors), dynamic honorifics, voice enrollment
 - **Google Calendar** - OAuth, event CRUD, incremental sync, background polling
-- **Cross-Session Memory** - Last 60 messages loaded from persistent history
+- **Cross-Session Memory** - Last 32 messages loaded from persistent history
 - **Health Check** - 5-layer system diagnostic (ANSI terminal report + voice summary)
 - **Hardware Failure Handling** - Startup retry, device monitoring, degraded mode, graceful recovery
 - **GNOME Desktop Bridge** - Custom GNOME Shell extension (D-Bus), Wayland-native window management, wmctrl fallback
@@ -169,7 +169,7 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 └────────────────────┬────────────────────────────────────┘
                      ↓
 ┌─────────────────────────────────────────────────────────┐
-│  LLM - Qwen3-VL-8B via REST API + Claude API fallback    │
+│  LLM - Qwen 3-8B via REST API + Claude API fallback    │
 │  • Handles unmatched queries                            │
 │  • Web research via native tool calling                 │
 │  • Conversational responses + technical reasoning       │
@@ -219,7 +219,7 @@ User: Hears response
 |-----------|-----------|---------|
 | **STT** | faster-whisper (CTranslate2, fine-tuned) | Speech recognition |
 | **TTS** | Kokoro 82M (primary) + Piper (fallback) | Speech synthesis |
-| **LLM** | Qwen3-VL-8B (Q5_K_M via llama.cpp) + Claude API | Language understanding + web research |
+| **LLM** | Qwen 3-8B (Q5_K_M via llama.cpp) + Claude API | Language understanding + web research |
 | **VAD** | WebRTC VAD | Voice activity detection |
 | **Wake Word** | Porcupine | Trigger detection |
 | **Embeddings** | sentence-transformers | Intent matching |
@@ -266,7 +266,7 @@ User: Hears response
 
 ### Phase 3: Intelligence (Days 8-10)
 - ✅ Semantic intent matching (90% pattern reduction)
-- ✅ LLM integration (Mistral 7B → Qwen 2.5-7B → Qwen 3-8B → Qwen3-VL-8B)
+- ✅ LLM integration (Mistral 7B → Qwen 2.5-7B → Qwen 3-8B)
 - ✅ Conversation context window
 - ✅ Intent confidence scoring
 
@@ -278,7 +278,7 @@ User: Hears response
 - ✅ Comprehensive documentation
 
 ### Phase 5: Major Upgrades (Feb 11) 🚀
-- ✅ **Qwen3-VL-8B LLM** (better reasoning)
+- ✅ **Qwen 3-8B LLM** (better reasoning)
 - ✅ **Custom Whisper training** (88%+ accuracy)
 - ✅ **Filesystem skill** (semantic file operations)
 - ✅ **Audio optimization** (no overflow)
@@ -310,7 +310,7 @@ User: Hears response
 - ✅ **Hardware failure graceful degradation** — startup retry, device monitor, degraded mode
 
 ### Phase 9: Web Research + Hardening (Feb 17-18) 🚀
-- ✅ **Web research (5 phases)** — Qwen3-VL-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
+- ✅ **Web research (5 phases)** — Qwen 3-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
 - ✅ **Prescriptive prompt design** — explicit rules for Qwen tool-use decisions, 150/150 correct test decisions
 - ✅ **Streaming delivery fixes** — sentence-only chunking, per-chunk metric stripping, context flush on shutdown
 - ✅ **27 bug fixes** — ack collision, keyword greediness, dismissal detection, decimal TTS, aplay lazy open, chunker decimal split, and more
@@ -349,29 +349,6 @@ User: Hears response
 - ✅ **GPU fp16 training** — 89 seconds on RX 7900 XT
 - ✅ **94.4% live accuracy** — wake word 100%, contraction handling 100%
 
-### Phase 15: Document Generation, Testing & Hardening (Feb 21-22) 🚀
-- ✅ **Document generation** — PPTX/DOCX/PDF via two-stage LLM pipeline (structure → content), Pexels stock image embedding, widescreen 16:9
-- ✅ **Doc gen prompt overhaul** — prescriptive MUST rules with GOOD/BAD inline examples, format-aware bullet depth (10-20 words with specific facts, numbers, named examples)
-- ✅ **Print document intent** — `print_document` semantic intent, CUPS auto-detection, `lp` command integration
-- ✅ **Edge case test suite expanded** — 122 → 132 → 144 → 148 → **152/152 passing** across 15 test phases
-- ✅ **ProcessGuard** — blocks subprocess launches (browsers, terminals, editors) during tests via `start_new_session=True` discriminator
-- ✅ **7 live demo bugs fixed** — parallel page fetch timeout, pre-route ack for long-running skills, fullscreen window Wayland fallback, GPU detection routing, trafilatura 5s cap, date ordinal TTS normalization, health check display routing
-- ✅ **Ack speaker-to-mic bleed fix** — mic paused during ack playback, prevents phantom commands
-- ✅ **Whisper brand-name corrections** — AMD/NVIDIA transcription fixes applied pre-routing
-- ✅ **Preferred-mic hot-swap recovery** — device monitor detects configured mic appearance, seamless fallback teardown
-- ✅ **Smart ack suppression** — skip acknowledgments for fast/conversational queries
-- ✅ **Publish script hardening** — README protection (backup/restore around rsync), document file exclusions
-
-### Phase 16: Metrics Dashboard & Community (Feb 22-23) 🚀
-- ✅ **LLM Metrics Dashboard (5 phases)** — +1,946 lines across 10 files, live at `/dashboard`
-- ✅ **Metrics data layer** — `MetricsTracker` singleton, SQLite with 16-column schema, 5 indexes, 180-day retention
-- ✅ **Metrics instrumentation** — all 3 frontends (voice, console, web) + LLM router record every interaction
-- ✅ **Dashboard backend** — 7 REST endpoints + WebSocket push for live updates
-- ✅ **Dashboard frontend** — Chart.js (interactions line, token stacked bar, provider doughnut, skills horizontal bar), paginated data explorer, CSV export, auto-refresh
-- ✅ **Web UI systemd service** — `jarvis-web.service`, auto-start after `jarvis.service`, port 8088
-- ✅ **Web UI layout improvements** — metrics link in input area, vertical voice toggle, stacked button layout
-- ✅ **GitHub community standards** — Code of Conduct, Contributing guide, Security Policy, issue templates, PR template — 100% community profile
-
 ---
 
 ## 🎨 Design Philosophy
@@ -405,29 +382,26 @@ Optimized for consumer hardware. No expensive GPUs required (though AMD GPU supp
 ## 🗺️ Roadmap
 
 ### Recently Completed
-- [x] ~~LLM Metrics Dashboard (5 phases)~~ — Done (Feb 23). Chart.js, live WebSocket, CSV export
-- [x] ~~GitHub community standards~~ — Done (Feb 23). CoC, Contributing, Security, templates
-- [x] ~~Document generation~~ — Done (Feb 22). PPTX/DOCX/PDF, Pexels images, print support
-- [x] ~~Edge case test suite~~ — Done (Feb 22). 152/152 passing across 15 phases
-- [x] ~~7 live demo bug fixes~~ — Done (Feb 22). Timeouts, ack routing, Wayland fallback, TTS normalization
 - [x] ~~Whisper v2 retraining~~ — Done (Feb 21). 198 phrases, 94%+ accuracy
 - [x] ~~Conversational Flow Refactor (4 phases)~~ — Done (Feb 21). Persona, State, Router, Polish
 - [x] ~~Web Chat UI (5 phases)~~ — Done (Feb 20). Streaming, sessions, markdown
+- [x] ~~File Editor Skill~~ — Done (Feb 20). 5 intents, confirmation flow
+- [x] ~~Edge Case Testing Phase 1~~ — Done (Feb 20). 92.5% pass rate
+- [x] ~~Ambient Wake Word Filter~~ — Done (Feb 20). Multi-signal blocking
 - [x] ~~App launcher + desktop control~~ — Done (Feb 19). 16 intents, GNOME Shell extension
 - [x] ~~Web research (Qwen tool calling)~~ — Done (Feb 18). DuckDuckGo + trafilatura
 - [x] ~~GitHub open source publication~~ — Done (Feb 18). Automated PII redaction
 
 ### Up Next
-- [ ] Inject user facts into web research (force multiplier for all research)
-- [ ] Document refinement follow-ups (cache + `refine_document` intent)
-- [ ] "Onscreen please" — retroactive visual display of last spoken answer
-- [ ] AI image generation (FLUX.1-schnell) for document slides
+- [ ] Edge Case Testing Phase 2 (priority chain & state machines)
+- [ ] Document generation skill
+- [ ] Email skill (Gmail)
+- [ ] Google Keep integration
 
 ### Medium Term
-- [ ] Vision/OCR Phase 1 (Tesseract) — "read this" / "what does this say"
-- [ ] Vision/OCR Phase 2-3 (Qwen3-VL mmproj) — full image understanding
+- [ ] Audio recording skill
 - [ ] LLM-centric architecture migration (wait for Qwen 3.5)
-- [ ] Email skill (Gmail)
+- [ ] Music control (Apple Music)
 
 ### Long Term
 - [ ] Threat hunting / malware analysis framework

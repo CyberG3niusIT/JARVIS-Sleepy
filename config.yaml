@@ -6,7 +6,7 @@ audio:
   mic_device: USB PnP Audio Device
   sample_rate: 16000
   channels: 1
-  output_device: plughw:0,0
+  output_device: default
   use_rnnoise: false
   device_monitor_interval: 5.0      # Seconds between hot-plug checks
   startup_retry_count: 5             # Max mic retries at boot

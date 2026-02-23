@@ -243,6 +243,28 @@ def check_bare_metal(config=None):
                 ))
                 break
 
+        # sounddevice only sees ALSA hardware devices; USB mics managed by
+        # PipeWire may be invisible.  Fall back to pactl to check.
+        if not found_configured and mic_name:
+            try:
+                import subprocess as _sp
+                pactl_out = _sp.run(
+                    ["pactl", "list", "sources", "short"],
+                    capture_output=True, text=True, timeout=3,
+                ).stdout
+                for line in pactl_out.splitlines():
+                    if mic_name.replace(" ", "_") in line:
+                        found_configured = True
+                        any_input = True
+                        results.append(_check(
+                            "Audio Input", "green",
+                            f"{mic_name} (PipeWire)",
+                            f"device={mic_name} configured=yes pipewire=yes",
+                        ))
+                        break
+            except Exception:
+                pass  # pactl unavailable — fall through to yellow/red
+
         if not found_configured:
             if any_input:
                 results.append(_check(

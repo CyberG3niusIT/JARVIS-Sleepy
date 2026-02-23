@@ -90,6 +90,13 @@ class JarvisContinuous:
         self.responses = get_response_library()
         self.llm = LLMRouter(config)
         
+        # --- Desktop manager (GNOME integration) ---
+        # Must init before skills so AppLauncherSkill can find the singleton
+        self.desktop_manager = None
+        if config.get("desktop.enabled", True):
+            self.desktop_manager = get_desktop_manager(config)
+            self.logger.info("Desktop manager initialized")
+
         # Initialize skill system
         self.skill_manager = SkillManager(config, self.conversation, self.tts, self.responses, self.llm)
         self.logger.info("Loading skills...")
@@ -134,12 +141,6 @@ class JarvisContinuous:
             )
 
             self.logger.info("Context window (working memory) enabled")
-
-        # --- Desktop manager (GNOME integration) ---
-        self.desktop_manager = None
-        if config.get("desktop.enabled", True):
-            self.desktop_manager = get_desktop_manager(config)
-            self.logger.info("Desktop manager initialized")
 
         # --- LLM Metrics tracking ---
         self.metrics = get_metrics_tracker(config)

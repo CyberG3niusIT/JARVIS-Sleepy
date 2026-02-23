@@ -97,14 +97,16 @@ class WebResearcher:
             self._last_search_time = time.time()
             return []
 
-    def fetch_page(self, url: str, max_chars: int = 4000) -> Optional[str]:
+    def fetch_page(self, url: str, max_chars: int = 4000,
+                   timeout: float = 4.0) -> Optional[str]:
         """Fetch and extract main content from a web page.
 
-        Uses trafilatura for content extraction with requests fallback.
+        Uses requests for download (hard timeout) + trafilatura for extraction.
 
         Args:
             url: Page URL to fetch
             max_chars: Maximum characters to return (default 4000)
+            timeout: HTTP request timeout in seconds (default 4.0)
 
         Returns:
             Extracted text content, or None on failure.
@@ -116,17 +118,20 @@ class WebResearcher:
             return cached[:max_chars]
 
         try:
+            import requests as _req
             import trafilatura
 
-            # Use 5s timeout (trafilatura default is 30s which blocks threads)
-            traf_config = trafilatura.settings.use_config()
-            traf_config.set('DEFAULT', 'download_timeout', '5')
-            downloaded = trafilatura.fetch_url(url, config=traf_config)
-            if not downloaded:
+            # Use requests with hard timeout (trafilatura's timeout is unreliable)
+            resp = _req.get(url, timeout=timeout, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; research-bot/1.0)",
+            })
+            resp.raise_for_status()
+            html = resp.text
+            if not html:
                 self.logger.warning(f"Page fetch returned nothing: {url}")
                 return None
 
-            text = trafilatura.extract(downloaded, include_links=False,
+            text = trafilatura.extract(html, include_links=False,
                                        include_tables=True,
                                        include_comments=False)
             if not text:
@@ -143,7 +148,7 @@ class WebResearcher:
             return None
 
     def fetch_pages_parallel(self, results: list[dict], max_results: int = 3,
-                             max_chars: int = 2000, timeout: float = 3.0,
+                             max_chars: int = 2000, timeout: float = 5.0,
                              min_chars: int = 300) -> list[str]:
         """Fetch page content from multiple search results concurrently.
 
@@ -151,7 +156,7 @@ class WebResearcher:
             results: Search results (each has 'title', 'url', 'snippet')
             max_results: Maximum number of pages to fetch
             max_chars: Max characters per page
-            timeout: Per-page fetch timeout in seconds
+            timeout: Hard wall-clock timeout for all fetches (seconds)
             min_chars: Minimum content length to include
 
         Returns:
@@ -169,16 +174,20 @@ class WebResearcher:
         page_sections = []
         start = time.time()
 
-        with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+        # Don't use context manager — its __exit__ calls shutdown(wait=True)
+        # which blocks until ALL threads finish, defeating the timeout.
+        pool = ThreadPoolExecutor(max_workers=len(urls))
+        try:
             future_to_info = {
-                pool.submit(self.fetch_page, url, max_chars): (title, url)
+                pool.submit(self.fetch_page, url, max_chars, timeout - 1):
+                    (title, url)
                 for title, url in urls
             }
             try:
-                for future in as_completed(future_to_info, timeout=timeout + 1):
+                for future in as_completed(future_to_info, timeout=timeout):
                     title, url = future_to_info[future]
                     try:
-                        page_text = future.result(timeout=timeout)
+                        page_text = future.result(timeout=0.5)
                         if page_text and len(page_text) >= min_chars:
                             page_sections.append(
                                 f"[{title}] ({url}):\n{page_text}"
@@ -191,6 +200,9 @@ class WebResearcher:
                     f"Parallel fetch: {timed_out} page(s) timed out, "
                     f"continuing with {len(page_sections)} collected"
                 )
+        finally:
+            # cancel_futures=True kills pending; wait=False doesn't block on running
+            pool.shutdown(wait=False, cancel_futures=True)
 
         elapsed = time.time() - start
         self.logger.info(
