@@ -42,8 +42,8 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - **Natural Language Understanding** - Semantic intent matching (sentence-transformers)
 - **Conversational Flow Engine** - Persona module (10 response pools, ~50 templates), ConversationState (turn tracking), ConversationRouter (shared priority chain)
 - **Text-to-Speech** - Kokoro 82M (primary, CPU, fable+george blend) + Piper ONNX fallback
-- **LLM Intelligence** - Qwen 3-8B (Q5_K_M) via llama.cpp + Claude API fallback with quality gating
-- **Web Research** - Qwen 3-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
+- **LLM Intelligence** - Qwen3-VL-8B (Q5_K_M) via llama.cpp + Claude API fallback with quality gating
+- **Web Research** - Qwen3-VL-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
 - **Event-Driven Pipeline** - Coordinator with STT/TTS workers, streaming LLM, contextual ack cache (10 tagged phrases)
 - **Gapless TTS Streaming** - StreamingAudioPipeline with single persistent aplay, background Kokoro generation
 - **Adaptive Conversation Windows** - 4-7s duration, extends with conversation depth, timeout cleanup, noise filtering, dismissal detection
@@ -112,7 +112,7 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - **Context Window** - Topic-segmented working memory, relevance-scored assembly, cross-session persistence
 - **User Profiles** - Speaker identification (resemblyzer d-vectors), dynamic honorifics, voice enrollment
 - **Google Calendar** - OAuth, event CRUD, incremental sync, background polling
-- **Cross-Session Memory** - Last 32 messages loaded from persistent history
+- **Cross-Session Memory** - Last 60 messages loaded from persistent history
 - **Health Check** - 5-layer system diagnostic (ANSI terminal report + voice summary)
 - **Hardware Failure Handling** - Startup retry, device monitoring, degraded mode, graceful recovery
 - **GNOME Desktop Bridge** - Custom GNOME Shell extension (D-Bus), Wayland-native window management, wmctrl fallback
@@ -169,7 +169,7 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 └────────────────────┬────────────────────────────────────┘
                      ↓
 ┌─────────────────────────────────────────────────────────┐
-│  LLM - Qwen 3-8B via REST API + Claude API fallback    │
+│  LLM - Qwen3-VL-8B via REST API + Claude API fallback    │
 │  • Handles unmatched queries                            │
 │  • Web research via native tool calling                 │
 │  • Conversational responses + technical reasoning       │
@@ -219,7 +219,7 @@ User: Hears response
 |-----------|-----------|---------|
 | **STT** | faster-whisper (CTranslate2, fine-tuned) | Speech recognition |
 | **TTS** | Kokoro 82M (primary) + Piper (fallback) | Speech synthesis |
-| **LLM** | Qwen 3-8B (Q5_K_M via llama.cpp) + Claude API | Language understanding + web research |
+| **LLM** | Qwen3-VL-8B (Q5_K_M via llama.cpp) + Claude API | Language understanding + web research |
 | **VAD** | WebRTC VAD | Voice activity detection |
 | **Wake Word** | Porcupine | Trigger detection |
 | **Embeddings** | sentence-transformers | Intent matching |
@@ -266,7 +266,7 @@ User: Hears response
 
 ### Phase 3: Intelligence (Days 8-10)
 - ✅ Semantic intent matching (90% pattern reduction)
-- ✅ LLM integration (Mistral 7B → Qwen 2.5-7B → Qwen 3-8B)
+- ✅ LLM integration (Mistral 7B → Qwen 2.5-7B → Qwen 3-8B → Qwen3-VL-8B)
 - ✅ Conversation context window
 - ✅ Intent confidence scoring
 
@@ -278,7 +278,7 @@ User: Hears response
 - ✅ Comprehensive documentation
 
 ### Phase 5: Major Upgrades (Feb 11) 🚀
-- ✅ **Qwen 3-8B LLM** (better reasoning)
+- ✅ **Qwen3-VL-8B LLM** (better reasoning)
 - ✅ **Custom Whisper training** (88%+ accuracy)
 - ✅ **Filesystem skill** (semantic file operations)
 - ✅ **Audio optimization** (no overflow)
@@ -310,7 +310,7 @@ User: Hears response
 - ✅ **Hardware failure graceful degradation** — startup retry, device monitor, degraded mode
 
 ### Phase 9: Web Research + Hardening (Feb 17-18) 🚀
-- ✅ **Web research (5 phases)** — Qwen 3-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
+- ✅ **Web research (5 phases)** — Qwen3-VL-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
 - ✅ **Prescriptive prompt design** — explicit rules for Qwen tool-use decisions, 150/150 correct test decisions
 - ✅ **Streaming delivery fixes** — sentence-only chunking, per-chunk metric stripping, context flush on shutdown
 - ✅ **27 bug fixes** — ack collision, keyword greediness, dismissal detection, decimal TTS, aplay lazy open, chunker decimal split, and more
