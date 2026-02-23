@@ -594,7 +594,7 @@ audio:
   mic_device: "USB PnP Audio Device"   # Your microphone name
   sample_rate: 16000                    # Don't change (Whisper expects 16kHz)
   channels: 1
-  output_device: plughw:0,0            # ALSA output device
+  output_device: default                # PipeWire default (or plughw:0,0 for direct ALSA)
   device_monitor_interval: 5.0         # Hot-plug detection interval
 ```
 
@@ -810,6 +810,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Version:** 2.5.0
+**Version:** 2.6.0
 **Status:** Production — actively developed
 **Last Updated:** February 22, 2026

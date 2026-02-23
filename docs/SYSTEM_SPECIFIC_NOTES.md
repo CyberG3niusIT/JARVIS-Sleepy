@@ -79,7 +79,8 @@ Fallback base model (CPU only):
 
 ### Audio Devices
 - **Microphone:** FIFINE K669B USB condenser mic (hw:fifine,0 via udev rule)
-- **Speakers:** ALCS1200A Analog (plughw:0,0)
+- **Output:** PipeWire default device (`output_device: default` in config.yaml)
+  - Changed from `plughw:0,0` (Feb 23) to enable PipeWire routing and OBS coexistence
 - **Secondary mic (unused):** EMEET SmartCam Nova 4K webcam (hw:2,0)
 
 ## Configuration Checklist
@@ -107,5 +108,5 @@ When updating `config.yaml`, always verify:
 
 ---
 
-**Last Updated:** February 22, 2026
+**Last Updated:** February 23, 2026
 **System:** ubuntu2404 (the user's workstation)

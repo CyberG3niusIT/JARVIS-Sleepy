@@ -12,7 +12,7 @@
 The automated test harness (`scripts/test_edge_cases.py`) validates routing and unit-level behavior
 by injecting text directly into the pipeline — no voice/mic/TTS needed.
 
-**Current results: 122/122 (100%) — Tier 1: 39/39 | Tier 2: 83/83**
+**Current results: 152/152 (100%) — Tier 1: 39/39 | Tier 2: 113/113**
 
 ### Quick Reference
 
@@ -31,7 +31,7 @@ python3 scripts/test_edge_cases.py --json        # JSON output
 | Tier | Scope | Tests | Load Time | Description |
 |------|-------|-------|-----------|-------------|
 | 1 | Unit | 39 | <1s | Ambient filter (13), noise filter (7), TTS normalizer (14), speech chunker (5) |
-| 2 | Routing | 93 | ~5s | Intent routing (40), priority chain/state machines (28), skill validation (23), priority ordering (2) |
+| 2 | Routing | 113 | ~5s | Intent routing (40), priority chain/state machines (28), skill validation (23), priority ordering (2), routing expansion (20) |
 | 3 | Execution | — | Future | Run skill handlers, validate response content |
 | 4 | Pipeline | — | Future | Full pipeline with LLM server running |
 

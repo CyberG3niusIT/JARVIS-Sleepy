@@ -161,7 +161,7 @@ journalctl --user -u jarvis -f
    journalctl --user -u jarvis | grep "🚀 GPU ACTIVE"
 ```
 
-See `docs/GPU_TROUBLESHOOTING.md` for detailed GPU setup.
+See the CTranslate2 build instructions in the README for detailed GPU setup.
 
 ## Voice Training (Optional)
 
@@ -251,12 +251,17 @@ python3 jarvis_console.py
 ### Anthropic Claude
 - **Get:** https://console.anthropic.com/
 - **Free Tier:** $5 credit for new accounts
-- **Required:** Yes (for LLM responses)
+- **Required:** No (quality fallback only — local Qwen3-VL-8B handles most queries)
 
 ### OpenWeather
 - **Get:** https://openweathermap.org/api
 - **Free Tier:** Yes
 - **Required:** No (weather skill only)
+
+### Pexels
+- **Get:** https://www.pexels.com/api/
+- **Free Tier:** Yes
+- **Required:** No (stock images for document generation — text-only slides without it)
 
 ## Updating
 ```bash
@@ -281,6 +286,6 @@ JARVIS automatically backs up to:
 
 ---
 
-**Version:** 2.5.0
-**Last Updated:** February 21, 2026
+**Version:** 2.6.0
+**Last Updated:** February 23, 2026
 **Status:** Production Ready

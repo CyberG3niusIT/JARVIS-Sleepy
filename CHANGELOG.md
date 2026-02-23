@@ -1,5 +1,54 @@
 # JARVIS Changelog
 
+## [2026-02-23] - Demo Prep + LLM Metrics + 4 Bug Fixes
+
+### Major Features
+- **LLM Metrics Dashboard (5 phases)** — `core/metrics_tracker.py`, `jarvis_web.py`, `web/metrics.html`
+  - Real-time tracking of LLM calls: tokens, latency, local vs API, quality gate retries
+  - Web dashboard at `/metrics` with charts, tables, and summary stats
+  - Persistent SQLite storage with 30-day retention
+  - Per-skill and per-model breakdowns
+- **jarvis-web.service** — systemd user service for web UI, auto-start after jarvis.service
+
+### Bug Fixes
+- **Web research page fetch timeout** — 20s+ → ~5s. Replaced `trafilatura.fetch_url()` with `requests.get(timeout=4)` + manual `pool.shutdown(wait=False, cancel_futures=True)`
+- **Desktop manager init order** — skills loaded before desktop manager was created → "not available" for all window management. Moved init before skill loading
+- **Health check PipeWire mic detection** — `sounddevice.query_devices()` misses PipeWire USB devices. Added `pactl list sources short` fallback
+- **Audio output PipeWire routing** — changed `output_device: plughw:0,0` → `output_device: default` for PipeWire compatibility (enables OBS coexistence)
+
+### Other Changes
+- Preferred-mic hot-swap recovery — device monitor recovers from wrong-mic fallback after boot race
+- Ack speaker-to-mic bleed fix — mic paused during ack playback
+- Whisper brand-name corrections — "and videos"→"amd's", "in video"→"nvidia"
+- WebUI health check spoken/on-screen mismatch fixed
+- Edge case tests expanded to 152 (from 144)
+
+---
+
+## [2026-02-22] - Document Generation + Qwen3-VL-8B + Smart Ack Suppression
+
+### Major Features
+- **Document Generation** — `skills/system/file_editor/document_generator.py`
+  - PPTX, DOCX, PDF generation via two-stage LLM pipeline
+  - Optional web research for content enrichment
+  - Pexels stock image integration with per-slide relevance scoring
+  - Saved to `share/` directory with notification
+- **Qwen3-VL-8B Model Upgrade** — `llama-server.service`
+  - Self-quantized Q5_K_M from F16 source (llama-quantize)
+  - llama.cpp rebuilt with ROCm (`GGML_HIP=ON`)
+  - 80.2 tok/s generation, vision-capable (mmproj encoder downloaded)
+- **Smart Ack Suppression** — `core/pipeline.py`
+  - Skip acknowledgments for fast/conversational queries
+  - Reduces unnecessary "one moment, sir" for instant responses
+
+### Bug Fixes
+- Doc gen prompt overhaul (prescriptive depth rules for Qwen)
+- publish.sh README protection (prevents overwrite of curated public README)
+- 7 doc gen live testing bugs fixed during demo prep
+- Edge case tests expanded to 144 (Phase 1E)
+
+---
+
 ## [2026-02-21] - Conversational Flow Refactor + Whisper v2
 
 ### Major Features

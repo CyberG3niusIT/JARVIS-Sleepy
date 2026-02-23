@@ -10,13 +10,19 @@ Skills are modular components that handle specific intents and commands. JARVIS 
 ## Skill Structure
 ```
 /mnt/storage/jarvis/skills/
-├── system/           # System-level skills
-│   ├── weather/
-│   ├── time_info/
-│   ├── system_info/
-│   └── filesystem/
-└── personal/         # User-specific skills
-    └── conversation/
+├── system/              # System-level skills
+│   ├── weather/         # Weather forecasts
+│   ├── time_info/       # Time and date
+│   ├── system_info/     # CPU, memory, system info
+│   ├── filesystem/      # File search, line counting
+│   ├── file_editor/     # File ops + document generation (PPTX/DOCX/PDF)
+│   ├── developer_tools/ # Codebase search, git, shell, visual output
+│   ├── app_launcher/    # Desktop control (16 intents)
+│   └── web_navigation/  # Web search & browsing
+└── personal/            # User-specific skills
+    ├── conversation/    # Greetings, small talk
+    ├── reminders/       # Voice reminders + calendar
+    └── news/            # RSS headline delivery
 ```
 
 Each skill directory contains:
@@ -364,16 +370,15 @@ def analyze_with_llm(self, entities: dict) -> str:
     return response
 ```
 
-## Skill Ideas
+## Skill Ideas (Not Yet Implemented)
 
-- **News:** Fetch latest headlines
-- **Reminders:** Set/list reminders
+- **Email:** Check/send emails (Gmail API + OAuth)
+- **Google Keep:** Shared grocery/todo lists
+- **Audio Recording:** Voice memos, meeting notes
+- **Music Control:** Apple Music integration
 - **Calculator:** Mathematical operations
 - **Unit Converter:** Temperature, distance, etc.
-- **Notes:** Take/retrieve notes
 - **Home Automation:** Control smart devices
-- **Email:** Check/send emails
-- **Calendar:** Schedule management
 
 ---
 
