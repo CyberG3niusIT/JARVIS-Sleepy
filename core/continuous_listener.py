@@ -623,6 +623,11 @@ class ContinuousListener:
         # Reset VAD state so residual TTS energy doesn't count as speech
         self.vad.reset()
 
+        # Acoustic settling delay — let room echo/reverb dissipate before
+        # re-enabling the audio callback.  _speaking_event is still set
+        # during this window, so incoming frames are discarded.
+        time.sleep(0.35)
+
         self.speaking = False
         self._speaking_event.clear()  # Allow audio callback to resume processing
         self.logger.info("🔊 Listening resumed")
@@ -636,6 +641,7 @@ class ContinuousListener:
         "in video": "nvidia",
         "in vidya": "nvidia",
         "and vidya": "nvidia",
+        "quinn": "qwen",
     }
 
     def _apply_transcription_corrections(self, text: str) -> str:

@@ -33,6 +33,7 @@
 | 50 | **AI image generation (FLUX.1-schnell)** — local image gen for doc gen, hybrid with Pexels | 4-6 hours | Pexels fails for tech/abstract topics. LLM decides per-slide: Pexels (photographic) vs FLUX (conceptual). Pre-load during research phase to hide cold start | Research complete: `memory/research_image_gen_ocr_selfprompt.md`. FLUX FP8 fits 20GB VRAM, ~12-20s/image. SDXL Lightning as faster fallback |
 | 51 | **Vision/OCR skill — Phase 1 Tesseract** — "read this" / "what does this say" via screenshot + OCR | 1-2 days | Immediate daily utility. CPU-only, 95-98% accuracy, 0.5-2s/page. Input via clipboard/screenshot/file | Proposed: `skills/system/vision/`. 4 intents: read_screen, describe_image, read_document, read_chart |
 | 52 | **Vision/OCR skill — Phase 2-3 Qwen3-VL** — full image understanding via mmproj vision encoder | 3-5 days | Chart reading, diagram understanding, visual Q&A, slide verification, web UI file upload. mmproj already downloaded (718MB) | Dynamic mmproj loading (0.6GB) only for image tasks. Supersedes earlier Qwen2.5-VL plans |
+| 55 | **Network awareness skill** — "what's on my network?" / "anything suspicious?" via voice | 4-8 hours | Device discovery (arp-scan/nmap), baseline known vs unknown devices, port/service anomaly detection, traffic analysis summaries, threat alerts | Fits threat hunting background. Natural skill: `skills/system/network/`. Intents: scan_network, list_devices, check_threats, network_status |
 
 ---
 
@@ -161,4 +162,4 @@
 
 ---
 
-**Total: 54 development ideas + 8 non-roadmap enhancements completed, sourced from 12+ documents across the entire project.**
+**Total: 55 development ideas + 8 non-roadmap enhancements completed, sourced from 12+ documents across the entire project.**

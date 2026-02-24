@@ -23,7 +23,7 @@ _generic_keywords = {"search", "open", "find", "look", "browse", "navigate", "we
                      "file", "code", "directory", "count", "analyze", "amazon"}
 
 # Keywords with explicit handler aliases get a bonus so they win ties
-_keyword_aliases = {"google", "search", "codebase"}
+_keyword_aliases = {"google", "codebase"}
 
 
 class SkillManager:
@@ -543,7 +543,6 @@ class SkillManager:
                 # Explicit keyword→handler aliases (keywords that don't suffix-match naturally)
                 _handler_aliases = {
                     "google": "search_web",
-                    "search": "search_web",
                 }
                 # _generic_keywords is module-level (shared with _match_by_keywords)
 
