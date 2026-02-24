@@ -349,6 +349,26 @@ User: Hears response
 - ✅ **GPU fp16 training** — 89 seconds on RX 7900 XT
 - ✅ **94.4% live accuracy** — wake word 100%, contraction handling 100%
 
+### Phase 15: Document Generation + Demo Prep (Feb 22) 🚀
+- ✅ **Document Generation** — PPTX/DOCX/PDF via two-stage LLM pipeline, web research integration, Pexels images
+- ✅ **Smart Ack Suppression** — Skip acknowledgments for fast/conversational queries
+- ✅ **Doc gen prompt overhaul** — Prescriptive depth rules for Qwen
+- ✅ **7 live testing bugs fixed** — publish.sh README protection
+- ✅ **Edge case tests expanded** — 144 tests (Phase 1E)
+
+### Phase 16: LLM Metrics Dashboard + Bug Fixes (Feb 23) 🚀
+- ✅ **LLM Metrics Dashboard (5 phases)** — Real-time tracking, web dashboard at `/metrics`, persistent SQLite, per-skill breakdowns
+- ✅ **jarvis-web.service** — Systemd user service for web UI, auto-start after jarvis.service
+- ✅ **4 bug fixes** — Web research timeout, desktop manager init order, health check PipeWire, audio PipeWire routing
+- ✅ **Preferred-mic hot-swap recovery** — Device monitor recovers from wrong-mic fallback after boot race
+- ✅ **Edge case tests expanded** — 152 tests (150/152 pass, 98.7%)
+
+### Phase 17: Qwen3.5-35B-A3B Model Upgrade (Feb 24) 🚀
+- ✅ **Qwen3.5-35B-A3B** — MoE (256 experts, 8+1 active, ~3B active params), Q3_K_M quantization, 48-63 tok/s, IFEval 91.9
+- ✅ **llama.cpp rebuilt** — ROCm build 8146, `GGML_HIP=ON`, 19.5/20.5 GB VRAM
+- ✅ **3 voice test fixes** — Web search routing (removed stale keyword alias), ack bleed (0.35s settling delay), Whisper "quinn"→"qwen"
+- ✅ **Full doc overhaul** — 12 files updated to reflect Qwen3.5-35B-A3B across all references
+
 ---
 
 ## 🎨 Design Philosophy
@@ -590,7 +610,7 @@ Include:
 - ✅ Three frontends: voice, console, web UI (all sharing one router)
 - ✅ Web Chat UI with streaming, markdown, session sidebar, and health HUD
 - ✅ Ambient wake word filter (multi-signal, blocks false triggers)
-- ✅ 38 router tests + 92.5% edge case pass rate
+- ✅ 38 router tests + 98.7% edge case pass rate (150/152)
 - ✅ Hardware failure graceful degradation
 - ✅ Sub-600ms skill responses (300-600ms)
 - ✅ Open source on GitHub with automated PII redaction
