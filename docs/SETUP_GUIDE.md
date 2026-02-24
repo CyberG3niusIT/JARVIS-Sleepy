@@ -77,7 +77,7 @@ wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_
 wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx.json
 
 # Qwen LLM (optional - uses Claude API by default)
-# Instructions at: https://huggingface.co/Qwen/Qwen3-8B-GGUF
+# Instructions at: https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF
 ```
 
 ### 6. Configure Paths

@@ -1,7 +1,7 @@
 # JARVIS - Personal AI Assistant
 
-**Version:** 2.5.0 (Production Ready)
-**Last Updated:** February 21, 2026
+**Version:** 2.7.0 (Production Ready)
+**Last Updated:** February 24, 2026
 **Status:** ✅ Stable, Feature-Rich, Voice-Controlled
 
 ---
@@ -42,8 +42,8 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 - **Natural Language Understanding** - Semantic intent matching (sentence-transformers)
 - **Conversational Flow Engine** - Persona module (10 response pools, ~50 templates), ConversationState (turn tracking), ConversationRouter (shared priority chain)
 - **Text-to-Speech** - Kokoro 82M (primary, CPU, fable+george blend) + Piper ONNX fallback
-- **LLM Intelligence** - Qwen 3-8B (Q5_K_M) via llama.cpp + Claude API fallback with quality gating
-- **Web Research** - Qwen 3-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
+- **LLM Intelligence** - Qwen3.5-35B-A3B (Q3_K_M, MoE, 3B active params) via llama.cpp + Claude API fallback with quality gating
+- **Web Research** - Qwen3.5 native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
 - **Event-Driven Pipeline** - Coordinator with STT/TTS workers, streaming LLM, contextual ack cache (10 tagged phrases)
 - **Gapless TTS Streaming** - StreamingAudioPipeline with single persistent aplay, background Kokoro generation
 - **Adaptive Conversation Windows** - 4-7s duration, extends with conversation depth, timeout cleanup, noise filtering, dismissal detection
@@ -169,8 +169,8 @@ JARVIS (Just A Rather Very Intelligent System) is a fully offline, voice-control
 └────────────────────┬────────────────────────────────────┘
                      ↓
 ┌─────────────────────────────────────────────────────────┐
-│  LLM - Qwen 3-8B via REST API + Claude API fallback    │
-│  • Handles unmatched queries                            │
+│  LLM - Qwen3.5-35B-A3B via REST API + Claude fallback   │
+│  • MoE: 256 experts, 8+1 active (~3B active params)    │
 │  • Web research via native tool calling                 │
 │  • Conversational responses + technical reasoning       │
 └────────────────────┬────────────────────────────────────┘
@@ -219,7 +219,7 @@ User: Hears response
 |-----------|-----------|---------|
 | **STT** | faster-whisper (CTranslate2, fine-tuned) | Speech recognition |
 | **TTS** | Kokoro 82M (primary) + Piper (fallback) | Speech synthesis |
-| **LLM** | Qwen 3-8B (Q5_K_M via llama.cpp) + Claude API | Language understanding + web research |
+| **LLM** | Qwen3.5-35B-A3B (Q3_K_M via llama.cpp) + Claude API | Language understanding + web research |
 | **VAD** | WebRTC VAD | Voice activity detection |
 | **Wake Word** | Porcupine | Trigger detection |
 | **Embeddings** | sentence-transformers | Intent matching |
@@ -266,7 +266,7 @@ User: Hears response
 
 ### Phase 3: Intelligence (Days 8-10)
 - ✅ Semantic intent matching (90% pattern reduction)
-- ✅ LLM integration (Mistral 7B → Qwen 2.5-7B → Qwen 3-8B)
+- ✅ LLM integration (Mistral 7B → Qwen 2.5-7B → Qwen 3-8B → Qwen3-VL-8B → Qwen3.5-35B-A3B)
 - ✅ Conversation context window
 - ✅ Intent confidence scoring
 
@@ -310,7 +310,7 @@ User: Hears response
 - ✅ **Hardware failure graceful degradation** — startup retry, device monitor, degraded mode
 
 ### Phase 9: Web Research + Hardening (Feb 17-18) 🚀
-- ✅ **Web research (5 phases)** — Qwen 3-8B native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
+- ✅ **Web research (5 phases)** — Qwen native tool calling + DuckDuckGo + trafilatura, multi-source synthesis
 - ✅ **Prescriptive prompt design** — explicit rules for Qwen tool-use decisions, 150/150 correct test decisions
 - ✅ **Streaming delivery fixes** — sentence-only chunking, per-chunk metric stripping, context flush on shutdown
 - ✅ **27 bug fixes** — ack collision, keyword greediness, dismissal detection, decimal TTS, aplay lazy open, chunker decimal split, and more
@@ -393,15 +393,15 @@ Optimized for consumer hardware. No expensive GPUs required (though AMD GPU supp
 - [x] ~~GitHub open source publication~~ — Done (Feb 18). Automated PII redaction
 
 ### Up Next
-- [ ] Edge Case Testing Phase 2 (priority chain & state machines)
-- [ ] Document generation skill
-- [ ] Email skill (Gmail)
-- [ ] Google Keep integration
+- [ ] Task planner + self-awareness (4 phases planned)
+- [ ] Document refinement follow-ups
+- [ ] AI image generation (FLUX.1-schnell)
+- [ ] Vision/OCR skill (Phase 1 Tesseract)
 
 ### Medium Term
 - [ ] Audio recording skill
-- [ ] LLM-centric architecture migration (wait for Qwen 3.5)
-- [ ] Music control (Apple Music)
+- [ ] LLM-centric architecture migration
+- [ ] Email skill (Gmail)
 
 ### Long Term
 - [ ] Threat hunting / malware analysis framework
@@ -531,7 +531,7 @@ Include:
 - Speech recognition: 94%+ (fine-tuned Whisper v2, 198 phrases, Southern accent)
 - Intent matching: 95%+ (semantic embeddings)
 - Routing tests: 38/38 pass (`scripts/test_router.py`)
-- Edge case testing: 92.5% (37/40 Phase 1)
+- Edge case testing: 98.7% (150/152 across 39 unit + 113 routing tests)
 
 ### Latency
 - Wake word detection: <100ms
@@ -544,8 +544,8 @@ Include:
 ### Resource Usage
 - RAM: ~4GB (with all models loaded)
 - CPU: 10-30% during processing
-- GPU: RX 7900 XT via ROCm (STT acceleration)
-- Disk: ~15GB (models + code)
+- GPU: RX 7900 XT via ROCm (STT + LLM, 19.5/20.5 GB VRAM used)
+- Disk: ~25GB (models + code)
 
 ---
 

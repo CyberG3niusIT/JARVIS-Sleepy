@@ -883,7 +883,7 @@ class LLMRouter:
             max_tokens = self._estimate_max_tokens(user_message)
         system_prompt = self._build_system_prompt()
         # Prescriptive tool-use prompt: tell Qwen exactly when to search and
-        # when NOT to.  Qwen3-8B with tool_choice=auto ignores vague guidance
+        # when NOT to.  Qwen with tool_choice=auto ignores vague guidance
         # ("when in doubt, search") but reliably follows explicit rules.
         # Tested 15 runs × 7 queries + 15 edge cases × 3 runs = 0 failures.
         today = date.today().strftime("%B %d, %Y")
