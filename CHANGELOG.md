@@ -1,6 +1,6 @@
 # JARVIS Changelog
 
-## [2026-02-24] - Qwen3.5-35B-A3B Upgrade + Voice Test Fixes
+## [2026-02-24] - Qwen3.5-35B-A3B Upgrade + LLM Test Suite + Voice Fixes
 
 ### Major Features
 - **Qwen3.5-35B-A3B Model Upgrade** — `llama-server.service`
@@ -9,6 +9,20 @@
   - 48-63 tok/s (comparable to old 8B dense), IFEval 91.9 (was ~70s)
   - VRAM: 19.5/20.5 GB (~1 GB headroom), `--parallel 1` for single-user
   - Replaces Qwen3-VL-8B Q5_K_M
+
+### Testing
+- **Tier 4 LLM test suite** — 28 automated tests validating live model responses
+  - System prompt adherence (5): no-filler, imperial units, brevity, date awareness
+  - Personality & opinions (3): no "as an AI", humor, warmth
+  - Tool calling (4): search when needed, restrain when not
+  - Structured output (2): clean JSON extraction
+  - Multi-turn context (2): fact recall, topic tracking
+  - Safety & refusal (3): phishing, prompt injection, malware
+  - Hallucination resistance (2): fake entities correctly rejected
+  - Technical knowledge (4): cybersecurity, Python, Linux, code gen
+  - Voice assistant fitness (3): conversational flow, brevity, imperial
+  - Total suite: 180/180 (Tier 1: 39, Tier 2: 113, Tier 4: 28)
+  - Requires llama-server running; skips gracefully when unavailable
 
 ### Bug Fixes
 - **Web search routing** — removed "search" keyword alias that hard-routed all search commands to browser instead of LLM web research pipeline. Site-specific searches (YouTube, Google) still route correctly via keyword/semantic matching

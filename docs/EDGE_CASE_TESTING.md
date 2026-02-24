@@ -12,7 +12,7 @@
 The automated test harness (`scripts/test_edge_cases.py`) validates routing and unit-level behavior
 by injecting text directly into the pipeline — no voice/mic/TTS needed.
 
-**Current results: 152/152 (100%) — Tier 1: 39/39 | Tier 2: 113/113**
+**Current results: 180/180 (100%) — Tier 1: 39/39 | Tier 2: 113/113 | Tier 4: 28/28**
 
 ### Quick Reference
 
@@ -20,8 +20,10 @@ by injecting text directly into the pipeline — no voice/mic/TTS needed.
 python3 scripts/test_edge_cases.py              # Tiers 1+2 (default)
 python3 scripts/test_edge_cases.py --tier 1     # Unit tests only (<1s)
 python3 scripts/test_edge_cases.py --tier 2     # Routing tests only (~5s load)
-python3 scripts/test_edge_cases.py --phase 1A   # Single phase
-python3 scripts/test_edge_cases.py --id 1A-01   # Single test
+python3 scripts/test_edge_cases.py --tier 4     # LLM tests only (requires llama-server)
+python3 scripts/test_edge_cases.py --all        # All tiers (1+2+4)
+python3 scripts/test_edge_cases.py --phase 4A   # Single phase (e.g. system prompt adherence)
+python3 scripts/test_edge_cases.py --id 4A-01   # Single test
 python3 scripts/test_edge_cases.py --verbose     # Show all tests (not just failures)
 python3 scripts/test_edge_cases.py --json        # JSON output
 ```
@@ -33,7 +35,7 @@ python3 scripts/test_edge_cases.py --json        # JSON output
 | 1 | Unit | 39 | <1s | Ambient filter (13), noise filter (7), TTS normalizer (14), speech chunker (5) |
 | 2 | Routing | 113 | ~5s | Intent routing (40), priority chain/state machines (28), skill validation (23), priority ordering (2), routing expansion (20) |
 | 3 | Execution | — | Future | Run skill handlers, validate response content |
-| 4 | Pipeline | — | Future | Full pipeline with LLM server running |
+| 4 | LLM | 28 | ~60s | System prompt adherence (5), personality (3), tool calling (4), structured output (2), multi-turn context (2), safety/refusal (3), hallucination resistance (2), technical knowledge (4), voice fitness (3). Requires llama-server on port 8080 |
 
 ### Post-Test Cleanup
 

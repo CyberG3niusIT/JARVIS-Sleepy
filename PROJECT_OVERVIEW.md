@@ -368,6 +368,7 @@ User: Hears response
 - ✅ **llama.cpp rebuilt** — ROCm build 8146, `GGML_HIP=ON`, 19.5/20.5 GB VRAM
 - ✅ **3 voice test fixes** — Web search routing (removed stale keyword alias), ack bleed (0.35s settling delay), Whisper "quinn"→"qwen"
 - ✅ **Full doc overhaul** — 12 files updated to reflect Qwen3.5-35B-A3B across all references
+- ✅ **Tier 4 LLM tests** — 28 tests validating model response quality, tool calling, safety, hallucination resistance
 
 ---
 
@@ -610,7 +611,7 @@ Include:
 - ✅ Three frontends: voice, console, web UI (all sharing one router)
 - ✅ Web Chat UI with streaming, markdown, session sidebar, and health HUD
 - ✅ Ambient wake word filter (multi-signal, blocks false triggers)
-- ✅ 38 router tests + 98.7% edge case pass rate (150/152)
+- ✅ 38 router tests + 180 edge case tests (100%) including 28 live LLM validation tests
 - ✅ Hardware failure graceful degradation
 - ✅ Sub-600ms skill responses (300-600ms)
 - ✅ Open source on GitHub with automated PII redaction
