@@ -251,7 +251,7 @@ python3 jarvis_console.py
 ### Anthropic Claude
 - **Get:** https://console.anthropic.com/
 - **Free Tier:** $5 credit for new accounts
-- **Required:** No (quality fallback only — local Qwen3-VL-8B handles most queries)
+- **Required:** No (quality fallback only — local Qwen3.5-35B-A3B handles most queries)
 
 ### OpenWeather
 - **Get:** https://openweathermap.org/api

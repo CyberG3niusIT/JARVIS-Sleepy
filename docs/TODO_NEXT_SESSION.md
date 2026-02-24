@@ -108,7 +108,7 @@
 ## Tier 5: Aspirational — Someday/Maybe
 
 - **Malware Analysis Framework** — QEMU sandbox, VirusTotal/Any.run API, CISA-format reports. Build when a specific engagement needs it.
-- **Video / Face Recognition** — webcam -> people/pets/objects. Hardware-dependent. Qwen3-VL vision encoder ready for text-only; image processing is future.
+- **Video / Face Recognition** — webcam -> people/pets/objects. Hardware-dependent. Qwen3.5 mmproj vision encoder downloaded but not loaded; image processing is future.
 - **Tor / Dark Web Research** — Brave Tor mode, safety protocols. Specialized professional use.
 - **Emotional context awareness** — laugh/frustration/distress detection. Research-level ML.
 - **Voice cloning (Paul Bettany)** — tested Coqui, rejected. Revisit when open-source matures.
@@ -127,7 +127,7 @@ None!
 ## Pending Live Tests
 
 - **Batch extraction (Phase 4)** — needs 25+ messages in one session to trigger
-- **Qwen3-VL vision features** — mmproj encoder downloaded, not yet integrated. Future: image understanding via `--mmproj` flag (#52)
+- **Qwen3.5 vision features** — mmproj encoder downloaded, not yet integrated. Future: image understanding via `--mmproj` flag (#52)
 
 ---
 
@@ -145,6 +145,7 @@ None!
 | Edge Case Tests expanded to 152 (Phase 1E + routing) | Feb 22-23 |
 | Doc gen prompt overhaul (prescriptive depth) | Feb 22 |
 | Qwen3-VL-8B Model Upgrade (ROCm rebuild, self-quantized Q5_K_M) | Feb 22 |
+| Qwen3.5-35B-A3B Upgrade (MoE Q3_K_M, unsloth, 48-63 tok/s) | Feb 24 |
 | Document Generation (PPTX/DOCX/PDF with web research + Pexels) | Feb 22 |
 | Smart Ack Suppression | Feb 22 |
 | Document generation live tested (7 bugs fixed during session 45) | Feb 22 |

@@ -9,7 +9,7 @@ A fully local, privacy-first voice assistant built on AMD ROCm, fine-tuned speec
 ## Highlights
 
 - **0.1-0.2s speech recognition** — Fine-tuned Whisper v2 (198 phrases, 94%+ accuracy) on AMD GPU via CTranslate2 + ROCm
-- **Local LLM intelligence** — Qwen3-VL-8B (Q5_K_M, self-quantized, vision-capable) via llama.cpp with web research tool calling
+- **Local LLM intelligence** — Qwen3.5-35B-A3B (Q3_K_M, MoE, 3B active params) via llama.cpp with native tool calling
 - **Natural blended voice** — Kokoro TTS with custom voice blend (fable + george), gapless streaming playback
 - **Conversational flow engine** — Persona module (10 response pools), adaptive conversation windows (4-7s), contextual acknowledgments, turn tracking
 - **Semantic understanding** — ML-based intent matching using sentence-transformers, not brittle regex patterns
@@ -101,7 +101,7 @@ A fully local, privacy-first voice assistant built on AMD ROCm, fine-tuned speec
                   │  4. Exact match (time, date)          │
                   │  5. Keyword + semantic verify         │
                   │  6. Pure semantic matching            │
-                  │  7. LLM fallback (Qwen3-VL-8B)         │
+                  │  7. LLM fallback (Qwen3.5-35B-A3B)      │
                   └──────┬──────────────┬────────────────┘
                          │              │
               ┌──────────▼───┐   ┌──────▼──────────┐
@@ -138,7 +138,7 @@ The system uses an **event-driven pipeline** with a Coordinator managing STT/TTS
 | **Conversation State** | Turn counting, intent history, question detection, research context tracking |
 | **Ambient Filter** | Multi-signal wake word validation: position, copula, threshold (0.80), length — blocks ambient mentions |
 | **Conversation Windows** | Adaptive follow-up windows (4-7s), extends with conversation depth, timeout cleanup |
-| **Web Research** | Qwen3-VL-8B calls DuckDuckGo + trafilatura to search and synthesize answers from live web sources |
+| **Web Research** | Qwen3.5-35B-A3B calls DuckDuckGo + trafilatura to search and synthesize answers from live web sources |
 | **Conversational Memory** | SQLite fact store + FAISS semantic search — remembers facts across sessions, surfaces them proactively |
 | **Context Window** | Topic-segmented working memory with relevance-scored assembly across sessions |
 | **Streaming TTS** | `StreamingAudioPipeline` — single persistent aplay process, background Kokoro generation, gapless playback |
@@ -162,7 +162,7 @@ The system uses an **event-driven pipeline** with a Coordinator managing STT/TTS
 | **Desktop Control** | "Open Chrome" / "Volume up" / "Switch to workspace 2" | 16 intents: app launch/close, window management, volume, workspaces, focus, clipboard via GNOME Shell extension D-Bus bridge |
 | **Conversation** | "Good morning" / "Thank you" / "How are you?" | Natural greetings, small talk, dismissal detection |
 | **Reminders** | "Remind me at 3pm" / "What's on my schedule?" | Priority tones, nag behavior, acknowledgment tracking |
-| **Web Research** | "How far is New York from London?" / "Who won the Super Bowl?" | Qwen3-VL-8B tool calling → DuckDuckGo → multi-source synthesis |
+| **Web Research** | "How far is New York from London?" / "Who won the Super Bowl?" | Qwen3.5 native tool calling → DuckDuckGo → multi-source synthesis |
 | **News** | "Read me the headlines" / "Any cybersecurity news?" | 16 RSS feeds, urgency classification, semantic dedup, category filtering |
 
 ### Additional Systems
@@ -199,7 +199,7 @@ The system uses an **event-driven pipeline** with a Coordinator managing STT/TTS
 | OS | Ubuntu 24.04 LTS |
 | ROCm | 7.2.0 |
 
-> **GPU acceleration is optional but transformative.** CPU-only Whisper takes 0.3-0.5s per transcription. With GPU: 0.1-0.2s. The local LLM (Qwen3-VL-8B) also benefits from GPU offloading via llama.cpp.
+> **GPU acceleration is optional but transformative.** CPU-only Whisper takes 0.3-0.5s per transcription. With GPU: 0.1-0.2s. The local LLM (Qwen3.5-35B-A3B) also benefits from GPU offloading via llama.cpp.
 
 ---
 
@@ -338,23 +338,20 @@ wget -O /path/to/models/whisper/ggml-base.bin \
 
 The GPU model is auto-downloaded by `faster-whisper` on first run. You can also [fine-tune Whisper](#fine-tuning-whisper) on your accent.
 
-### Qwen3-VL-8B LLM
+### Qwen3.5-35B-A3B LLM
 
 | Model | Source | Format | Quantization |
 |-------|--------|--------|-------------|
-| **Qwen3-VL-8B-Instruct** | [Qwen3-VL-8B GGUF](https://huggingface.co/models?search=Qwen3-VL-8B+GGUF) | GGUF | Q5_K_M recommended (self-quantized from F16) |
+| **Qwen3.5-35B-A3B** | [unsloth GGUF](https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF) | GGUF | Q3_K_M recommended (imatrix-calibrated) |
 
 ```bash
 mkdir -p /path/to/models/llm
-# Download F16 source and self-quantize for best quality:
-# 1. Get F16 GGUF (~16.4GB) from HuggingFace
-# 2. Quantize locally:
-#    llama-quantize Qwen3VL-8B-Instruct-F16.gguf Qwen3VL-8B-Instruct-Q5_K_M.gguf Q5_K_M
-#
-# Or download a pre-quantized Q5_K_M (~5.5GB) directly if available.
+# Download pre-quantized Q3_K_M (~16GB) from unsloth (trusted, imatrix-calibrated):
+huggingface-cli download unsloth/Qwen3.5-35B-A3B-GGUF \
+    Qwen3.5-35B-A3B-Q3_K_M.gguf --local-dir /path/to/models/llm
 ```
 
-The LLM runs via llama.cpp as a server process. The systemd service `llama-server.service` manages it. Qwen3-VL-8B is vision-capable (multimodal) and supports native tool calling for web research.
+The LLM runs via llama.cpp as a server process. The systemd service `llama-server.service` manages it. Qwen3.5-35B-A3B is a MoE model (256 experts, 8+1 active, ~3B active params) with native tool calling for web research. Vision available via mmproj but not loaded by default.
 
 ### Kokoro TTS (Primary Voice)
 
@@ -616,7 +613,7 @@ audio:
 ```yaml
 llm:
   local:
-    model_path: /path/to/models/llm/Qwen3VL-8B-Instruct-Q5_K_M.gguf
+    model_path: /path/to/models/llm/Qwen3.5-35B-A3B-Q3_K_M.gguf
     context_size: 8192
     gpu_layers: 999          # Offload all layers to GPU (if available)
     temperature: 0.6
@@ -808,7 +805,7 @@ The sentence-transformer model matches user speech against these examples — no
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) by SYSTRAN — GPU-accelerated Whisper
 - [CTranslate2](https://github.com/OpenNMT/CTranslate2) by OpenNMT — Inference engine
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) by ggml-org — LLM inference
-- [Qwen3-VL-8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) by Qwen — Local LLM (vision-capable, tool calling)
+- [Qwen3.5-35B-A3B](https://huggingface.co/Qwen/Qwen3.5-35B-A3B) by Qwen — Local LLM (MoE, native tool calling)
 - [Piper](https://github.com/rhasspy/piper) by rhasspy — Fallback TTS
 - [sentence-transformers](https://github.com/UKPLab/sentence-transformers) — Semantic matching
 - [Porcupine](https://picovoice.ai/) by Picovoice — Wake word detection

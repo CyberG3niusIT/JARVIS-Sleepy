@@ -43,18 +43,19 @@ Fallback base model (CPU only):
 
 ## LLM Configuration
 
-**Model:** Qwen3-VL-8B (Q5_K_M, self-quantized from F16, vision-capable)
+**Model:** Qwen3.5-35B-A3B (Q3_K_M, MoE 256 experts/8+1 active, 3B active params)
 ```
-/mnt/models/llm/Qwen3VL-8B-Instruct-Q5_K_M.gguf
+/mnt/models/llm/Qwen3.5-35B-A3B-Q3_K_M.gguf
 ```
 
 **Server:** llama.cpp via systemd service
 ```
 /etc/systemd/system/llama-server.service
 ```
-- Port 8080, ROCm backend, GPU offload
+- Port 8080, ROCm backend, GPU offload, `--parallel 1`
 - `systemctl status llama-server` to check
-- Qwen3-VL supports native tool calling (web research) and vision (future)
+- Qwen3.5 supports native tool calling (web research) and thinking mode (disabled via `--reasoning-budget 0`)
+- mmproj vision encoder downloaded but not loaded (future)
 
 **Fallback:** Claude API (Anthropic) — used when local quality gate fails
 
@@ -75,7 +76,7 @@ Fallback base model (CPU only):
 - **Whisper (fine-tuned, source):** `/mnt/models/voice_training/whisper_finetuned/final`
 - **Whisper (base fallback):** `/mnt/models/whisper/ggml-base.bin`
 - **Piper TTS:** `/mnt/models/piper/en_GB-northern_english_male-medium.onnx`
-- **Qwen LLM:** `/mnt/models/llm/Qwen3VL-8B-Instruct-Q5_K_M.gguf`
+- **Qwen LLM:** `/mnt/models/llm/Qwen3.5-35B-A3B-Q3_K_M.gguf`
 
 ### Audio Devices
 - **Microphone:** FIFINE K669B USB condenser mic (hw:fifine,0 via udev rule)
@@ -88,7 +89,7 @@ Fallback base model (CPU only):
 When updating `config.yaml`, always verify:
 - [ ] Piper path is `/home/user/.local/bin/piper`
 - [ ] Fine-tuned Whisper model path is correct (CTranslate2 format)
-- [ ] LLM path points to `Qwen3VL-8B-Instruct-Q5_K_M.gguf`
+- [ ] LLM path points to `Qwen3.5-35B-A3B-Q3_K_M.gguf`
 - [ ] All paths use correct username (your_username, not generic)
 - [ ] Model paths point to `/mnt/models/`
 - [ ] Skills/storage paths point to `/mnt/storage/jarvis/`
@@ -101,12 +102,12 @@ When updating `config.yaml`, always verify:
 2. ❌ Using `ggml-medium.bin` for STT → 10 second delays (too slow!)
 3. ❌ Using relative paths for models → Models not found
 4. ❌ Hardcoding `/home/user/` → Won't work on this system
-5. ❌ Referencing old Qwen2.5-7B model → Replaced by Qwen3-VL-8B (Feb 22)
+5. ❌ Referencing old models → Current is Qwen3.5-35B-A3B Q3_K_M (Feb 24)
 6. ✅ Always use full absolute paths
 7. ✅ Always test TTS after config changes
 8. ✅ Fine-tuned Whisper for production, base.bin only as CPU fallback
 
 ---
 
-**Last Updated:** February 23, 2026
+**Last Updated:** February 24, 2026
 **System:** ubuntu2404 (the user's workstation)

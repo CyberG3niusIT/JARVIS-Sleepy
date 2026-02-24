@@ -1,5 +1,22 @@
 # JARVIS Changelog
 
+## [2026-02-24] - Qwen3.5-35B-A3B Upgrade + Voice Test Fixes
+
+### Major Features
+- **Qwen3.5-35B-A3B Model Upgrade** — `llama-server.service`
+  - MoE architecture: 35B total params, 256 experts, 8+1 active (~3B active)
+  - Q3_K_M quantization (unsloth, imatrix-calibrated), 16GB model file
+  - 48-63 tok/s (comparable to old 8B dense), IFEval 91.9 (was ~70s)
+  - VRAM: 19.5/20.5 GB (~1 GB headroom), `--parallel 1` for single-user
+  - Replaces Qwen3-VL-8B Q5_K_M
+
+### Bug Fixes
+- **Web search routing** — removed "search" keyword alias that hard-routed all search commands to browser instead of LLM web research pipeline. Site-specific searches (YouTube, Google) still route correctly via keyword/semantic matching
+- **Ack speaker-to-mic bleed** — added 0.35s acoustic settling delay in `resume_listening()` to prevent TTS echo from re-triggering intents
+- **Whisper correction** — added "quinn" → "qwen" transcription correction
+
+---
+
 ## [2026-02-23] - Demo Prep + LLM Metrics + 4 Bug Fixes
 
 ### Major Features

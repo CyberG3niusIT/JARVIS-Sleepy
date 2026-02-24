@@ -32,7 +32,7 @@
 | 49 | **Document refinement follow-ups** — cache last structure/research, add `refine_document` intent for iterative revision | 3-4 hours | "Make slide 3 more detailed" / "add more statistics" after doc gen. Currently stumps JARVIS — no pipeline state persistence | Cache structure JSON + research context on skill instance, 10-min expiry, LLM modifies cached structure on follow-up |
 | 50 | **AI image generation (FLUX.1-schnell)** — local image gen for doc gen, hybrid with Pexels | 4-6 hours | Pexels fails for tech/abstract topics. LLM decides per-slide: Pexels (photographic) vs FLUX (conceptual). Pre-load during research phase to hide cold start | Research complete: `memory/research_image_gen_ocr_selfprompt.md`. FLUX FP8 fits 20GB VRAM, ~12-20s/image. SDXL Lightning as faster fallback |
 | 51 | **Vision/OCR skill — Phase 1 Tesseract** — "read this" / "what does this say" via screenshot + OCR | 1-2 days | Immediate daily utility. CPU-only, 95-98% accuracy, 0.5-2s/page. Input via clipboard/screenshot/file | Proposed: `skills/system/vision/`. 4 intents: read_screen, describe_image, read_document, read_chart |
-| 52 | **Vision/OCR skill — Phase 2-3 Qwen3-VL** — full image understanding via mmproj vision encoder | 3-5 days | Chart reading, diagram understanding, visual Q&A, slide verification, web UI file upload. mmproj already downloaded (718MB) | Dynamic mmproj loading (0.6GB) only for image tasks. Supersedes earlier Qwen2.5-VL plans |
+| 52 | **Vision/OCR skill — Phase 2-3 Qwen3.5** — full image understanding via mmproj vision encoder | 3-5 days | Chart reading, diagram understanding, visual Q&A, slide verification, web UI file upload. mmproj already downloaded (861MB) | Dynamic mmproj loading only for image tasks. Model-swap strategy needed (tight VRAM with Q3_K_M) |
 | 55 | **Network awareness skill** — "what's on my network?" / "anything suspicious?" via voice | 4-8 hours | Device discovery (arp-scan/nmap), baseline known vs unknown devices, port/service anomaly detection, traffic analysis summaries, threat alerts | Fits threat hunting background. Natural skill: `skills/system/network/`. Intents: scan_network, list_devices, check_threats, network_status |
 
 ---
@@ -86,7 +86,7 @@
 | # | Item | Effort | ROI | Notes |
 |---|------|--------|-----|-------|
 | 31 | **Malware analysis framework** — QEMU sandbox, VirusTotal/Any.run, CISA reports, threat intel DB | 30-50 hours | Professional threat hunting. Build when a specific engagement needs it | MASTER_DESIGN.md |
-| 32 | **Video / face recognition** — webcam for people/pets/objects, security cameras | 20-40 hours | Hardware-dependent. Qwen3-VL vision could simplify this | MASTER_DESIGN.md + DEVELOPMENT_VISION.md |
+| 32 | **Video / face recognition** — webcam for people/pets/objects, security cameras | 20-40 hours | Hardware-dependent. Qwen3.5 vision could simplify this | MASTER_DESIGN.md + DEVELOPMENT_VISION.md |
 | 33 | **Tor / dark web research** — Brave Tor mode, VPN verification, session logging, sandboxed | 15-20 hours | Specialized professional use. Safety protocols critical | MASTER_DESIGN.md |
 | 34 | **Emotional context awareness** — voice-based frustration/distress/laugh detection | Research-level | Could enable health monitoring, age verification, adaptive tone | MASTER_DESIGN.md |
 | 35 | **Voice cloning (Paul Bettany)** — Coqui rejected, StyleTTS2 rejected, F5-TTS worth evaluating | 10-20 hours | The dream. Must be <500ms RTF. Revisit when open-source matures | TTS_VOICE_OPTIONS.md |
@@ -125,6 +125,7 @@
 - #41: Web UI session sidebar — all 5 phases complete (Feb 20)
 - #42: Document generation — PPTX/DOCX/PDF with web research + Pexels images (Feb 22)
 - #45: Qwen3-VL-8B model upgrade — ROCm rebuild, self-quantized Q5_K_M, 80.2 tok/s (Feb 22)
+- #45b: Qwen3.5-35B-A3B upgrade — MoE Q3_K_M (unsloth), 48-63 tok/s, IFEval 91.9 (Feb 24)
 
 ### Other Completed (non-roadmap enhancements)
 - Smart ack suppression — skip acknowledgements for fast/conversational queries (Feb 22)
