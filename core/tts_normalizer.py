@@ -68,6 +68,7 @@ class TTSNormalizer:
             "ips": self.normalize_ips,
             "ports": self.normalize_ports,
             "cpu_gpu_models": self.normalize_cpu_gpu_models,  # Add before years
+            "model_nomenclature": self.normalize_model_nomenclature,  # Qwen3.5-35B-A3B before decimals/numbers
             "years": self.normalize_years,
             "file_sizes": self.normalize_file_sizes,
             "timestamps": self.normalize_timestamps,
@@ -209,9 +210,98 @@ class TTSNormalizer:
             return result
         
         text = re.sub(r"Core (i\d)[-\s](\d{4,5})([A-Z]+)?", intel_core, text, flags=re.IGNORECASE)
-        
+
         return text
-    
+
+    # ========== Model Nomenclature ==========
+    def normalize_model_nomenclature(self, text: str) -> str:
+        """
+        Normalize AI model version strings for natural speech.
+
+        Examples:
+        - Qwen3.5-35B-A3B → Qwen three point five dash thirty-five B dash A three B
+        - Llama3.1-8B → Llama three point one dash eight B
+        - GPT4o → G P T four O
+        - FLUX1.0-schnell → FLUX one point zero dash schnell
+        - Qwen3.5-Plus → Qwen three point five dash Plus
+        - Whisper-base → Whisper dash base
+        """
+        # Pattern: word/acronym optionally glued to a version number, then
+        # optional hyphen-separated segments (35B, A3B, Plus, schnell, etc.)
+        # e.g. "Qwen3.5-35B-A3B", "Llama3.1-8B", "GPT4o", "FLUX1.0-schnell"
+        pattern = r'([A-Za-z]{2,})(\d+(?:\.\d+)?[a-zA-Z]?)((?:-[A-Za-z0-9.]+)*)'
+
+        def _model_to_spoken(match):
+            name = match.group(1)        # "Qwen", "Llama", "GPT", "FLUX"
+            version = match.group(2)      # "3.5", "4o", "1.0"
+            suffixes = match.group(3)     # "-35B-A3B", "-8B", "-schnell", ""
+
+            # Speak the name — uppercase acronyms get spelled out
+            if name.isupper() and len(name) >= 2:
+                spoken_name = ' '.join(name)
+            else:
+                spoken_name = name
+
+            # Speak the version: split trailing letter, handle decimal
+            trailing_letter = ''
+            ver_core = version
+            if ver_core and ver_core[-1].isalpha():
+                trailing_letter = ver_core[-1].upper()
+                ver_core = ver_core[:-1]
+
+            if '.' in ver_core:
+                whole, frac = ver_core.split('.', 1)
+                frac_spoken = ' '.join(self.digit_words.get(d, d) for d in frac)
+                spoken_ver = f"{self._number_to_words(int(whole))} point {frac_spoken}"
+            else:
+                spoken_ver = self._number_to_words(int(ver_core)) if ver_core else ''
+
+            if trailing_letter:
+                spoken_ver += f" {trailing_letter}"
+
+            # Speak suffix segments: "-35B" → "dash thirty-five B"
+            spoken_suffixes = ''
+            if suffixes:
+                for seg in suffixes.split('-'):
+                    if not seg:
+                        continue
+                    spoken_suffixes += f" dash {self._alphanumeric_segment(seg)}"
+
+            return f"{spoken_name} {spoken_ver}{spoken_suffixes}"
+
+        return re.sub(pattern, _model_to_spoken, text)
+
+    def _alphanumeric_segment(self, seg: str) -> str:
+        """Speak a mixed alphanumeric segment naturally.
+
+        Examples:
+            35B → thirty-five B
+            A3B → A three B
+            8B  → eight B
+            v0.3 → v zero point three
+            Plus → Plus
+            schnell → schnell
+        """
+        if seg.isalpha():
+            return seg
+        if seg.isdigit():
+            return self._number_to_words(int(seg))
+
+        # Mixed: split into runs of digits, letters, and dots
+        parts = re.findall(r'[A-Za-z]+|\d+|\.', seg)
+        spoken = []
+        for i, part in enumerate(parts):
+            if part == '.':
+                spoken.append('point')
+            elif part.isdigit():
+                spoken.append(self._number_to_words(int(part)))
+            elif part.isupper() and len(part) <= 3:
+                # Short uppercase = spell out (A, B, AB)
+                spoken.append(' '.join(part))
+            else:
+                spoken.append(part)
+        return ' '.join(spoken)
+
     # ========== Ports ==========
     def normalize_ports(self, text: str) -> str:
         """

@@ -600,6 +600,9 @@ class Coordinator:
             self.logger.info(f"Ignoring garbage transcription: {text[:30]}...")
             return
 
+        # Apply brand-name corrections (quinn→qwen, etc.) before any routing
+        text = self._apply_transcription_corrections(text)
+
         self.logger.info(f"Transcribed: {text}")
         print(f"📝 Heard: \"{text}\"")
 
@@ -1307,6 +1310,27 @@ class Coordinator:
             if len(words[0]) < 4:
                 return True
         return False
+
+    # Post-transcription word corrections for known Whisper mishearings.
+    # Mirrors continuous_listener._TRANSCRIPTION_CORRECTIONS — keep in sync.
+    _TRANSCRIPTION_CORRECTIONS = {
+        "and videos": "amd's",
+        "and video": "amd",
+        "in video": "nvidia",
+        "in vidya": "nvidia",
+        "and vidya": "nvidia",
+        "quinn": "qwen",
+    }
+
+    def _apply_transcription_corrections(self, text: str) -> str:
+        """Fix known Whisper brand-name mishearings (AMD, NVIDIA, etc.)."""
+        corrected = text
+        for wrong, right in self._TRANSCRIPTION_CORRECTIONS.items():
+            if wrong in corrected:
+                corrected = corrected.replace(wrong, right)
+        if corrected != text:
+            self.logger.info(f"Corrected: '{text}' → '{corrected}'")
+        return corrected
 
     def _apply_command_corrections(self, text: str) -> str:
         """Apply corrections for common command mishearings."""
