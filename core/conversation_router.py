@@ -98,7 +98,8 @@ class ConversationRouter:
                  context_window=None,
                  conv_state=None,
                  config=None,
-                 web_researcher=None):
+                 web_researcher=None,
+                 self_awareness=None):
         self.skill_manager = skill_manager
         self.conversation = conversation
         self.llm = llm
@@ -109,6 +110,7 @@ class ConversationRouter:
         self.conv_state = conv_state or ConversationState()
         self.config = config
         self.web_researcher = web_researcher
+        self.self_awareness = self_awareness
 
     def route(self, command: str, *,
               in_conversation: bool = False,
@@ -539,6 +541,14 @@ class ConversationRouter:
                 command,
                 user_id=getattr(self.conversation, 'current_user', None) or "primary_user",
             )
+
+        # Self-awareness: inject capability manifest + compact state
+        if self.self_awareness:
+            manifest = self.self_awareness.get_capability_manifest()
+            compact = self.self_awareness.get_compact_state()
+            awareness_block = "\n".join(filter(None, [manifest, compact]))
+            if awareness_block:
+                memory_context = f"{awareness_block}\n\n{memory_context}" if memory_context else awareness_block
 
         # Document-aware LLM hint
         if doc_buffer and doc_buffer.active:

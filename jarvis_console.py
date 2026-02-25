@@ -58,6 +58,7 @@ from core.speech_chunker import SpeechChunker
 from core.context_window import get_context_window, estimate_tokens, TOKEN_RATIO
 from core.document_buffer import DocumentBuffer, BINARY_EXTENSIONS
 from core.metrics_tracker import get_metrics_tracker
+from core.self_awareness import SelfAwareness
 
 
 class TTSProxy:
@@ -726,6 +727,18 @@ def run_console(config, mode):
                        f"threshold={context_window.topic_shift_threshold}, "
                        f"prior={cw_stats['segments']} seg(s))")
 
+    # LLM metrics tracking
+    metrics = get_metrics_tracker(config)
+
+    # Self-awareness layer (Phase 1 of task planner)
+    self_awareness = SelfAwareness(
+        skill_manager=skill_manager,
+        metrics=metrics,
+        memory_manager=memory_manager,
+        context_window=context_window,
+        config=config,
+    )
+
     # Conversation state + shared router (Phase 2-3 of conversational flow refactor)
     conv_state = ConversationState()
     router = ConversationRouter(
@@ -739,10 +752,8 @@ def run_console(config, mode):
         conv_state=conv_state,
         config=config,
         web_researcher=web_researcher,
+        self_awareness=self_awareness,
     )
-
-    # LLM metrics tracking
-    metrics = get_metrics_tracker(config)
 
     # Command history (persists across sessions) + document buffer
     history_file = Path(__file__).parent / ".console_history"

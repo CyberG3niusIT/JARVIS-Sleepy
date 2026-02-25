@@ -252,6 +252,27 @@ class MetricsTracker:
             conn.close()
 
     # ------------------------------------------------------------------
+    # Read — Skill Average Latency
+    # ------------------------------------------------------------------
+
+    def get_skill_avg_latency(self, skill_name: str, hours: int = 24) -> float:
+        """Average latency (ms) for a specific skill over the given window.
+
+        Returns 0.0 if no data available.
+        """
+        cutoff = time.time() - (hours * 3600)
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT AVG(latency_ms) as avg_lat FROM llm_interactions "
+                "WHERE skill = ? AND timestamp >= ? AND latency_ms IS NOT NULL",
+                (skill_name, cutoff),
+            ).fetchone()
+            return round(row["avg_lat"] or 0.0, 1)
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
     # Read — Skill Breakdown
     # ------------------------------------------------------------------
 

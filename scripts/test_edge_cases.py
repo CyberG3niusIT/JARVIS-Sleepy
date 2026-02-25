@@ -80,6 +80,7 @@ class TestCase:
     expect_noise: Optional[bool] = None       # noise filter result
     expect_normalized: Optional[str] = None   # TTS normalizer output (substring match)
     expect_chunks: Optional[list] = None      # speech chunker output
+    expect_self_awareness: Optional[str] = None  # self-awareness test type
 
     # LLM expectations (Tier 4)
     llm_system: Optional[str] = None          # system prompt (None = use default JARVIS prompt)
@@ -454,6 +455,126 @@ def run_chunker_test(case):
 
 
 # ===========================================================================
+# Tier 1: Self-awareness test runner
+# ===========================================================================
+
+# Lazy-init cache for self-awareness test components (expensive — only build once)
+_sa_components = {}
+
+
+def _get_sa_components():
+    """Build a minimal SelfAwareness instance with real skill_manager for testing."""
+    if _sa_components:
+        return _sa_components
+
+    from core.config import load_config
+    from core.self_awareness import SelfAwareness
+
+    config = load_config()
+
+    # Minimal skill manager — we need real loaded skills
+    from core.skill_manager import SkillManager
+    sm = SkillManager(config, None, TTSStub(), {}, None)
+    sm.load_all_skills()
+
+    sa = SelfAwareness(skill_manager=sm, config=config)
+    _sa_components['sa'] = sa
+    _sa_components['sm'] = sm
+    return _sa_components
+
+
+def run_self_awareness_test(case):
+    """Test SelfAwareness methods."""
+    comps = _get_sa_components()
+    sa = comps['sa']
+    sm = comps['sm']
+    test_type = case.expect_self_awareness
+
+    if test_type == "manifest_contains_skills":
+        manifest = sa.get_capability_manifest()
+        missing = []
+        for name in sm.skills:
+            if name not in manifest:
+                missing.append(name)
+        if missing:
+            return False, f"manifest missing skills: {missing}"
+        return True, f"manifest contains all {len(sm.skills)} skills ({len(manifest)} chars)"
+
+    elif test_type == "manifest_has_web_research":
+        manifest = sa.get_capability_manifest()
+        if "web_research" not in manifest:
+            return False, f"'web_research' not in manifest"
+        return True, "web_research listed in manifest"
+
+    elif test_type == "manifest_has_general_knowledge":
+        manifest = sa.get_capability_manifest()
+        if "general_knowledge" not in manifest:
+            return False, f"'general_knowledge' not in manifest"
+        return True, "general_knowledge listed in manifest"
+
+    elif test_type == "capabilities_count":
+        caps = sa.get_capabilities()
+        skill_count = len(sm.skills)
+        if len(caps) != skill_count:
+            return False, f"capabilities={len(caps)}, skills={skill_count}"
+        return True, f"{len(caps)} capabilities match {skill_count} skills"
+
+    elif test_type == "capabilities_have_intents":
+        caps = sa.get_capabilities()
+        with_intents = [c for c in caps if c.intents]
+        if not with_intents:
+            return False, "no capabilities have intents"
+        return True, f"{len(with_intents)}/{len(caps)} have intents"
+
+    elif test_type == "compact_state_format":
+        # With minimal components (no metrics/memory), state may be empty —
+        # but the method must not error and must return a string
+        state_str = sa.get_compact_state()
+        if not isinstance(state_str, str):
+            return False, f"compact state not a string: {type(state_str)}"
+        # If non-empty, must start with "State:"
+        if state_str and not state_str.startswith("State:"):
+            return False, f"compact state bad format: {state_str!r}"
+        return True, f"compact state: {state_str!r} (valid format)"
+
+    elif test_type == "system_state_uptime":
+        state = sa.get_system_state()
+        if state.uptime_seconds <= 0:
+            return False, f"uptime={state.uptime_seconds}"
+        return True, f"uptime={state.uptime_seconds:.1f}s"
+
+    elif test_type == "estimate_no_metrics":
+        # Without metrics tracker, should return "unknown"
+        dur = sa.estimate_duration("weather")
+        if dur != "unknown":
+            return False, f"expected 'unknown' without metrics, got '{dur}'"
+        return True, f"estimate without metrics: '{dur}'"
+
+    elif test_type == "manifest_cached":
+        # Second call should return same object (cached)
+        sa.invalidate_cache()
+        m1 = sa.get_capability_manifest()
+        m2 = sa.get_capability_manifest()
+        if m1 is not m2:
+            return False, "manifest not cached (different objects)"
+        return True, "manifest cached correctly"
+
+    elif test_type == "persona_with_awareness":
+        from core import persona
+        manifest = sa.get_capability_manifest()
+        prompt = persona.system_prompt_with_awareness(manifest, "State: test")
+        if "YOUR CAPABILITIES" not in prompt:
+            return False, "manifest not in prompt"
+        if "State: test" not in prompt:
+            return False, "compact state not in prompt"
+        if "JARVIS" not in prompt:
+            return False, "base system prompt missing"
+        return True, f"awareness prompt: {len(prompt)} chars"
+
+    return False, f"unknown self_awareness test type: {test_type}"
+
+
+# ===========================================================================
 # Tier 2: Routing test runner
 # ===========================================================================
 
@@ -740,6 +861,8 @@ def run_test(case, components, results):
             passed, detail = run_normalizer_test(case)
         elif case.expect_chunks is not None:
             passed, detail = run_chunker_test(case)
+        elif case.expect_self_awareness is not None:
+            passed, detail = run_self_awareness_test(case)
         else:
             results.skip(case.id, "No tier-1 expectation set")
             return
@@ -891,6 +1014,43 @@ TESTS += [
     TestCase("7C-05", "Really?! No way!", 1, "7C", "Speech Chunker",
              expect_chunks=["Really?!", "No way!"],
              notes="Multiple sentence-end chars — split after ?! followed by space"),
+]
+
+# ---------------------------------------------------------------------------
+# TIER 1: Phase 8A — Self-Awareness Layer
+# ---------------------------------------------------------------------------
+
+TESTS += [
+    TestCase("8A-01", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="manifest_contains_skills",
+             notes="Manifest lists all loaded skill names"),
+    TestCase("8A-02", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="manifest_has_web_research",
+             notes="Manifest includes web_research pseudo-skill"),
+    TestCase("8A-03", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="manifest_has_general_knowledge",
+             notes="Manifest includes general_knowledge pseudo-skill"),
+    TestCase("8A-04", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="capabilities_count",
+             notes="Capability count matches loaded skill count"),
+    TestCase("8A-05", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="capabilities_have_intents",
+             notes="At least some capabilities have intent lists"),
+    TestCase("8A-06", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="compact_state_format",
+             notes="Compact state returns valid format string"),
+    TestCase("8A-07", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="system_state_uptime",
+             notes="System state reports positive uptime"),
+    TestCase("8A-08", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="estimate_no_metrics",
+             notes="Duration estimate returns 'unknown' without metrics tracker"),
+    TestCase("8A-09", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="manifest_cached",
+             notes="Second manifest call returns cached object"),
+    TestCase("8A-10", "", 1, "8A", "Self-Awareness",
+             expect_self_awareness="persona_with_awareness",
+             notes="system_prompt_with_awareness() includes manifest + state + base prompt"),
 ]
 
 # ---------------------------------------------------------------------------

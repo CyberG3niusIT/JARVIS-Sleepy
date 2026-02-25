@@ -171,6 +171,21 @@ def system_prompt_minimal() -> str:
     return "You are JARVIS, a personal AI assistant.\nYou are helpful, professional, and concise."
 
 
+def system_prompt_with_awareness(manifest: str, state: str = "") -> str:
+    """System prompt enriched with self-awareness context.
+
+    Appends the capability manifest and optional compact state to the
+    base system prompt so the LLM knows what JARVIS can do.
+    """
+    base = system_prompt()
+    sections = [base]
+    if manifest:
+        sections.append(manifest)
+    if state:
+        sections.append(state)
+    return "\n\n".join(sections)
+
+
 def rundown_defer() -> str:
     """Response when user defers the daily rundown."""
     return f"Very well, {get_honorific()}. Just say 'daily rundown' whenever you're ready."

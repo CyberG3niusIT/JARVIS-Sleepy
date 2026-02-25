@@ -52,6 +52,7 @@ from core.context_window import get_context_window
 from core.document_buffer import DocumentBuffer, BINARY_EXTENSIONS
 from core.speech_chunker import SpeechChunker
 from core.metrics_tracker import get_metrics_tracker
+from core.self_awareness import SelfAwareness
 
 logger = logging.getLogger("jarvis.web")
 
@@ -179,6 +180,15 @@ def init_components(config, tts_proxy):
     # LLM metrics tracking
     components['metrics'] = get_metrics_tracker(config)
 
+    # Self-awareness layer (Phase 1 of task planner)
+    components['self_awareness'] = SelfAwareness(
+        skill_manager=components['skill_manager'],
+        metrics=components['metrics'],
+        memory_manager=components['memory_manager'],
+        context_window=components['context_window'],
+        config=config,
+    )
+
     # Centralized conversation state (Phase 2 of conversational flow refactor)
     components['conv_state'] = ConversationState()
 
@@ -194,6 +204,7 @@ def init_components(config, tts_proxy):
         conv_state=components['conv_state'],
         config=config,
         web_researcher=components['web_researcher'],
+        self_awareness=components['self_awareness'],
     )
 
     return components

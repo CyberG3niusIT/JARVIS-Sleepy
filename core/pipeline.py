@@ -30,6 +30,7 @@ from core.conversation_state import ConversationState
 from core.conversation_router import ConversationRouter, RouteResult
 from core.llm_router import ToolCallRequest
 from core.web_research import WebResearcher, format_search_results
+from core.self_awareness import SelfAwareness
 
 
 # ---------------------------------------------------------------------------
@@ -423,14 +424,7 @@ class Coordinator:
         # Web research (tool calling)
         self.web_researcher = WebResearcher(config) if config.get("llm.local.tool_calling", False) else None
 
-        # Centralized conversation state (Phase 2 of conversational flow refactor)
-        self.conv_state = ConversationState()
-
-        self.running = True
-        self.state = PipelineState.IDLE
-        self.wake_word = config.get("system.wake_word", "jarvis").lower()
-
-        # Session stats for health reporting
+        # Session stats for health reporting (must be before SelfAwareness which reads it)
         self.stats = {
             'start_time': time.time(),
             'commands_processed': 0,
@@ -438,6 +432,23 @@ class Coordinator:
             'last_error_time': None,
             'last_error_msg': None,
         }
+
+        # Self-awareness layer (Phase 1 of task planner)
+        self.self_awareness = SelfAwareness(
+            skill_manager=skill_manager,
+            metrics=metrics,
+            memory_manager=memory_manager,
+            context_window=context_window,
+            coordinator_stats=self.stats,
+            config=config,
+        )
+
+        # Centralized conversation state (Phase 2 of conversational flow refactor)
+        self.conv_state = ConversationState()
+
+        self.running = True
+        self.state = PipelineState.IDLE
+        self.wake_word = config.get("system.wake_word", "jarvis").lower()
 
         # Streaming LLM state
         self._streaming_active = False
@@ -468,6 +479,7 @@ class Coordinator:
             conv_state=self.conv_state,
             config=config,
             web_researcher=self.web_researcher,
+            self_awareness=self.self_awareness,
         )
 
         # Wire timeout cleanup so silence-expired windows get same cleanup as dismissals
