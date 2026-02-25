@@ -574,17 +574,20 @@ class ConversationRouter:
                     source="planner",
                     handled=True,
                 )
-            # Pause/resume handled by event queue in voice mode;
-            # router path covers console/web where event_queue=None
-            if words & _INTERRUPT_PAUSE:
-                logger.info("Pause request via router")
+            # Pause: only available in voice mode (requires event queue for
+            # async input). Console/web run execute_plan() synchronously — the
+            # user cannot interact mid-execution, so pause is not possible.
+            if tp.can_pause and words & _INTERRUPT_PAUSE:
+                logger.info("Pause request via router (voice mode)")
                 return RouteResult(
                     text=persona.task_paused(),
                     intent="task_plan_pause",
                     source="planner",
                     handled=True,
                 )
-            if words & _INTERRUPT_RESUME:
+            # Resume: only matches when the plan is actually paused.
+            # Prevents "continue" from being swallowed during normal execution.
+            if tp.is_paused and words & _INTERRUPT_RESUME:
                 logger.info("Resume request via router")
                 return RouteResult(
                     text=persona.task_resumed(),

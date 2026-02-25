@@ -17,6 +17,7 @@ import logging
 import queue
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Optional
@@ -69,12 +70,18 @@ CONFIRMATION_REQUIRED_SKILLS = {"developer_tools"}
 
 # Stop/cancel/skip/pause keywords for voice interrupt detection
 _INTERRUPT_CANCEL = {"stop", "cancel", "abort", "halt", "nevermind", "never mind"}
-_INTERRUPT_SKIP = {"skip", "next", "skip that"}
+_INTERRUPT_SKIP = {"skip", "next"}
 _INTERRUPT_PAUSE = {"wait", "hold", "pause"}
 _INTERRUPT_RESUME = {"continue", "resume", "proceed"}
 
 # Pause timeout: auto-cancel after 2 minutes of inactivity
 _PAUSE_TIMEOUT_SECONDS = 120
+
+# LLM evaluation timeout: max wait for step evaluation call (seconds).
+# The HTTP request has its own 30s timeout, but evaluation should be fast
+# (100 tokens ≈ 1-2s). This catches edge cases where the server accepts
+# the request but generates slowly.
+_EVALUATE_TIMEOUT_SECONDS = 10
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +221,11 @@ class TaskPlanner:
     def is_paused(self) -> bool:
         """True if the plan is currently paused."""
         return self._paused
+
+    @property
+    def can_pause(self) -> bool:
+        """True if pause/resume is supported (requires event queue for async input)."""
+        return self._event_queue is not None
 
     # ------------------------------------------------------------------
     # Destructive step detection + confirmation
@@ -518,10 +530,16 @@ class TaskPlanner:
         )
 
         try:
-            response = self._llm.chat(
-                user_message=prompt,
-                max_tokens=100,
-            )
+            # Use a tight timeout — evaluation is a simple classification task
+            # (100 tokens ≈ 1-2s). Prevents stalling the plan if LLM is slow.
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    self._llm.chat,
+                    user_message=prompt,
+                    max_tokens=100,
+                )
+                response = future.result(timeout=_EVALUATE_TIMEOUT_SECONDS)
+
             if not response:
                 return ("continue", "")
 
@@ -537,6 +555,9 @@ class TaskPlanner:
             else:
                 # CONTINUE or unrecognized → continue
                 return ("continue", "")
+        except FuturesTimeoutError:
+            logger.warning(f"Step evaluation timed out after {_EVALUATE_TIMEOUT_SECONDS}s — defaulting to continue")
+            return ("continue", "")
         except Exception as e:
             logger.warning(f"Step evaluation LLM call failed: {e} — defaulting to continue")
             return ("continue", "")

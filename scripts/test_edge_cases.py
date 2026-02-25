@@ -303,6 +303,7 @@ def setup_state(components, case):
         task_planner._cancel_requested = False
         task_planner._skip_requested = False
         task_planner._paused = False
+        task_planner._event_queue = None
     conv_state.pending_plan_confirmation = False
 
     # Apply case-specific setup
@@ -356,6 +357,33 @@ def setup_state(components, case):
             ])
             plan.status = PlanStatus.RUNNING
             tp.active_plan = plan
+
+    if setup.get("active_plan_with_event_queue"):
+        tp = components.get("task_planner")
+        if tp:
+            import queue as _q
+            from core.task_planner import TaskPlan, PlanStep, PlanStatus
+            plan = TaskPlan(original_request="test active", steps=[
+                PlanStep(step_id=1, description="step one", skill_name="weather", input_text="weather"),
+                PlanStep(step_id=2, description="step two", skill_name="time_info", input_text="time"),
+            ])
+            plan.status = PlanStatus.RUNNING
+            tp.active_plan = plan
+            tp._event_queue = _q.Queue()
+
+    if setup.get("active_plan_paused"):
+        tp = components.get("task_planner")
+        if tp:
+            import queue as _q
+            from core.task_planner import TaskPlan, PlanStep, PlanStatus
+            plan = TaskPlan(original_request="test active", steps=[
+                PlanStep(step_id=1, description="step one", skill_name="weather", input_text="weather"),
+                PlanStep(step_id=2, description="step two", skill_name="time_info", input_text="time"),
+            ])
+            plan.status = PlanStatus.RUNNING
+            tp.active_plan = plan
+            tp._event_queue = _q.Queue()
+            tp._paused = True
 
 
 # ===========================================================================
@@ -1011,6 +1039,165 @@ def run_task_planner_test(case):
         if not msg:
             return False, "task_resumed returned empty"
         return True, f"task_resumed: {msg!r}"
+
+    # ------------------------------------------------------------------
+    # Phase 8E: Bug fixes (session 69)
+    # ------------------------------------------------------------------
+
+    # can_pause property
+    elif test_type == "can_pause_no_event_queue":
+        # TaskPlanner created without event_queue → can_pause is False
+        if tp.can_pause:
+            return False, "can_pause should be False without event_queue"
+        return True, "can_pause=False without event_queue"
+
+    elif test_type == "can_pause_with_event_queue":
+        import queue as _q
+        tp._event_queue = _q.Queue()
+        try:
+            if not tp.can_pause:
+                return False, "can_pause should be True with event_queue"
+            return True, "can_pause=True with event_queue"
+        finally:
+            tp._event_queue = None
+
+    # _wait_for_resume without event queue → immediate "resume"
+    elif test_type == "wait_for_resume_no_queue":
+        tp._event_queue = None
+        result = tp._wait_for_resume()
+        if result != "resume":
+            return False, f"expected 'resume' without queue, got '{result}'"
+        if tp.is_paused:
+            return False, "_paused should be False after _wait_for_resume"
+        return True, "_wait_for_resume returns 'resume' without event queue"
+
+    # _wait_for_resume sets _paused=True during execution
+    elif test_type == "wait_for_resume_sets_paused":
+        import queue as _q
+        import threading
+        eq = _q.Queue()
+        tp._event_queue = eq
+        paused_during = []
+
+        def check_and_resume():
+            import time as _t
+            _t.sleep(0.1)
+            paused_during.append(tp.is_paused)
+            # Send resume event to unblock
+            from core.events import Event, EventType
+            eq.put(Event(type=EventType.COMMAND_DETECTED, data={"text": "resume"}))
+
+        t = threading.Thread(target=check_and_resume)
+        t.start()
+        result = tp._wait_for_resume()
+        t.join(timeout=5)
+        tp._event_queue = None
+
+        if not paused_during or not paused_during[0]:
+            return False, f"_paused was not True during _wait_for_resume: {paused_during}"
+        if tp.is_paused:
+            return False, "_paused should be False after _wait_for_resume"
+        if result != "resume":
+            return False, f"expected 'resume', got '{result}'"
+        return True, "_wait_for_resume sets _paused=True then clears it"
+
+    # _wait_for_resume returns "cancel" on cancel event
+    elif test_type == "wait_for_resume_cancel":
+        import queue as _q
+        import threading
+        eq = _q.Queue()
+        tp._event_queue = eq
+
+        def send_cancel():
+            import time as _t
+            _t.sleep(0.05)
+            from core.events import Event, EventType
+            eq.put(Event(type=EventType.COMMAND_DETECTED, data={"text": "cancel"}))
+
+        t = threading.Thread(target=send_cancel)
+        t.start()
+        result = tp._wait_for_resume()
+        t.join(timeout=5)
+        tp._event_queue = None
+
+        if result != "cancel":
+            return False, f"expected 'cancel', got '{result}'"
+        return True, "_wait_for_resume returns 'cancel' on cancel event"
+
+    # _wait_for_resume returns "cancel" when _cancel_requested set
+    elif test_type == "wait_for_resume_cancel_requested":
+        import queue as _q
+        import threading
+        eq = _q.Queue()
+        tp._event_queue = eq
+
+        def set_cancel():
+            import time as _t
+            _t.sleep(0.05)
+            tp._cancel_requested = True
+
+        t = threading.Thread(target=set_cancel)
+        t.start()
+        result = tp._wait_for_resume()
+        t.join(timeout=5)
+        tp._event_queue = None
+        tp._cancel_requested = False
+
+        if result != "cancel":
+            return False, f"expected 'cancel', got '{result}'"
+        return True, "_wait_for_resume returns 'cancel' when _cancel_requested"
+
+    # _wait_for_resume re-queues non-matching events
+    elif test_type == "wait_for_resume_requeues":
+        import queue as _q
+        import threading
+        eq = _q.Queue()
+        tp._event_queue = eq
+
+        from core.events import Event, EventType
+        # Put a non-matching event, then a resume event
+        def send_events():
+            import time as _t
+            _t.sleep(0.05)
+            eq.put(Event(type=EventType.COMMAND_DETECTED, data={"text": "what time is it"}))
+            _t.sleep(0.05)
+            eq.put(Event(type=EventType.COMMAND_DETECTED, data={"text": "continue"}))
+
+        t = threading.Thread(target=send_events)
+        t.start()
+        result = tp._wait_for_resume()
+        t.join(timeout=5)
+
+        # Check that non-matching event was re-queued
+        requeued = []
+        while not eq.empty():
+            requeued.append(eq.get_nowait())
+        tp._event_queue = None
+
+        if result != "resume":
+            return False, f"expected 'resume', got '{result}'"
+        if len(requeued) != 1:
+            return False, f"expected 1 re-queued event, got {len(requeued)}"
+        requeued_text = requeued[0].data.get("text", "")
+        if "what time" not in requeued_text:
+            return False, f"unexpected re-queued event text: {requeued_text!r}"
+        return True, "non-matching events re-queued after resume"
+
+    # "skip that" removed from _INTERRUPT_SKIP (multi-word phrase can't match set intersection)
+    elif test_type == "skip_that_not_in_set":
+        from core.task_planner import _INTERRUPT_SKIP
+        if "skip that" in _INTERRUPT_SKIP:
+            return False, "'skip that' still in _INTERRUPT_SKIP — dead code"
+        if "skip" not in _INTERRUPT_SKIP:
+            return False, "'skip' missing from _INTERRUPT_SKIP"
+        return True, f"_INTERRUPT_SKIP={_INTERRUPT_SKIP} (no multi-word phrases)"
+
+    # evaluate timeout constant exists
+    elif test_type == "evaluate_timeout_exists":
+        from core.task_planner import _EVALUATE_TIMEOUT_SECONDS
+        if not isinstance(_EVALUATE_TIMEOUT_SECONDS, (int, float)) or _EVALUATE_TIMEOUT_SECONDS <= 0:
+            return False, f"_EVALUATE_TIMEOUT_SECONDS invalid: {_EVALUATE_TIMEOUT_SECONDS}"
+        return True, f"_EVALUATE_TIMEOUT_SECONDS={_EVALUATE_TIMEOUT_SECONDS}"
 
     return False, f"unknown task_planner test type: {test_type}"
 
@@ -1678,6 +1865,41 @@ TESTS += [
     TestCase("8D-20", "", 1, "8D", "Task Planner Phase 4 — Pause/Resume",
              expect_task_planner="persona_task_resumed",
              notes="task_resumed returns non-empty"),
+
+    # --- Phase 8E: Bug Fixes (session 69) ---
+
+    # can_pause property
+    TestCase("8E-01", "", 1, "8E", "Task Planner Bug Fixes — can_pause",
+             expect_task_planner="can_pause_no_event_queue",
+             notes="can_pause=False without event queue"),
+    TestCase("8E-02", "", 1, "8E", "Task Planner Bug Fixes — can_pause",
+             expect_task_planner="can_pause_with_event_queue",
+             notes="can_pause=True with event queue"),
+
+    # _wait_for_resume behavior
+    TestCase("8E-03", "", 1, "8E", "Task Planner Bug Fixes — _wait_for_resume",
+             expect_task_planner="wait_for_resume_no_queue",
+             notes="_wait_for_resume returns 'resume' immediately without queue"),
+    TestCase("8E-04", "", 1, "8E", "Task Planner Bug Fixes — _wait_for_resume",
+             expect_task_planner="wait_for_resume_sets_paused",
+             notes="_wait_for_resume sets _paused=True during execution"),
+    TestCase("8E-05", "", 1, "8E", "Task Planner Bug Fixes — _wait_for_resume",
+             expect_task_planner="wait_for_resume_cancel",
+             notes="_wait_for_resume returns 'cancel' on cancel event"),
+    TestCase("8E-06", "", 1, "8E", "Task Planner Bug Fixes — _wait_for_resume",
+             expect_task_planner="wait_for_resume_cancel_requested",
+             notes="_wait_for_resume returns 'cancel' when _cancel_requested"),
+    TestCase("8E-07", "", 1, "8E", "Task Planner Bug Fixes — _wait_for_resume",
+             expect_task_planner="wait_for_resume_requeues",
+             notes="Non-matching events re-queued after resume"),
+
+    # "skip that" removal + evaluate timeout
+    TestCase("8E-08", "", 1, "8E", "Task Planner Bug Fixes — skip/timeout",
+             expect_task_planner="skip_that_not_in_set",
+             notes="'skip that' removed from _INTERRUPT_SKIP (dead code)"),
+    TestCase("8E-09", "", 1, "8E", "Task Planner Bug Fixes — skip/timeout",
+             expect_task_planner="evaluate_timeout_exists",
+             notes="_EVALUATE_TIMEOUT_SECONDS is positive number"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -1718,31 +1940,55 @@ TESTS += [
 # ---------------------------------------------------------------------------
 # TIER 2: Phase 8D — Pause/Resume Routing (P1.5)
 # ---------------------------------------------------------------------------
+# Pause requires event queue (voice mode). Resume requires is_paused=True.
+# Without these conditions, keywords fall through to normal routing.
 
 TESTS += [
-    # Pause with active plan → task_plan_pause intent
+    # Pause with active plan + event queue → task_plan_pause intent
     TestCase("8D-R01", "pause", 2, "8D", "Plan Pause/Resume Routing",
              in_conversation=True,
-             setup={"active_plan_running": True},
+             setup={"active_plan_with_event_queue": True},
              expect_handled=True, expect_intent="task_plan_pause",
              expect_source="planner",
-             notes="'pause' with active plan → paused"),
+             notes="'pause' with active plan + event queue → paused"),
 
-    # Resume with active plan → task_plan_resume intent
+    # Resume with active paused plan → task_plan_resume intent
     TestCase("8D-R02", "resume", 2, "8D", "Plan Pause/Resume Routing",
              in_conversation=True,
-             setup={"active_plan_running": True},
+             setup={"active_plan_paused": True},
              expect_handled=True, expect_intent="task_plan_resume",
              expect_source="planner",
-             notes="'resume' with active plan → resumed"),
+             notes="'resume' with paused plan → resumed"),
 
-    # "wait" with active plan → pause
+    # "wait" with active plan + event queue → pause
     TestCase("8D-R03", "wait", 2, "8D", "Plan Pause/Resume Routing",
              in_conversation=True,
-             setup={"active_plan_running": True},
+             setup={"active_plan_with_event_queue": True},
              expect_handled=True, expect_intent="task_plan_pause",
              expect_source="planner",
-             notes="'wait' with active plan → paused"),
+             notes="'wait' with active plan + event queue → paused"),
+
+    # Pause WITHOUT event queue (console/web) → falls through P1.5, handled by other skill
+    TestCase("8D-R04", "pause", 2, "8D", "Plan Pause/Resume Routing",
+             in_conversation=True,
+             setup={"active_plan_running": True},
+             expect_handled=True, expect_source="skill",
+             notes="'pause' without event queue → falls through to skill routing"),
+
+    # "continue" during active non-paused plan → falls through P1.5, not swallowed as resume
+    TestCase("8D-R05", "continue", 2, "8D", "Plan Pause/Resume Routing",
+             in_conversation=True,
+             setup={"active_plan_running": True},
+             expect_handled=True, expect_source="skill",
+             notes="'continue' during non-paused active plan → falls through to skill routing"),
+
+    # "continue" during paused plan → resume
+    TestCase("8D-R06", "continue", 2, "8D", "Plan Pause/Resume Routing",
+             in_conversation=True,
+             setup={"active_plan_paused": True},
+             expect_handled=True, expect_intent="task_plan_resume",
+             expect_source="planner",
+             notes="'continue' during paused plan → resume"),
 ]
 
 # ---------------------------------------------------------------------------
