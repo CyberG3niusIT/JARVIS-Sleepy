@@ -183,7 +183,7 @@ class SkillManager:
                     # Cache embeddings at load time — eliminates per-query re-encoding
                     if examples and hasattr(self, '_embedding_model'):
                         self._semantic_embedding_cache[(metadata.name, intent_id)] = \
-                            self._embedding_model.encode(examples, convert_to_tensor=True)
+                            self._embedding_model.encode(examples, convert_to_tensor=True, show_progress_bar=False)
             
             self.logger.info(f"✅ Loaded skill: {metadata.name} ({metadata.category})")
             return True
@@ -321,7 +321,7 @@ class SkillManager:
         if not hasattr(self, '_embedding_model'):
             return None
 
-        user_embedding = self._embedding_model.encode(user_text, convert_to_tensor=True)
+        user_embedding = self._embedding_model.encode(user_text, convert_to_tensor=True, show_progress_bar=False)
 
         best_match = None
         best_score = 0.0
@@ -584,7 +584,7 @@ class SkillManager:
                         # Use semantic similarity to disambiguate
                         from sentence_transformers import util as _st_util
                         if hasattr(self, '_embedding_model'):
-                            _user_emb = self._embedding_model.encode(user_text, convert_to_tensor=True)
+                            _user_emb = self._embedding_model.encode(user_text, convert_to_tensor=True, show_progress_bar=False)
                             _best_sim, _best_pair = -1.0, None
                             for _sid, _sdata in suffix_matches:
                                 _ck = (skill_name, _sid)
@@ -605,7 +605,7 @@ class SkillManager:
                 # LAYER 4b: Semantic similarity within the matched skill
                 from sentence_transformers import util
                 if hasattr(self, '_embedding_model'):
-                    user_emb = self._embedding_model.encode(user_text, convert_to_tensor=True)
+                    user_emb = self._embedding_model.encode(user_text, convert_to_tensor=True, show_progress_bar=False)
                     best_handler = None
                     best_score = 0.0
                     best_intent = None

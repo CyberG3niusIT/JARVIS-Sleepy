@@ -156,7 +156,7 @@ class ContextWindow:
 
         try:
             embedding = self.embedding_model.encode(
-                content, normalize_embeddings=True
+                content, normalize_embeddings=True, show_progress_bar=False
             )
             embedding = np.array(embedding, dtype=np.float32)
 
@@ -223,7 +223,7 @@ class ContextWindow:
             query_embedding = None
             if self.embedding_model:
                 query_embedding = self.embedding_model.encode(
-                    current_query, normalize_embeddings=True
+                    current_query, normalize_embeddings=True, show_progress_bar=False
                 )
                 query_embedding = np.array(query_embedding, dtype=np.float32)
 

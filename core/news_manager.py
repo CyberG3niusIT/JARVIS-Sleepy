@@ -436,7 +436,7 @@ class NewsManager:
         if self._embedding_model is None:
             return False
 
-        new_emb = self._embedding_model.encode([headline], convert_to_numpy=True)[0]
+        new_emb = self._embedding_model.encode([headline], convert_to_numpy=True, show_progress_bar=False)[0]
 
         for _, existing_emb in self._recent_embeddings:
             sim = self._cosine_similarity(new_emb, existing_emb)

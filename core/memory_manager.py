@@ -244,7 +244,7 @@ class MemoryManager:
 
         try:
             import numpy as np
-            embedding = self.embedding_model.encode(content, normalize_embeddings=True)
+            embedding = self.embedding_model.encode(content, normalize_embeddings=True, show_progress_bar=False)
             self.faiss_index.add(np.array([embedding], dtype=np.float32))
             self.faiss_metadata.append({
                 "timestamp": message.get("timestamp") or time.time(),
@@ -285,7 +285,7 @@ class MemoryManager:
             # Batch encode for efficiency
             embeddings = self.embedding_model.encode(
                 texts, normalize_embeddings=True,
-                batch_size=64, show_progress_bar=True
+                batch_size=64, show_progress_bar=False
             )
 
             self.faiss_index.add(np.array(embeddings, dtype=np.float32))
@@ -324,7 +324,7 @@ class MemoryManager:
 
         try:
             import numpy as np
-            query_embedding = self.embedding_model.encode(query, normalize_embeddings=True)
+            query_embedding = self.embedding_model.encode(query, normalize_embeddings=True, show_progress_bar=False)
             scores, indices = self.faiss_index.search(
                 np.array([query_embedding], dtype=np.float32), top_k
             )
@@ -1074,11 +1074,11 @@ class MemoryManager:
 
         try:
             import numpy as np
-            query_emb = self.embedding_model.encode(query, normalize_embeddings=True)
+            query_emb = self.embedding_model.encode(query, normalize_embeddings=True, show_progress_bar=False)
             # Enrich fact text for better semantic matching
             # e.g. birthday facts should also match "how old am I", "age"
             fact_texts = [self._enrich_fact_for_search(f["content"]) for f in facts]
-            fact_embs = self.embedding_model.encode(fact_texts, normalize_embeddings=True)
+            fact_embs = self.embedding_model.encode(fact_texts, normalize_embeddings=True, show_progress_bar=False)
 
             scores = np.dot(fact_embs, query_emb)
             ranked = sorted(zip(facts, scores), key=lambda x: x[1], reverse=True)

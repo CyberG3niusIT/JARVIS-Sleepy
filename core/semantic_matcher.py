@@ -33,7 +33,7 @@ class SemanticMatcher:
     def register_intent(self, intent_id, examples, threshold=0.85):
         if not examples:
             raise ValueError(f"Intent {intent_id} has no examples")
-        embeddings = self.model.encode(examples, convert_to_numpy=True)
+        embeddings = self.model.encode(examples, convert_to_numpy=True, show_progress_bar=False)
         self.intent_embeddings[intent_id] = embeddings
         self.intent_examples[intent_id] = examples
         self.intent_thresholds[intent_id] = threshold
@@ -44,7 +44,7 @@ class SemanticMatcher:
         if not self.intent_embeddings:
             return None, 0.0
         
-        query_embedding = self.model.encode([query], convert_to_numpy=True)[0]
+        query_embedding = self.model.encode([query], convert_to_numpy=True, show_progress_bar=False)[0]
         best_intent, best_score = None, 0.0
         
         for intent_id, embeddings in self.intent_embeddings.items():
