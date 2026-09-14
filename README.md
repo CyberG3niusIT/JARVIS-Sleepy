@@ -1,1140 +1,290 @@
-# JARVIS — Local Voice Assistant on AMD ROCm
+# JARVIS Sleepy
 
-A fully local, GPU-accelerated voice assistant with fine-tuned speech recognition, LLM-driven tool calling, computer vision, self-managing memory, and streaming TTS — all running on consumer AMD hardware. No cloud required for core operation.
+Lokaler Sprachassistent für Windows 11 mit Ubuntu 24.04 unter WSL2, AMD ROCm, lokalem LLM, deutscher Spracherkennung und Windows-Steuerung.
 
-**Built on:** Ubuntu 24.04 | Python 3.12 | ROCm 7.2 | AMD RX 7900 XT
+Dieses Repository enthält den aktuellen Sleepy-Stand meiner JARVIS-Anpassung. Die Basis stammt aus `InterGenJLU/jarvis`, wurde aber für meinen Windows- und WSL2-Stack deutlich umgebaut.
 
----
+Es gibt hier bewusst keine eingebetteten Demo-Videos, Audioaufnahmen oder externen Medienlinks. Die README beschreibt nur den tatsächlich verwendeten Stand.
 
-## By the Numbers
+## Aktueller Stand
 
-| What | How Much |
-|------|----------|
-| **Codebase** | ~66,000 lines of Python across ~40 modules |
-| **LLM** | Qwen3.5-35B-A3B (MoE, 3B active) — Q3_K_M on 20GB VRAM |
-| **Tool calling accuracy** | 100% across 1,200+ trials (local LLM, no cloud) |
-| **LLM tools** | 11 auto-discovered (one-file plugin system) |
-| **Routing layers** | 18-layer shared priority chain, one router for 3 frontends |
-| **Domain synthesis** | 17-domain classifier feeds 14 specialized anti-hallucination prompts |
-| **Persona templates** | 38 response pools, ~184 templates, style-tagged ack cache |
-| **Unit tests** | 314/314 passing (4 tiers) |
-| **Conversation tests** | 62-conversation behavioral suite |
-| **STT accuracy** | 94%+ (fine-tuned Whisper on Southern accent, 198 phrases) |
-| **STT latency** | 0.1-0.2s (CTranslate2 on GPU) |
-| **End-to-end** | 2-4s first spoken word (streaming LLM + streaming TTS) |
-| **VRAM usage** | ~19.5 / 20 GB (RX 7900 XT, 32K context) |
-| **Vision** | Desktop webcam + mobile camera relay + face enrollment |
+Der erste funktionierende Sicherungspunkt ist als Tag vorhanden:
 
----
-
-## Demo
-
-<video src="https://github.com/user-attachments/assets/857b4737-eef8-4bc5-8d71-d493a35c3934" width="100%" controls></video>
-
-*3-minute demo: wake word activation, voice commands, web research, document generation, and desktop control — all running locally on AMD GPU.*
-
-[![Watch on YouTube](https://img.youtube.com/vi/WsqLyUdl9ac/maxresdefault.jpg)](https://youtu.be/WsqLyUdl9ac)
-
-*Watch on YouTube for full resolution with chapters.*
-
----
-
-## Screenshots
-
-### Web UI
-![JARVIS Web UI](images/JARVIS_WEBUI_2.png)
-*Browser-based chat with streaming responses, health check HUD, and system diagnostics*
-
-![JARVIS Web UI — Session Sidebar](images/JARVIS_WEBUI_3.png)
-*Session sidebar with conversation history, auto-detected sessions, and rename support*
-
-### Vision — "What do you see through the webcam?"
-![JARVIS Vision](images/JARVIS_VISION.png)
-*JARVIS describes the scene through the desktop webcam — identifying objects, clothing (including a favorite band shirt), furniture, and room layout. Qwen3.5 multimodal via mmproj, fully local.*
-
-### Mobile Web UI + Vision
-![JARVIS Mobile Vision](images/JARVIS_MOBILE_VISION.png)
-*Same vision capability from an iPhone over Tailscale VPN — webcam frame relayed via WebSocket, analyzed by the local LLM, response streamed back to mobile.*
-
-### Console Mode
-![JARVIS Console](images/JARVIS_CONSOLE.png)
-*Terminal interface with rich stats panel showing match layer, skill routing, confidence, and timing*
-
----
-
-## Table of Contents
-
-- [Demo](#demo)
-- [Architecture](#architecture)
-- [How Requests Flow](#how-requests-flow)
-- [Key Subsystems](#key-subsystems)
-- [Skills & Capabilities](#skills--capabilities)
-- [Hardware Requirements](#hardware-requirements)
-- [Installation](#installation)
-- [Model Setup](#model-setup)
-- [The Kokoro Voice](#the-kokoro-voice)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Configuration Reference](#configuration-reference)
-- [AMD ROCm Build Guide](#amd-rocm-build-guide) — complete RDNA 3 GFX target reference + build instructions
-- [Fine-Tuning Whisper](#fine-tuning-whisper)
-- [Development](#development)
-- [License](#license)
-
----
-
-## Architecture
-
-```
-                        ┌──────────────────────┐
-                        │   Porcupine Wake     │
-                        │   Word Detection     │
-                        └──────────┬───────────┘
-                                   │ "Jarvis"
-                        ┌──────────▼───────────┐
-                        │  Ambient Filter      │
-                        │  (position, copula,  │
-                        │  threshold, length)  │
-                        └──────────┬───────────┘
-                                   │ verified wake word
-                        ┌──────────▼───────────┐
-                        │  Silero VAD v6 ONNX  │
-                        │  Continuous Listener  │
-                        │  (neural speech det) │
-                        └──────────┬───────────┘
-                                   │ audio frames
-                        ┌──────────▼───────────┐
-                        │  Speaker ID          │
-                        │  (SpeechBrain        │
-                        │  ECAPA-TDNN)         │
-                        └──────────┬───────────┘
-                                   │ user identity
-                        ┌──────────▼───────────┐
-                        │  Whisper STT v2      │
-                        │  (CTranslate2/GPU)   │
-                        │  198 phrases, 94%+   │
-                        └──────────┬───────────┘
-                                   │ text
-                ┌──────────────────▼────────────────────┐
-                │       ConversationRouter              │
-                │  Shared 18-layer priority chain:      │
-                │                                       │
-                │  P0:     Delivery mode (read/display) │
-                │  P1-2.8: Confirmations, dismissals,   │
-                │          intros, reminders, acks      │
-                │  P3:     Memory / recall / forget     │
-                │  P3.1-3.7: Readback, artifacts, news  │
-                │  Pre-P4: Task planner (compound       │
-                │          detection, LLM plan gen)     │
-                │  Pre-P4b: Self-hardware queries       │
-                │                                       │
-                │  ★ P4-LLM: Tool calling (11 tools)    │
-                │    semantic pruner → Qwen3.5 decides  │
-                │    domain classifier → 14 synthesis   │
-                │    prompts (anti-hallucination)        │
-                │                                       │
-                │  P4: Skill routing (stateful skills)  │
-                │  P5+: LLM fallback (Qwen → Claude)    │
-                └──────┬──────────────┬─────────────────┘
-                       │              │
-            ┌──────────▼───┐   ┌──────▼──────────┐
-            │  Skill       │   │  LLM Router     │
-            │  Handler     │   │  Qwen → Claude  │
-            │  (3 skills)  │   │  + 11 LLM Tools │
-            └──────────┬───┘   └──────┬──────────┘
-                       │              │
-                ┌──────▼──────────────▼─────────┐
-                │   Persona + Contextual Acks   │
-                │   (38 pools, ~184 templates)  │
-                └──────────────┬────────────────┘
-                               │
-                ┌──────────────▼────────────────┐
-                │        Kokoro TTS             │
-                │   StreamingAudioPipeline      │
-                │   (gapless multi-sentence)    │
-                └──────────────┬────────────────┘
-                               │ PCM audio
-                        ┌──────▼──────┐
-                        │   aplay     │
-                        │   (ALSA)    │
-                        └─────────────┘
+```text
+sleepy-jarvis-working-v1
 ```
 
-The system uses an **event-driven pipeline** with a Coordinator managing STT/TTS workers. The LLM response streams token-by-token, is chunked into sentences, and each sentence is synthesized and played as it arrives — the user hears the first sentence while the LLM is still generating the rest.
+Der zugehörige Stand umfasst unter anderem:
 
-### Tools vs Skills
+- Windows 11 als Hostsystem
+- Ubuntu 24.04 unter WSL2
+- systemd in WSL2
+- funktionierendes WSLInterop für Windows-Programme
+- AMD RX 7900 XTX mit ROCm
+- lokales Qwen3.5 LLM über llama.cpp
+- deutsches Qwen3-ASR über sherpa-onnx
+- Whisper als möglicher Fallback
+- deutsche Piper-TTS
+- deutsches semantisches Matching
+- deutsche Persona- und Antwortanpassungen
+- Windows-App-Start aus JARVIS heraus
+- lokale Daten-, Modell- und Cachepfade außerhalb des Git-Repositories
 
-JARVIS has two extension mechanisms. The distinction matters:
+## Hardware des aktuellen Builds
 
-| | **LLM Tools** | **Skills** |
-|---|---|---|
-| **What they are** | Stateless query->response functions the LLM calls | Stateful modules with multi-turn flows, confirmations, or desktop control |
-| **Who decides** | Qwen3.5 selects which tool to call based on the user's query | Priority chain routes to the skill before the LLM sees the query |
-| **How to add one** | Create one `.py` file in `core/tools/` — auto-discovered | Create a skill directory with `skill.py` + `metadata.yaml` |
-| **Examples** | get_weather, find_files, developer_tools, recall_memory, take_screenshot | app_launcher (desktop verbs), file_editor (doc gen + confirmation), social_introductions (multi-turn) |
-| **Count** | 11 tools (6 domain + 5 always-included) | 3 skill-only + 8 with companion tools |
+```text
+CPU:  Intel Core Ultra 5 245K
+GPU:  AMD Radeon RX 7900 XTX 24 GB
+RAM:  32 GB DDR5
+OS:   Windows 11 Pro for Workstations
+WSL:  Ubuntu 24.04
+```
 
-Most functionality lives in **tools** now. Skills remain for things that need deterministic state machines, desktop integration, or nested LLM pipelines — things where "let the LLM decide" isn't reliable enough.
+Der Code kann grundsätzlich auch auf anderer Hardware laufen. Dieser Branch wird aber primär auf genau diesem System entwickelt und getestet.
 
----
+## Architektur
 
-## How Requests Flow
+Der aktuelle Voice-Pfad sieht vereinfacht so aus:
 
-Every request — voice, console, or web — hits the same `ConversationRouter.route()` method. The 18-layer priority chain evaluates top-to-bottom and returns on the first match:
+```text
+Mikrofon
+   |
+   v
+VAD / Continuous Listener
+   |
+   v
+Qwen3-ASR 0.6B INT8
+sherpa-onnx
+Hotwords: Jarvis, Hey Jarvis
+   |
+   v
+Wakeword-Prüfung
+   |
+   v
+Intent / Skill / Tool Routing
+   |
+   +--> lokales Qwen3.5 LLM über llama.cpp
+   |
+   +--> Windows-Steuerung über WSLInterop
+   |
+   v
+Piper TTS
+   |
+   v
+WSLg / PulseAudio
+```
 
-1. **P0-P2.8** — Fast deterministic checks: delivery mode commands, rundown acceptance, task planner interrupts, reminder acks, memory forget confirms, introduction state machine, dismissal detection, bare ack filtering. Zero LLM involvement, sub-10ms.
+## Sprachmodell
 
-2. **P3-P3.7** — Memory and artifact layers: recall/forget/transparency, structured readback (next/previous/section N), artifact reference resolution ("the second result", "that recipe"), news article pull-up.
+Das lokale LLM läuft über `llama.cpp` als persistenter Server.
 
-3. **Pre-P4** — Compound request detection (22 regex signals like "and then", "after that") triggers the task planner, which generates a multi-step LLM plan and executes steps sequentially with per-step evaluation, pause/resume/cancel voice interrupts, and predictive timing announcements.
+Aktuell verwendet:
 
-4. **P4-LLM** — The primary path. A semantic pruner scores all 11 tools against the query using sentence-transformer embeddings, selects the top 4, and hands them to Qwen3.5 with a dynamically-built system prompt. The LLM decides which tool to call (or none). After the tool returns data, a 17-domain classifier (math, medical, legal, sports, programming, etc.) selects one of 14 domain-specific synthesis prompts with tailored anti-hallucination constraints. The LLM then streams a natural language answer.
+```text
+Qwen3.5-35B-A3B-abliterated-Q3_K_M.gguf
+```
 
-5. **P4-Skill** — Non-migrated stateful skills (app_launcher, file_editor, social_introductions) get their turn via 5-layer semantic intent matching.
+Der llama.cpp-Server läuft lokal auf:
 
-6. **Fallback** — Pure LLM conversation: Qwen3.5 streams a response with quality gating. If gibberish, retries with a nudge. If still bad, falls back to Claude API.
+```text
+127.0.0.1:8080
+```
 
----
+Die Modellgewichte selbst liegen nicht im Git-Repository.
 
-## Key Subsystems
+## Spracherkennung
 
-### Self-Managing Memory
+Für den deutschen Voice-Betrieb wird derzeit Qwen3-ASR über sherpa-onnx verwendet.
 
-MemGPT-pattern per-turn fact extraction: after every exchange, the LLM extracts durable facts and stores them in SQLite. The `recall_memory` tool (always available to the LLM) performs text + FAISS semantic search across stored facts. CMA 6/6 (Consolidation, Mapping, Abstraction) handles importance scoring, retrieval-driven mutation, associative linking between related facts, and episode-to-semantic knowledge promotion.
+Aktuelles Modell:
 
-### Interaction Artifact Cache
+```text
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25
+```
 
-5-phase typed cache system. Every tool result is stored as a typed artifact (weather, search, reminder, news, system, file, dev_tools, memory) in hot/warm/cold tiers. Phase 2 adds reference resolution — "the second result", "that recipe", "repeat that" all resolve to the correct cached artifact. Phase 3 adds sub-item navigation with on-demand LLM decomposition. Phase 4 promotes artifacts to long-term memory at session end. Phase 5 enables cross-session retrieval via FAISS semantic search across cold-tier artifacts.
+Die Hotwords sind derzeit:
 
-### Vision Pipeline
+```text
+Jarvis,Hey Jarvis
+```
 
-Desktop webcam capture via ffmpeg MJPEG singleton (v4l2, 1280x720, 15fps, auto-start/stop with 30s idle shutdown). Mobile camera relay via WebSocket — the server sends a `frame_request`, the browser captures from `getUserMedia`, and returns a base64 JPEG `frame_response`. Both paths feed through PIL downscale and into the Qwen3.5 multimodal pipeline (mmproj-F16.gguf, CPU inference, 90s timeout). `take_screenshot` captures the desktop via gnome-screenshot with optional window cropping. `enroll_face` adds face recognition for presence-based greetings.
+Das war für diesen Build deutlich zuverlässiger als Whisper Base bei der Erkennung des Eigennamens "Jarvis".
 
-### Domain-Aware Response Synthesis
+Qwen3-ASR läuft in der aktuellen sherpa-onnx-Integration auf der CPU. Der Recognizer wird beim Start einmal geladen und anschließend wiederverwendet.
 
-When the LLM calls a tool and gets results back, a 17-domain regex classifier categorizes the query (math, veterinary, medical, nutrition, finance, legal, gaming, sports, automotive, real estate, programming, science/tech, history, travel, factual, geo). This feeds into one of 14 domain-specific synthesis prompt blocks injected into `continue_after_tool_call()`. Each domain has tailored anti-hallucination constraints — medical responses disclaim, legal responses cite jurisdictions, programming responses specify versions. Domains without specialized prompts (math, factual, geo) use the generic synthesis template.
+## TTS
 
-### Task Planner
+Die aktuelle deutsche Sprachausgabe verwendet Piper.
 
-22 conjunctive regex patterns detect compound requests ("check the weather and then create a packing list"). The LLM generates a JSON plan (max 4 steps), which executes sequentially with direct skill routing per step. Each step gets LLM evaluation (continue/adjust/stop). Voice interrupts (cancel, skip, pause, resume) work via an event queue checked between steps. Predictive timing announcements ("2 steps, about a few seconds") and error-aware planning (unreliable skill warnings) round it out.
+Modellpfad im aktuellen System:
 
-### Persona Engine
+```text
+/home/alex/jarvis-data/models/piper/jarvis-de-high/
+```
 
-38 response pool categories with ~184 templates, style-tagged contextual acknowledgments (10 pre-synthesized phrases: neutral, checking, working, research), dynamic honorific injection ("sir" for primary user, "ma'am"/"Ms. Guest" for secondary), domain-specific dry-humor disclaimers for hallucination-prone topics (medical, legal). Guest mode activates a security boundary with HAL 9000 easter egg greetings and restricted tool access (`get_weather` and `web_search` only).
+Die Stimme ist vorerst eine funktionierende Zwischenlösung und noch nicht als endgültige JARVIS-Stimme festgelegt.
 
-### Additional Subsystems
+## Windows-Integration
 
-| Subsystem | What It Does |
-|-----------|-------------|
-| **Conversation Router** | 18-layer shared priority chain for voice/console/web — one router, three frontends |
-| **Tool Registry** | Auto-discovers `core/tools/*.py`, builds schemas, injects dependencies — adding a tool = one file |
-| **MCP Bridge** | Bidirectional MCP: outbound server exposes JARVIS tools to external clients (Claude Code); inbound client consumes external MCP servers as native tools |
-| **Self-Awareness** | Capability manifest + system state injected into LLM context — JARVIS knows what it can do, its current error rates, VRAM usage, and uptime |
-| **Speaker ID** | SpeechBrain ECAPA-TDNN (192-dim, 0.80% EER) — identifies who's speaking and adjusts honorifics, tool access, and memory scope dynamically. Evolved from Resemblyzer d-vectors (256-dim, 5-8% EER) |
-| **Face Recognition** | InsightFace ArcFace (512-dim, 99.83% LFW) — presence detection with proactive greetings, voice-driven face enrollment with pose instructions. Evolved from dlib/Haar cascade (128-dim, 97% LFW) |
-| **Multi-Speaker Tracking** | Per-speaker history labels, rapid-switch detection (3 switches in 60s triggers a retort), participant-aware LLM context |
-| **Context Window** | Topic-segmented working memory with relevance-scored assembly, 24K token budget, cross-session persistence |
-| **Streaming TTS** | `StreamingAudioPipeline` — single persistent aplay process, background Kokoro generation, gapless playback |
-| **TTS Normalizer** | 22-pass text normalization: markdown, heteronyms, IPs, ports, CPU/GPU names, model nomenclature, quant strings, years, file sizes, timestamps, currencies, fractions, measurements, temperatures, URLs, paths, and more |
-| **Structured Readback** | LLM-parsed section navigation with voice control (next/previous/section N) + delivery modes (read/display/print/browse) |
-| **People Manager** | SQLite contacts database with relationship tracking, TTS pronunciation overrides, LLM context injection for known people |
-| **Web Research** | Serper (primary) + DuckDuckGo (fallback) + trafilatura, 5min TTL cache, parallel page fetching, multi-source synthesis |
-| **Google Calendar** | Two-way sync with dedicated JARVIS calendar, OAuth, incremental sync, background polling, multi-notification composite keys |
-| **Health Check** | 5-layer system diagnostic (bare metal, services, internals, data stores, self-assessment) with ANSI terminal report + voice summary |
-| **GNOME Desktop Bridge** | Custom GNOME Shell extension providing Wayland-native window management via D-Bus, with wmctrl fallback for XWayland |
-| **Ambient Filter** | Multi-signal wake word validation: position, copula, threshold (0.80), length — blocks ambient mentions like "I was just telling Jarvis about..." |
+Windows-Programme werden aus WSL2 über WSLInterop gestartet.
 
----
+Aktuell funktionieren unter anderem:
 
-## Skills & Capabilities
+```text
+Explorer
+Chrome
+Microsoft Edge
+VS Code
+Windows Terminal
+PowerShell
+cmd
+Editor
+Rechner
+Windows Einstellungen
+```
 
-### LLM Tools (Qwen3.5 decides when to call)
+Die ursprüngliche Desktop-Steuerung des Upstream-Projekts ist stark auf GNOME ausgelegt. Vollständige Windows-Fenstersteuerung wie Minimieren, Maximieren, Schließen, Fokuswechsel und Lautstärkesteuerung ist noch nicht vollständig portiert.
 
-Stateless query->response functions. The LLM receives the user's query, selects the right tool, calls it, and synthesizes a natural language answer from the result.
+## Start
 
-| Tool | Examples | What It Does |
-|------|---------|-------------|
-| **get_weather** | "What's the weather?" / "Will it rain?" | OpenWeatherMap API — current conditions, forecast, rain check |
-| **get_system_info** | "What CPU do I have?" / "How much RAM?" | 8 sub-handlers: cpu, memory, disk, gpu, network, processes, uptime, all |
-| **find_files** | "Find my config file" / "Show recent files" | 11 actions: search, count, list, dir sizes, disk usage, file info, tree, large files, package info |
-| **developer_tools** | "Git status" / "Search codebase for TODO" | 13 actions: codebase search, git multi-repo, system admin, general shell, visual output, 3-tier safety |
-| **manage_reminders** | "Remind me at 3pm" / "What's on my schedule?" | 5 actions: add, list, cancel, acknowledge, snooze. Priority tones, nag behavior |
-| **get_news** | "Read me the headlines" / "Cybersecurity news?" | 16 RSS feeds, urgency classification, semantic dedup, category/priority filtering |
-| **web_search** | "Who won the Super Bowl?" | Serper primary + DDG fallback, trafilatura multi-source synthesis (always available) |
-| **recall_memory** | "What's my favorite color?" | SQLite text + FAISS semantic search across stored facts (always available) |
-| **take_screenshot** | "What's on my screen?" | gnome-screenshot + optional window crop, LANCZOS downscale, base64 to LLM vision |
-| **capture_webcam** | "What do you see?" / "What am I holding?" | Desktop webcam or mobile camera relay, PIL downscale, base64 to Qwen3.5 mmproj |
-| **enroll_face** | "Learn my face" / "Remember what I look like" | Face detection + embedding storage for presence-based greetings |
-
-### Skills (Deterministic routing — state machines and desktop control)
-
-These handle things that need multi-turn flows, confirmations, or direct desktop integration.
-
-| Skill | Examples | How It Works |
-|-------|---------|-------------|
-| **File Editor** | "Write a script that..." / "Create a presentation about..." | 5 intents: write, edit, read, delete + list. Two-stage LLM content generation. Document generation: PPTX/DOCX/PDF with web research integration and Pexels stock images. Confirmation flow for destructive ops |
-| **Desktop Control** | "Open Chrome" / "Volume up" / "Switch to workspace 2" | 16 intents: app launch/close, window management, volume, workspaces, focus, clipboard via GNOME Shell extension D-Bus bridge |
-| **Social Introductions** | "Meet my niece Arya" / "Who is Arya?" | Multi-turn butler-style introduction flow: name confirmation, pronunciation check, fact gathering, persistent people database with TTS pronunciation overrides |
-
-**Conversation** (greetings, small talk, "how are you?") is handled directly by the LLM — no dedicated skill needed.
-
-### Document Generation
-
-JARVIS generates PPTX, DOCX, and PDF documents through a two-stage LLM pipeline. Stage 1 gathers content (optionally via web research). Stage 2 structures it into the target format. Presentations pull stock images from the Pexels API. Generated documents land in a shared folder and can be opened on the desktop via "open it" or read back via "read it to me" with structured section navigation.
-
-### Local Image Generation (FLUX.2)
-
-FLUX.2-klein-4B runs locally on the RX 7900 XT via GPU swap — JARVIS pauses the LLM, loads FLUX into VRAM, generates 1024x1024 images, then unloads and resumes the LLM. Supports text-to-image and img2img by voice or web UI.
-
-- **Warm (FLUX already loaded):** ~12-20s per image
-- **Cold (GPU swap required):** ~90-200s total (includes model load/unload + generation). Img2img is on the higher end due to the additional image encoding step.
-
-![JARVIS Web UI — local FLUX.2 img2img generation. User uploaded a photo and asked "Can you make me look steampunk?" Cold start including GPU swap.](images/JARVIS_FLUX_IMG2IMG.png)
-
----
-
-## Hardware Requirements
-
-### Minimum (single GPU)
-
-| Component | Requirement | Why |
-|-----------|------------|-----|
-| CPU | x86_64, 8+ cores | Kokoro TTS runs on CPU, concurrent with audio processing |
-| RAM | 32GB | Models + Python + OS overhead |
-| GPU | 20GB+ VRAM (AMD or NVIDIA) | 35B LLM at Q3_K_M needs ~19.5GB with 32K context |
-| Storage | 30GB free | Models (~25GB) + code + cache |
-| Audio | USB microphone + speakers | Voice mode requires both |
-| OS | Ubuntu 24.04 LTS | ROCm tested on this; other distros may work |
-
-A single 20GB+ GPU can run the 35B LLM, Whisper STT, and embeddings — but without the 4B synthesis model you lose the 60% TTFT improvement and contextual acks.
-
-### Recommended (What This Was Built On)
-
-| Component | Spec | Role |
-|-----------|------|------|
-| CPU | AMD Ryzen 9 5900X (24 threads) | Kokoro TTS, FAISS, VAD, general processing |
-| GPU 1 (compute) | AMD RX 7900 XT (20GB VRAM) | 35B LLM — reasoning + tool calling |
-| GPU 2 (inference) | AMD RX 7600 (8GB VRAM) | 4B LLM + Whisper STT + nomic embeddings |
-| RAM | 64GB | Headroom for concurrent models + browser + desktop |
-| Microphone | USB condenser mic (FIFINE K669B tested) | Voice input |
-| OS | Ubuntu 24.04 LTS |
-| ROCm | 7.2.0 |
-
-> **GPU acceleration is optional but transformative.** CPU-only Whisper takes 0.3-0.5s per transcription. With GPU: 0.1-0.2s. The 35B LLM runs via llama.cpp with full GPU offload at ~48-63 tok/s. Dual GPU setup: RX 7900 XT runs the 35B, RX 7600 runs the 4B synthesis model + Whisper STT + embeddings.
-
----
-
-## Installation
-
-### 1. Clone the Repository
+Virtuelle Umgebung aktivieren:
 
 ```bash
-git clone https://github.com/YOUR_USER/jarvis.git ~/jarvis
-cd ~/jarvis
+cd /home/alex/jarvis
+source /home/alex/jarvis-venv/bin/activate
 ```
 
-### 2. Install System Dependencies
+Textkonsole:
 
 ```bash
-sudo apt update
-sudo apt install -y \
-    portaudio19-dev python3-pyaudio \
-    build-essential cmake \
-    alsa-utils \
-    ffmpeg
+python jarvis_console.py
 ```
 
-### 3. Create Virtual Environment + Install Dependencies
-
-JARVIS uses a venv with system site-packages access (required for ROCm library bindings). See the [AMD ROCm Build Guide](#amd-rocm-build-guide) for the full rationale and PyTorch source build instructions.
+Voice-Modus:
 
 ```bash
-# Create venv (--system-site-packages needed for ROCm)
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-
-# Core dependencies
-pip install -r requirements.txt
-
-# Additional packages
-pip install \
-    faster-whisper \
-    sentence-transformers \
-    speechbrain \
-    insightface \
-    silero-vad \
-    kokoro \
-    soundfile \
-    trafilatura \
-    duckduckgo-search \
-    faiss-cpu
+python jarvis_console.py --speech
 ```
 
-### 4. Install llama.cpp (for local LLM)
+Hybrid-Modus:
 
 ```bash
-cd ~
-git clone https://github.com/ggml-org/llama.cpp
-cd llama.cpp
-
-# ROCm GPU build (RDNA 3 flash attention enabled):
-HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
-cmake -S . -B build \
-  -DGGML_HIP=ON \
-  -DGPU_TARGETS="gfx1100;gfx1102" \
-  -DGGML_HIP_ROCWMMA_FATTN=ON \
-  -DCMAKE_BUILD_TYPE=Release
-
-cmake --build build --config Release -j $(nproc)
+python jarvis_console.py --hybrid
 ```
 
-See [AMD ROCm Build Guide](#amd-rocm-build-guide) for full details on GFX targets and multi-GPU configuration.
+## Lokaler llama.cpp-Server
 
-### 5. Install Piper TTS (fallback)
+Der lokale LLM-Server wird als systemd-User-Service betrieben.
+
+Status prüfen:
 
 ```bash
-pip install piper-tts
+systemctl --user status llama-server.service
 ```
 
-### 6. Configure API Keys
+Starten:
 
 ```bash
-cp .env.example ~/jarvis/.env
-nano ~/jarvis/.env
+systemctl --user start llama-server.service
 ```
 
-Fill in your keys:
-- **PORCUPINE_ACCESS_KEY** — Free tier at [picovoice.ai](https://picovoice.ai/)
-- **ANTHROPIC_API_KEY** — From [console.anthropic.com](https://console.anthropic.com/) (LLM fallback)
-- **OPENWEATHER_API_KEY** — Free tier at [openweathermap.org](https://openweathermap.org/api) (weather skill)
-- **PEXELS_API_KEY** — Free tier at [pexels.com/api](https://www.pexels.com/api/) (stock images for document generation — optional, text-only slides without it)
-
-### 7. Download Models
-
-See [Model Setup](#model-setup) below for detailed instructions with download links.
-
-### 8. Configure
-
-Edit `config.yaml` and update paths to match your model locations. See [Configuration Reference](#configuration-reference).
-
-### 9. Set Up Systemd Service
+Stoppen:
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp jarvis.service ~/.config/systemd/user/
-
-# If using a local LLM:
-cp llama-server.service ~/.config/systemd/user/
-
-# Enable linger (service runs without active login)
-loginctl enable-linger $USER
-
-# Enable and start
-systemctl --user daemon-reload
-systemctl --user enable jarvis
-systemctl --user start jarvis
-
-# Check status
-systemctl --user status jarvis
-journalctl --user -u jarvis -f
+systemctl --user stop llama-server.service
 ```
 
-### 10. Test
-
-Say: **"Jarvis, what time is it?"**
-
-Or use console mode (no microphone needed):
-```bash
-python3 jarvis_console.py
-```
-
----
-
-## Model Setup
-
-JARVIS uses several AI models. Here's where to get each one.
-
-### Whisper STT (Speech-to-Text)
-
-| Model | Source | Format | Purpose |
-|-------|--------|--------|---------|
-| **whisper-base** | [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin) | GGML | CPU fallback |
-| **faster-whisper base** | Auto-downloaded by `faster-whisper` | CTranslate2 | GPU-accelerated (recommended) |
+Logs:
 
 ```bash
-# CPU fallback model (optional)
-mkdir -p /path/to/models/whisper
-wget -O /path/to/models/whisper/ggml-base.bin \
-    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+journalctl --user -u llama-server.service -f
 ```
 
-The GPU model is auto-downloaded by `faster-whisper` on first run. You can also [fine-tune Whisper](#fine-tuning-whisper) on your accent.
+## Verzeichnisstruktur
 
-### Qwen3.5-35B-A3B LLM
+Wichtige Pfade des aktuellen Builds:
 
-| Model | Source | Format | Quantization |
-|-------|--------|--------|-------------|
-| **Qwen3.5-35B-A3B** | [unsloth GGUF](https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF) | GGUF | Q3_K_M recommended (imatrix-calibrated) |
+```text
+/home/alex/jarvis
+    Git-Repository und Quellcode
+
+/home/alex/jarvis-venv
+    Python-Umgebung für JARVIS
+
+/home/alex/qwen3-asr-venv
+    separate Testumgebung für sherpa-onnx / Qwen3-ASR
+
+/home/alex/jarvis-data
+    Modelle, Datenbanken, Cache, Logs und Laufzeitdaten
+
+/home/alex/llama.cpp
+    lokal gebautes llama.cpp
+```
+
+## Daten und Secrets
+
+Modelle, Audiodateien, Datenbanken, Logs, lokale Backups und `.env` werden nicht in Git eingecheckt.
+
+API-Keys und Auth-Tokens gehören ausschließlich in `.env` oder andere lokale Secret-Stores.
+
+Beispiel:
+
+```text
+JARVIS_WEB_AUTH_TOKEN=...
+ANTHROPIC_API_KEY=...
+PORCUPINE_ACCESS_KEY=...
+```
+
+Die Datei `.env` ist über `.gitignore` ausgeschlossen.
+
+## Noch nicht vollständig portiert
+
+Der aktuelle Stand funktioniert bereits als lokaler deutscher Voice-Assistent, ist aber noch kein abgeschlossener Windows-Port.
+
+Noch offen oder nur teilweise umgesetzt sind insbesondere:
+
+- vollständige Windows-Fenstersteuerung
+- weitere GNOME-spezifische Funktionen ersetzen
+- einzelne englische Skill-Ausgaben vollständig eindeutschen
+- Reminder-Parser für natürliches Deutsch erweitern
+- finale deutsche JARVIS-Stimme
+- weitere Tests für Wakeword und Umgebungsgeräusche
+- allgemeine Installation auf einem frischen Windows-System vereinfachen
+
+## Git-Struktur
+
+Dieses Repository ist der eigene Entwicklungsstand:
+
+```text
+origin
+https://github.com/CyberG3niusIT/JARVIS-Sleepy.git
+```
+
+Das ursprüngliche Projekt bleibt als Upstream eingebunden:
+
+```text
+upstream
+https://github.com/InterGenJLU/jarvis.git
+```
+
+Dadurch können spätere Änderungen des Originalprojekts verglichen oder gezielt übernommen werden, ohne den Sleepy-Branch zu überschreiben.
+
+## Wiederherstellungspunkt
+
+Der erste stabile Voice-Stand ist markiert mit:
 
 ```bash
-mkdir -p /path/to/models/llm
-# Download pre-quantized Q3_K_M (~16GB) from unsloth (trusted, imatrix-calibrated):
-huggingface-cli download unsloth/Qwen3.5-35B-A3B-GGUF \
-    Qwen3.5-35B-A3B-Q3_K_M.gguf --local-dir /path/to/models/llm
+git checkout sleepy-jarvis-working-v1
 ```
 
-The LLM runs via llama.cpp as a server process. The systemd service `llama-server.service` manages it. Qwen3.5-35B-A3B is a MoE model (256 experts, 8+1 active, ~3B active params) with native tool calling. At Q3_K_M quantization, it fits in ~19.5GB VRAM with 32K context, leaving headroom on a 20GB card. IFEval 91.9, SWE-bench 69.2.
-
-### Kokoro TTS (Primary Voice)
-
-| Model | Source | Size | Runtime |
-|-------|--------|------|---------|
-| **Kokoro-82M** | [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | 82M params | CPU (in-process) |
-
-Kokoro auto-downloads from HuggingFace Hub on first initialization. No manual download needed.
-
-See [The Kokoro Voice](#the-kokoro-voice) for how the custom voice blend works.
-
-### Piper TTS (Fallback)
-
-| Model | Source | Format |
-|-------|--------|--------|
-| **en_GB-northern_english_male-medium** | [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/northern_english_male/medium) | ONNX |
+Oder als neuer Branch:
 
 ```bash
-mkdir -p /path/to/models/piper
-cd /path/to/models/piper
-
-wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx
-wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx.json
+git switch -c restore-sleepy-v1 sleepy-jarvis-working-v1
 ```
 
-### Sentence Transformers (Semantic Matching)
+## Herkunft und Lizenz
 
-| Model | Source | Purpose |
-|-------|--------|---------|
-| **nomic-embed-text-v1.5** | [nomic-ai](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) | Intent matching, memory search, tool pruning, news dedup (768-dim, GPU) |
+Dieses Projekt basiert auf `InterGenJLU/jarvis` und enthält eigene Anpassungen für Windows 11, WSL2, deutsche Sprachverarbeitung, Qwen3-ASR, Piper-TTS und die aktuelle Sleepy-Systemarchitektur.
 
-Runs on RX 7600 GPU (~9ms/query). Evolved from all-MiniLM-L6-v2 (384-dim, CPU, ~1ms but lower quality). +6 MTEB points, 8192 token context (vs 256).
-
-### Porcupine (Wake Word)
-
-| Component | Source | Note |
-|-----------|--------|------|
-| **pvporcupine** | [picovoice.ai](https://picovoice.ai/) | Requires free API key |
-
-Get a free access key from Picovoice and add it to your `.env` file.
-
-### SpeechBrain (Speaker ID)
-
-| Model | Source | Purpose |
-|-------|--------|---------|
-| **ECAPA-TDNN** | [speechbrain/spkrec-ecapa-voxceleb](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) | Speaker identification (192-dim, 0.80% EER) |
-
-Runs on RX 7600 GPU. Evolved from Resemblyzer VoiceEncoder (256-dim, 5-8% EER) — 10x accuracy improvement. RMS-normalized pipeline with scipy bandlimited resampling for consistent scores across volume levels. Sticky identity cached for 60s to avoid re-verification during conversation.
-
-### InsightFace (Face Recognition)
-
-| Model | Source | Purpose |
-|-------|--------|---------|
-| **buffalo_l (RetinaFace + ArcFace)** | [insightface](https://github.com/deepinsight/insightface) | Face detection + 512-dim recognition (99.83% LFW) |
-
-Single-pass detection and identification, replacing the previous two-tier Haar cascade + dlib system (128-dim, 97% LFW). Powers presence detection (proactive greetings) and voice-driven face enrollment with guided pose instructions.
-
-### Silero VAD (Voice Activity Detection)
-
-| Model | Source | Purpose |
-|-------|--------|---------|
-| **Silero VAD v6.2.1** | [silero-vad](https://github.com/snakers4/silero-vad) | Neural speech/noise discrimination (ONNX, stateful) |
-
-Replaced WebRTC VAD. Neural network with cross-chunk context for better barge-in detection, speech/noise distinction, and music rejection. 16% fewer errors on noisy data. 0.14ms/chunk on CPU.
-
----
-
-## The Kokoro Voice
-
-JARVIS uses [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), a lightweight 82-million parameter TTS model that runs on CPU. What makes it special is the **voice blending** system.
-
-### How Voice Blending Works
-
-Kokoro ships with multiple voice presets as PyTorch tensors (`.pt` files). JARVIS loads two voices and blends them via linear interpolation:
-
-```python
-# From core/tts.py — the voice blend
-voice_a = torch.load("bm_fable.pt")    # British male, warm
-voice_b = torch.load("bm_george.pt")   # British male, deeper
-blended = voice_a * 0.5 + voice_b * 0.5  # 50/50 blend
-```
-
-This creates a voice that has the warmth of "fable" with the depth of "george" — more natural than either voice alone.
-
-### Configuration
-
-```yaml
-# config.yaml
-tts:
-  engine: kokoro
-  kokoro_voice_a: bm_fable        # First voice
-  kokoro_voice_b: bm_george       # Second voice
-  kokoro_blend_ratio: 0.5         # 0.0 = all george, 1.0 = all fable
-  kokoro_speed: 1.0               # Playback speed
-```
-
-### Available Voices
-
-Kokoro includes several voice presets. The `bm_` prefix means "British male":
-- `bm_fable` — warm, narrator-like
-- `bm_george` — deeper, more authoritative
-- `bf_emma` — British female
-- `am_adam` — American male
-- And more — check the [Kokoro model card](https://huggingface.co/hexgrad/Kokoro-82M) for the full list.
-
-### Why Kokoro Over Other TTS?
-
-We evaluated several TTS engines:
-
-| Engine | Verdict | Notes |
-|--------|---------|-------|
-| **Kokoro 82M** | Primary | Best quality-to-speed ratio. CPU-only avoids GPU contention with STT/LLM. 82M params loads in <2s. |
-| **Piper** | Fallback | Good but more robotic. ONNX format, subprocess-based. Used when Kokoro fails to initialize. |
-| **StyleTTS 2** | Rejected | Superior quality but 10x slower, required GPU (competing with STT), and PyTorch dependency conflicts. |
-
-### Streaming Playback
-
-JARVIS doesn't wait for the full response before speaking. The `StreamingAudioPipeline` synthesizes each sentence in the background while the previous one plays, maintaining a single persistent `aplay` process for gapless audio.
-
----
-
-## Usage
-
-### Voice Mode (Production)
-
-```bash
-# Start via systemd
-systemctl --user start jarvis
-
-# Check status
-systemctl --user status jarvis
-
-# Live logs
-journalctl --user -u jarvis -f
-```
-
-Say the wake word ("Jarvis") followed by your command:
-- *"Jarvis, what time is it?"*
-- *"Jarvis, what's the weather like?"*
-- *"Jarvis, remind me to check the oven in 20 minutes"*
-- *"Jarvis, search the codebase for TODO"*
-- *"Jarvis, who won the Super Bowl?"*
-- *"Jarvis, read me the tech headlines"*
-- *"Jarvis, create a presentation about renewable energy"*
-- *"Jarvis, open Chrome"*
-- *"Jarvis, what's on my screen?"*
-- *"Jarvis, check the weather and then create a packing list document"*
-
-After JARVIS responds, you have a **conversation window** (4-7 seconds, adaptive) to ask follow-up questions without repeating the wake word. The window extends with conversation depth and when JARVIS asks a question.
-
-### Console Mode
-
-```bash
-# Text-only mode — type commands, see responses + stats panel
-python3 jarvis_console.py
-
-# Hybrid mode — type commands, responses printed AND spoken
-python3 jarvis_console.py --hybrid
-
-# Speech mode — full voice pipeline via terminal
-python3 jarvis_console.py --speech
-```
-
-The console displays a stats panel after each command showing match layer, skill, confidence score, timing, and LLM token counts.
-
-### Web UI
-
-```bash
-# Start the web interface
-python3 jarvis_web.py
-
-# Then open http://127.0.0.1:8088 in your browser
-# HTTPS available at https://0.0.0.0:8443 (Tailscale certs)
-```
-
-The web UI provides the same full pipeline with streaming LLM responses, markdown rendering, drag/drop file handling, web research, image upload + webcam/mobile camera for vision queries, conversation history with session sidebar, health check HUD, memory dashboard at `/memory`, and LLM metrics at `/metrics`.
-
----
-
-## Project Structure
-
-```
-jarvis/                              # ~66,000 lines of Python
-├── jarvis_continuous.py             # Voice mode entry point (~994 lines)
-├── jarvis_console.py                # Console entry point (~1,495 lines)
-├── jarvis_web.py                    # Web UI entry point (~3,875 lines)
-├── config.yaml                      # Main configuration
-├── .env                             # API keys (not in repo)
-│
-├── core/                            # Core modules (~32,700 lines)
-│   ├── conversation_router.py       # 18-layer shared priority chain (~3,003 lines)
-│   ├── llm_router.py                # LLM routing, tool calling, domain synthesis (~1,814 lines)
-│   ├── interaction_cache.py         # 5-phase artifact cache (~1,993 lines)
-│   ├── pipeline.py                  # Event-driven Coordinator + workers (~2,054 lines)
-│   ├── task_planner.py              # Compound detection + LLM plan execution (~1,097 lines)
-│   ├── tts_normalizer.py            # 22-pass text normalization (~1,072 lines)
-│   ├── skill_manager.py             # 5-layer intent matching (~931 lines)
-│   ├── health_check.py              # 5-layer system diagnostic (~908 lines)
-│   ├── continuous_listener.py       # VAD + wake word + ambient filter (~885 lines)
-│   ├── tts.py                       # Kokoro + Piper, streaming pipeline (~722 lines)
-│   ├── persona.py                   # 38 response pools, system prompts (~726 lines)
-│   ├── memory_manager.py            # SQLite facts + FAISS + CMA 6/6
-│   ├── context_window.py            # Topic-segmented working memory
-│   ├── self_awareness.py            # Capability manifest + system state
-│   ├── conversation.py              # History, cross-session, multi-speaker
-│   ├── reminder_manager.py          # Reminders, rundowns, calendar sync
-│   ├── desktop_manager.py           # GNOME D-Bus + wmctrl + volume
-│   ├── people_manager.py            # People DB, TTS pronunciation
-│   ├── webcam_manager.py            # ffmpeg MJPEG + mobile camera relay
-│   ├── speaker_id.py                # SpeechBrain ECAPA-TDNN speaker ID
-│   ├── presence_detector.py         # InsightFace face detection + greetings
-│   ├── stt.py                       # faster-whisper CTranslate2/GPU
-│   ├── tool_registry.py             # Auto-discovery, schema assembly
-│   ├── awareness.py                 # Unified context assembly
-│   ├── mcp_client.py / mcp_server.py  # Bidirectional MCP bridge
-│   └── tools/                       # 11 one-file tool definitions
-│       ├── get_weather.py
-│       ├── get_system_info.py
-│       ├── find_files.py
-│       ├── developer_tools.py
-│       ├── manage_reminders.py
-│       ├── get_news.py
-│       ├── web_search.py
-│       ├── recall_memory.py
-│       ├── take_screenshot.py
-│       ├── capture_webcam.py
-│       └── enroll_face.py
-│
-├── skills/                          # Skill implementations
-│   ├── system/
-│   │   ├── time_info/               # Instant time/date (semantic matching)
-│   │   ├── weather/                 # Companion to get_weather tool
-│   │   ├── system_info/             # Companion to get_system_info tool
-│   │   ├── filesystem/              # Companion to find_files tool
-│   │   ├── file_editor/             # Doc gen (PPTX/DOCX/PDF) + file CRUD
-│   │   ├── developer_tools/         # Companion to developer_tools tool
-│   │   ├── app_launcher/            # 16-intent desktop control
-│   │   └── web_navigation/          # Playwright web browsing
-│   └── personal/
-│       ├── reminders/               # Voice reminders + Google Calendar
-│       ├── news/                    # 16-feed RSS delivery
-│       └── social_introductions/    # Multi-turn butler-style introductions
-│
-├── web/                             # Web UI frontend (~1,927 lines JS)
-│   ├── index.html
-│   ├── style.css
-│   └── app.js                       # WebSocket client, webcam, file browser
-├── extensions/
-│   └── jarvis-desktop@jarvis/       # GNOME Shell extension (D-Bus bridge)
-├── scripts/                         # Test suites + utilities
-│   ├── unit_tests.sh                # 314 tests across 4 tiers
-│   ├── test_conversations.py        # 62-conversation behavioral suite
-│   ├── test_tool_calling.py         # 175+ queries, 10-category taxonomy
-│   ├── test_tool_artifacts.py       # 175 artifact wiring tests
-│   ├── test_vision.py               # 180 vision pipeline tests
-│   ├── test_web_handler.py          # 61 web handler tests
-│   ├── test_manage_memory.py        # 43 memory tests
-│   └── ...
-└── docs/
-    ├── SKILL_DEVELOPMENT.md         # How to create tools and skills
-    ├── VOICE_TRAINING_GUIDE.md      # Whisper fine-tuning
-    └── ...
-```
-
----
-
-## Configuration Reference
-
-The main configuration lives in `config.yaml`. Here are the key sections:
-
-### Audio
-
-```yaml
-audio:
-  mic_device: "USB PnP Audio Device"   # Your microphone name
-  sample_rate: 16000                    # Don't change (Whisper expects 16kHz)
-  channels: 1
-  output_device: default                # PipeWire default (or plughw:0,0 for direct ALSA)
-  device_monitor_interval: 5.0         # Hot-plug detection interval
-```
-
-### LLM
-
-```yaml
-llm:
-  local:
-    model_path: /path/to/models/llm/Qwen3.5-35B-A3B-Q3_K_M.gguf
-    context_size: 32768
-    gpu_layers: 999          # Offload all layers to GPU
-    temperature: 0.6
-    tool_calling: true       # Enable LLM tool calling (11 tools)
-  api:
-    provider: anthropic      # Fallback LLM
-    model: claude-sonnet-4-20250514
-    api_key_env: ANTHROPIC_API_KEY
-```
-
-### TTS
-
-```yaml
-tts:
-  engine: kokoro                      # 'kokoro' or 'piper'
-  kokoro_voice_a: bm_fable
-  kokoro_voice_b: bm_george
-  kokoro_blend_ratio: 0.5             # Voice blend
-  kokoro_speed: 1.0
-  # Piper fallback
-  model_path: /path/to/models/piper/en_GB-northern_english_male-medium.onnx
-  config_path: /path/to/models/piper/en_GB-northern_english_male-medium.onnx.json
-```
-
-### Semantic Matching
-
-```yaml
-semantic_matching:
-  enabled: true
-  model: nomic-ai/nomic-embed-text-v1.5
-  cache_dir: /path/to/models/sentence-transformers
-  default_threshold: 0.85    # Minimum confidence for intent match
-  fallback_to_llm: true      # Send unmatched queries to LLM
-```
-
-For the full configuration reference, see the comments in `config.yaml`.
-
----
-
-## AMD ROCm Build Guide
-
-> **Complete RDNA 3 (RX 7000 Series) GFX target reference, PyTorch source build, llama.cpp flash attention, and CTranslate2 for ROCm 7.2 on AMD GPUs.**
-
-Building a production AI system on AMD GPUs with ROCm requires careful attention to GFX targets, resampling pipelines, and build order. These are hard-won lessons from building and running dual-GPU inference (RX 7900 XT + RX 7600) 24/7.
-
-### GPU Architecture Targets — Complete RDNA 3 Reference
-
-**This is the single most important thing to get right.** Each AMD GPU has a native GFX target determined by its chip. `rocminfo` may report the *overridden* identity (usually gfx1100) rather than the actual hardware target — don't rely on it blindly.
-
-Find your GPU's true architecture: `rocminfo | grep gfx` (without HSA_OVERRIDE set)
-
-#### Chip-to-GFX Mapping
-
-| Chip | GFX Target | LLVM Target | Architecture |
-|------|-----------|-------------|--------------|
-| **Navi 31** | gfx1100 | {11, 0, 0} | RDNA 3 Chiplet |
-| **Navi 32** | gfx1101 | {11, 0, 1} | RDNA 3 Chiplet |
-| **Navi 33** | gfx1102 | {11, 0, 2} | RDNA 3 Monolithic |
-| **Phoenix (APU)** | gfx1103 | {11, 0, 3} | RDNA 3 iGPU |
-
-#### Desktop GPUs
-
-| GPU | Chip | Native GFX | `HSA_OVERRIDE_GFX_VERSION` | CUs | VRAM |
-|-----|------|-----------|---------------------------|-----|------|
-| RX 7900 XTX | Navi 31 | gfx1100 | `11.0.0` | 96 | 24 GB |
-| RX 7900 XT | Navi 31 | gfx1100 | `11.0.0` | 84 | 20 GB |
-| RX 7900 GRE | Navi 31 | gfx1100 | `11.0.0` | 80 | 16 GB |
-| RX 7800 XT | Navi 32 | gfx1101 | `11.0.0` or `11.0.1`* | 60 | 16 GB |
-| RX 7700 XT | Navi 32 | gfx1101 | `11.0.0` or `11.0.1`* | 54 | 12 GB |
-| RX 7600 XT | Navi 33 | gfx1102 | `11.0.0` or `11.0.2` | 32 | 16 GB |
-| RX 7600 | Navi 33 | gfx1102 | `11.0.0` or `11.0.2` | 32 | 8 GB |
-
-*`11.0.1` for Navi 32 is supported by ROCm 7.2+ (native gfx1101 kernels ship in rocBLAS) but is less widely tested than `11.0.0`. We have confirmed `11.0.2` works for Navi 33 in production.
-
-#### Workstation GPUs
-
-| GPU | Chip | Native GFX |
-|-----|------|-----------|
-| Radeon PRO W7900 | Navi 31 | gfx1100 |
-| Radeon PRO W7800 | Navi 31 | gfx1100 |
-| Radeon PRO W7700 | Navi 32 | gfx1101 |
-| Radeon PRO W7600 | Navi 33 | gfx1102 |
-| Radeon PRO W7500 | Navi 33 | gfx1102 |
-
-#### Mobile GPUs
-
-| GPU | Chip | Native GFX |
-|-----|------|-----------|
-| RX 7600M XT | Navi 33 | gfx1102 |
-| RX 7600M / 7600S / 7700S | Navi 33 | gfx1102 |
-
-#### APU iGPUs
-
-| iGPU | Native GFX | `HSA_OVERRIDE_GFX_VERSION` |
-|------|-----------|---------------------------|
-| Radeon 780M / 760M / 740M | gfx1103 | `11.0.0` |
-
-#### Why `11.0.0` for Everything?
-
-ROCm libraries (rocBLAS, MIOpen) ship pre-compiled kernels for gfx1100. The `HSA_OVERRIDE_GFX_VERSION=11.0.0` override tells the runtime to use these kernels, which are binary-compatible across the GFX11 family. PyTorch ROCm wheels are also compiled for gfx1100 only, so non-gfx1100 GPUs **require** this override to use pre-built wheels.
-
-As of ROCm 7.2.0, rocBLAS ships native kernels for gfx1100, gfx1101, and gfx1102 — so `11.0.2` also works for Navi 33 GPUs. However, `11.0.0` is the most widely tested and community-recommended value.
-
-#### The rocminfo Reporting Gotcha
-
-With `HSA_OVERRIDE_GFX_VERSION=11.0.0` set system-wide, `rocminfo` reports **all** GPUs as gfx1100 — even if the hardware is actually gfx1102. This is expected behavior: rocminfo shows the overridden identity, not the true hardware target. To see the real GFX target, temporarily unset the override: `unset HSA_OVERRIDE_GFX_VERSION && rocminfo | grep gfx`.
-
-#### Historical Note
-
-Early ROCm documentation ([issue #2475](https://github.com/ROCm/ROCm/issues/2475), [issue #2500](https://github.com/ROCm/ROCm/issues/2500)) incorrectly listed the RX 7600 as gfx1100 instead of gfx1102. Additionally, early WCCFtech reporting swapped Navi 32 and Navi 33 targets. The LLVM source code is the authoritative reference.
-
-### Step 1: Create a Virtual Environment
-
-**Do not use `--break-system-packages`.** Use a venv with system site-packages access (needed for ROCm bindings):
-
-```bash
-python3 -m venv --system-site-packages /path/to/your/project/.venv
-source /path/to/your/project/.venv/bin/activate
-```
-
-All subsequent pip installs and service `ExecStart` paths should use the venv Python.
-
-### Step 2: Build PyTorch from Source
-
-The pip wheels for PyTorch+ROCm often have mismatched GFX targets or version string issues. Building from source ensures your PyTorch matches your exact ROCm installation and GPU architecture:
-
-```bash
-# Install build dependencies
-pip install "setuptools>=70.1.0,<82" cmake ninja numpy packaging pyyaml \
-  requests six "typing-extensions>=4.10.0" mkl-static mkl-include wheel
-
-# Clone and checkout
-cd ~
-git clone --recursive https://github.com/pytorch/pytorch pytorch-build
-cd pytorch-build
-git checkout v2.10.0
-git submodule sync
-git submodule update --init --recursive
-
-# Set build environment — adjust PYTORCH_ROCM_ARCH for YOUR GPUs
-export ROCM_PATH=/opt/rocm-7.2.0
-export PYTORCH_ROCM_ARCH="gfx1100;gfx1102"  # Both GPUs!
-export USE_ROCM=1
-export USE_CUDA=0
-export USE_MKLDNN=0
-export USE_NINJA=1
-export BUILD_TEST=0
-export MAX_JOBS=16
-export CMAKE_PREFIX_PATH="${ROCM_PATH}:${CMAKE_PREFIX_PATH}"
-export PATH="${ROCM_PATH}/bin:${PATH}"
-export HSA_OVERRIDE_GFX_VERSION=11.0.0
-
-# Hipify CUDA code to HIP, then build (~60-120 min)
-python tools/amd_build/build_amd.py
-pip install --no-build-isolation -v -e . 2>&1 | tee /tmp/pytorch_build.log
-```
-
-**Important:** This creates an editable install. The `pytorch-build` directory must NOT be deleted — Python links to it at runtime.
-
-### Step 3: Build llama.cpp with Flash Attention
-
-RDNA 3 supports flash attention via rocWMMA. This flag (`GGML_HIP_ROCWMMA_FATTN`) significantly improves inference performance:
-
-```bash
-cd ~/llama.cpp
-rm -rf build
-
-HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
-cmake -S . -B build \
-  -DGGML_HIP=ON \
-  -DGPU_TARGETS="gfx1100;gfx1102" \
-  -DGGML_HIP_ROCWMMA_FATTN=ON \
-  -DCMAKE_BUILD_TYPE=Release
-
-cmake --build build --config Release -j 16
-```
-
-### Step 4: Build CTranslate2 from Source
-
-The pip version is CUDA-only. For AMD GPUs, build with HIP support. **Target both GPU architectures:**
-
-```bash
-git clone --recursive https://github.com/OpenNMT/CTranslate2.git
-cd CTranslate2 && mkdir build && cd build
-
-cmake .. \
-  -DWITH_HIP=ON \
-  -DWITH_MKL=OFF \
-  -DWITH_OPENBLAS=ON \
-  -DCMAKE_HIP_ARCHITECTURES="gfx1100;gfx1102" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
-  -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DBUILD_CLI=OFF
-
-make -j$(nproc)
-sudo make install && sudo ldconfig
-
-# Python bindings (into your venv)
-cd ../python
-pip install .
-```
-
-### Step 5: Service Configuration — Per-GPU GFX Overrides
-
-Each systemd service must set the correct GFX override for the GPU it runs on:
-
-```ini
-# 35B LLM on RX 7900 XT (llama-server.service)
-Environment=HSA_OVERRIDE_GFX_VERSION=11.0.0
-Environment=HIP_VISIBLE_DEVICES=1
-
-# 4B LLM on RX 7600 (llama-server-small.service)
-Environment=HSA_OVERRIDE_GFX_VERSION=11.0.2
-Environment=HIP_VISIBLE_DEVICES=0
-
-# Voice service (Whisper + embeddings on RX 7600)
-Environment=HSA_OVERRIDE_GFX_VERSION=11.0.2
-Environment=HIP_VISIBLE_DEVICES=0
-```
-
-We use `11.0.2` (native gfx1102) for the RX 7600 and it works correctly on ROCm 7.2.0. The community standard is `11.0.0` for all RDNA 3 — both values are valid for Navi 33 GPUs since ROCm 7.2 ships native gfx1102 kernels.
-
-### Environment Variables Reference
-
-| Variable | Value | Purpose |
-|----------|-------|---------|
-| `HSA_OVERRIDE_GFX_VERSION` | `11.0.0` | GPU architecture override — standard for all RDNA 3 (see reference table above) |
-| `HIP_VISIBLE_DEVICES` | `0` or `1` | Which GPU a process sees (0=first, 1=second) |
-| `ROCM_PATH` | `/opt/rocm-7.2.0` | ROCm installation path |
-| `PYTORCH_ROCM_ARCH` | `gfx1100;gfx1102` | Build-time only: which architectures to compile for |
-
-### Audio Resampling — Speaker ID Pitfall
-
-If you use speaker identification (ECAPA-TDNN or similar), the resampling method used for enrollment **must match** the resampling method used in production. We discovered that enrollment using `scipy.signal.resample_poly` (bandlimited anti-aliasing) and production using `np.interp` (linear interpolation) produced spectrally different audio from the same speaker — causing cosine similarity scores to drop from 0.81 to -0.003 (effectively treating the same person as a stranger).
-
-**Fix:** Use `resample_poly` in both paths. Never use `np.interp` for audio that feeds into speaker embedding models.
-
-### PyTorch + CTranslate2 Coexistence
-
-Both use `/opt/rocm-7.2.0/lib/`. They coexist in the same venv if:
-
-1. Both target the same ROCm version
-2. `LD_LIBRARY_PATH` includes `/opt/rocm-7.2.0/lib/`
-3. `core/stt.py` avoids importing torch directly (historical import-order sensitivity)
-
----
-
-## Fine-Tuning Whisper
-
-JARVIS supports fine-tuning Whisper on your voice and accent. This is what transforms it from a generic model into one that understands *you*.
-
-### Why Fine-Tune?
-
-The base Whisper model struggles with:
-- Regional accents (Southern US, British dialects, etc.)
-- Domain-specific vocabulary (technical terms, project names)
-- Proper nouns it hasn't seen
-
-### Process
-
-1. **Record training data** — 198 utterances covering problem words, domain vocabulary, and natural speech patterns
-2. **Train** — Fine-tune from the base Whisper model using HuggingFace Transformers (89 seconds on RX 7900 XT, fp16)
-3. **Convert** — Export to CTranslate2 format for GPU-accelerated inference
-4. **Deploy** — Update `config.yaml` to point to the new model
-
-See [docs/VOICE_TRAINING_GUIDE.md](docs/VOICE_TRAINING_GUIDE.md) for the complete process.
-
-### Results (v2 — FIFINE K669B, 198 phrases)
-
-| Metric | Before | After |
-|--------|--------|-------|
-| General accuracy | ~80% | 94%+ |
-| Domain vocabulary | ~60% | ~95%+ |
-| Wake word detection | ~90% | 100% |
-| Contraction handling | ~70% | 100% |
-| Latency (GPU) | 0.1-0.2s | 0.1-0.2s (unchanged) |
-
----
-
-## Development
-
-### Adding New Functionality
-
-There are two paths depending on what you're building. See [docs/SKILL_DEVELOPMENT.md](docs/SKILL_DEVELOPMENT.md) for the full guide with examples.
-
-**Path 1: LLM Tool** (stateless data query — most new features)
-
-Create one `.py` file in `core/tools/`. The registry auto-discovers it.
-
-```python
-# core/tools/your_tool.py
-TOOL_NAME = "your_tool"
-SKILL_NAME = "your_skill"       # or None if not skill-gated
-SCHEMA = { ... }                 # OpenAI function schema
-SYSTEM_PROMPT_RULE = "..."       # When to use this tool
-def handler(args):               # Execute and return result string
-    return "result"
-```
-
-That's it — no wiring changes, no imports to update, no registry edits. The tool registry auto-discovers `.py` files in `core/tools/`, builds the OpenAI-compatible schema, injects runtime dependencies, and makes it available to the LLM.
-
-**Path 2: Skill** (stateful, multi-turn, desktop control, or nested LLM flows)
-
-```
-skills/system/your_skill/
-├── skill.py           # Main logic (extends BaseSkill)
-├── metadata.yaml      # Skill config + semantic intents
-└── __init__.py        # Exports
-```
-
-Skills register semantic intents (natural language examples) and the sentence-transformer model matches user speech against them.
-
-### Test Suites
-
-| Suite | Tests | What It Validates |
-|-------|-------|-------------------|
-| **Unit tests** (`unit_tests.sh`) | 314 | 4 tiers: edge cases, routing, tool calling, LLM quality |
-| **Conversation tests** (`test_conversations.py`) | 62 conversations, 270+ turns | End-to-end behavioral validation via WebSocket |
-| **Tool artifact tests** (`test_tool_artifacts.py`) | 175 | Tool result -> artifact cache wiring |
-| **Vision tests** (`test_vision.py`) | 180 | Frame parsing, webcam lifecycle, screenshot, mobile relay, presence |
-| **Web handler tests** (`test_web_handler.py`) | 61 | WebSocket dispatch, mobile routing, client detection |
-| **Memory tests** (`test_manage_memory.py`) | 43 | Fact extraction, recall, registry integration |
-
-### Architecture Principles
-
-1. **Privacy first** — Everything runs locally. Claude API is a quality fallback, not a dependency.
-2. **LLM-centric** — Qwen3.5 decides which tools to call. Skills exist for things that need deterministic state machines.
-3. **Streaming everything** — LLM tokens stream to TTS, TTS streams to audio. No waiting for full responses.
-4. **Graceful degradation** — GPU fails? Fall back to CPU. Kokoro fails? Fall back to Piper. Local LLM fails? Fall back to Claude API. Webcam fails? Fall back to mobile camera.
-5. **One router, three frontends** — Voice, console, and web all hit the same 18-layer priority chain. No routing duplication.
-6. **One-file extensibility** — Adding a tool is one Python file. Adding a skill is one directory. No wiring changes anywhere.
-
----
-
-## Acknowledgments
-
-### Models & Libraries
-
-- [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) by hexgrad — TTS model
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) by SYSTRAN — GPU-accelerated Whisper
-- [CTranslate2](https://github.com/OpenNMT/CTranslate2) by OpenNMT — Inference engine
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) by ggml-org — LLM inference
-- [Qwen3.5-35B-A3B](https://huggingface.co/Qwen/Qwen3.5-35B-A3B) by Qwen — Reasoning LLM (MoE, native tool calling)
-- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) by Qwen — Synthesis LLM
-- [Piper](https://github.com/rhasspy/piper) by rhasspy — Fallback TTS
-- [SpeechBrain](https://github.com/speechbrain/speechbrain) — Speaker identification (ECAPA-TDNN)
-- [InsightFace](https://github.com/deepinsight/insightface) — Face recognition (ArcFace)
-- [Silero VAD](https://github.com/snakers4/silero-vad) — Voice activity detection
-- [nomic-embed-text](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) by Nomic AI — Semantic embeddings
-- [sentence-transformers](https://github.com/UKPLab/sentence-transformers) — Embedding framework
-- [Porcupine](https://picovoice.ai/) by Picovoice — Wake word detection
-- [Playwright](https://playwright.dev/) — Web navigation
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-**Version:** 6.0.0
-**Status:** Production — actively developed
-**Last Updated:** March 21, 2026
+Die Lizenz des ursprünglichen Projekts bleibt erhalten. Siehe `LICENSE`.
