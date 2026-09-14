@@ -64,7 +64,7 @@ class EventLogger:
     def __init__(self, config):
         self.db_path = Path(config.get(
             "events.db_path",
-            "/mnt/storage/jarvis/data/events.db",
+            "/home/alex/jarvis-data/data/events.db",
         ))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.retention_days = config.get("events.retention_days", 180)

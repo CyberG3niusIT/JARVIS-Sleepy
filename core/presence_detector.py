@@ -81,7 +81,7 @@ class PresenceDetector:
 
         # Face embeddings directory
         self._embeddings_dir = Path(
-            config.get("system.storage_path", "/mnt/storage/jarvis")
+            config.get("system.storage_path", "/home/alex/jarvis-data")
         ) / "data" / "face_embeddings"
         self._embeddings_dir.mkdir(parents=True, exist_ok=True)
 

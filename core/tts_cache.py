@@ -4,8 +4,8 @@ Stores pre-generated PCM audio on disk with a SQLite index. Startup loads
 from disk (~10ms) instead of regenerating via Kokoro (~200s).
 
 Storage:
-    Index:  /mnt/storage/jarvis/data/tts_cache.db
-    Audio:  /mnt/storage/jarvis/data/tts_cache/<hash>.pcm
+    Index:  /home/alex/jarvis-data/data/tts_cache.db
+    Audio:  /home/alex/jarvis-data/data/tts_cache/<hash>.pcm
 
 Usage:
     cache = TTSCache(config)
@@ -28,8 +28,8 @@ from core.logger import get_logger
 
 logger = get_logger("jarvis.tts_cache")
 
-_DEFAULT_DB_PATH = "/mnt/storage/jarvis/data/tts_cache.db"
-_DEFAULT_CACHE_DIR = "/mnt/storage/jarvis/data/tts_cache"
+_DEFAULT_DB_PATH = "/home/alex/jarvis-data/data/tts_cache.db"
+_DEFAULT_CACHE_DIR = "/home/alex/jarvis-data/data/tts_cache"
 
 
 class TTSCache:

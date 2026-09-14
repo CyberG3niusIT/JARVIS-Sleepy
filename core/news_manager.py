@@ -95,7 +95,7 @@ class NewsManager:
         # Database
         self.db_path = Path(config.get(
             "news.db_path",
-            "/mnt/storage/jarvis/data/news_headlines.db",
+            "/home/alex/jarvis-data/data/news_headlines.db",
         ))
         self._db_lock = threading.Lock()
         self._init_db()
@@ -450,9 +450,13 @@ class NewsManager:
             try:
                 from sentence_transformers import SentenceTransformer
                 cache_dir = self.config.get("semantic_matching.cache_dir", None)
+                model_name = self.config.get(
+                    "semantic_matching.model", "all-MiniLM-L6-v2"
+                )
                 self._embedding_model = SentenceTransformer(
-                    "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True,
-                    device="cpu", cache_folder=cache_dir
+                    model_name,
+                    device="cpu",
+                    cache_folder=cache_dir
                 )
                 self.logger.info("News dedup embedding model loaded (nomic-embed-text-v1.5, CPU fallback)")
             except Exception as e:

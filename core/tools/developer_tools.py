@@ -144,7 +144,7 @@ def _get_safety():
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             '_safety',
-            '/mnt/storage/jarvis/skills/system/developer_tools/_safety.py',
+            '/home/alex/jarvis-data/skills/system/developer_tools/_safety.py',
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -158,7 +158,7 @@ def _get_safety():
 
 _GIT_REPOS = {
     'main': '/home/user/jarvis',
-    'skills': '/mnt/storage/jarvis/skills',
+    'skills': '/home/alex/jarvis-data/skills',
     'models': '/mnt/models',
 }
 
@@ -279,7 +279,7 @@ def _devtools_codebase_search(args: dict) -> str:
         return "Error: 'pattern' is required for codebase search."
     search_dirs = [
         '/home/user/jarvis/core',
-        '/mnt/storage/jarvis/skills',
+        '/home/alex/jarvis-data/skills',
     ]
     all_matches = []
     for d in search_dirs:
@@ -381,7 +381,7 @@ def _devtools_system_health(args: dict) -> str:
             import importlib.util
             _spec = importlib.util.spec_from_file_location(
                 '_display',
-                '/mnt/storage/jarvis/skills/system/developer_tools/_display.py',
+                '/home/alex/jarvis-data/skills/system/developer_tools/_display.py',
             )
             _disp_mod = importlib.util.module_from_spec(_spec)
             _spec.loader.exec_module(_disp_mod)

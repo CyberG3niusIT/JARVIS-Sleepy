@@ -104,7 +104,7 @@ _TOOL_KEYWORD_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _TOOL_KEYWORDS]
 # Layer 2: Binary classifier — logistic regression on embeddings
 # ---------------------------------------------------------------------------
 
-_MODEL_PATH = Path("/mnt/storage/jarvis/models/tool_classifier/tool_classifier_v1.joblib")
+_MODEL_PATH = Path("/home/alex/jarvis-data/models/tool_classifier/tool_classifier_v1.joblib")
 _classifier = None
 _classifier_loaded = False
 _CONFIDENCE_THRESHOLD = 0.10  # Skip tools only when P(tool) < this

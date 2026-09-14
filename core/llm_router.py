@@ -315,7 +315,10 @@ class LLMRouter:
                     "temperature": temperature if temperature is not None else self.temperature,
                     "top_p": self.top_p,
                     "top_k": self.top_k,
-                    "max_tokens": max_tokens
+                    "max_tokens": max_tokens,
+                    "chat_template_kwargs": {
+                        "enable_thinking": False
+                    }
                 },
                 timeout=timeout
             )

@@ -275,7 +275,7 @@ class TextToSpeech:
 
             # CAL-L0 cache: check for pre-generated audio before synthesizing.
             # Saves ~300ms per cached phrase. Cache key is the exact text.
-            cached_pcm = self._tts_cache.get(text)
+            cached_pcm = self._tts_cache.get(text) if hasattr(self, "_tts_cache") else None
             if cached_pcm is not None:
                 try:
                     aplay = self._open_aplay()

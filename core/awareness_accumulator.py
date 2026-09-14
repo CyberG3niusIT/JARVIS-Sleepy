@@ -717,7 +717,7 @@ class AwarenessAccumulator:
         self._news_manager = news_manager
 
         # Delivery log for dedup
-        data_dir = config.get("system.storage_path", "/mnt/storage/jarvis")
+        data_dir = config.get("system.storage_path", "/home/alex/jarvis-data")
         db_path = Path(data_dir) / "data" / "briefing_log.db"
         self._delivery_log = DeliveryLog(db_path)
 

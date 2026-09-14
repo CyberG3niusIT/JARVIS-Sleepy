@@ -105,9 +105,9 @@ class MemoryManager:
 
         # Paths
         self.db_path = Path(config.get("conversational_memory.db_path",
-            "/mnt/storage/jarvis/data/memory.db"))
+            "/home/alex/jarvis-data/data/memory.db"))
         self.faiss_index_path = Path(config.get("conversational_memory.faiss_index_path",
-            "/mnt/storage/jarvis/data/memory_faiss"))
+            "/home/alex/jarvis-data/data/memory_faiss"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Batch extraction config (Phase 4)

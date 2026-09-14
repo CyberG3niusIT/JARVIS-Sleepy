@@ -115,3 +115,51 @@ class TimeInfoSkill(BaseSkill):
         except Exception as e:
             self.logger.error(f"Error getting date: {e}")
             return self.respond("I'm sorry, I couldn't retrieve the date.")
+
+# BEGIN JARVIS DE-DE TIME
+def _de_get_time(self) -> str:
+    try:
+        now = datetime.now()
+        return self.respond(
+            f"Es ist {now.strftime('%H:%M')} Uhr, {{honorific}}."
+        )
+    except Exception as e:
+        self.logger.error(f"Error getting time: {e}")
+        return self.respond(
+            "Ich konnte die aktuelle Uhrzeit nicht ermitteln."
+        )
+
+
+def _de_get_date(self) -> str:
+    try:
+        now = datetime.now()
+
+        weekdays = [
+            "Montag", "Dienstag", "Mittwoch", "Donnerstag",
+            "Freitag", "Samstag", "Sonntag"
+        ]
+
+        months = [
+            "Januar", "Februar", "März", "April", "Mai", "Juni",
+            "Juli", "August", "September", "Oktober",
+            "November", "Dezember"
+        ]
+
+        weekday = weekdays[now.weekday()]
+        month = months[now.month - 1]
+
+        return self.respond(
+            f"Heute ist {weekday}, der {now.day}. {month} "
+            f"{now.year}, {{honorific}}."
+        )
+
+    except Exception as e:
+        self.logger.error(f"Error getting date: {e}")
+        return self.respond(
+            "Ich konnte das aktuelle Datum nicht ermitteln."
+        )
+
+
+TimeInfoSkill.get_time = _de_get_time
+TimeInfoSkill.get_date = _de_get_date
+# END JARVIS DE-DE TIME

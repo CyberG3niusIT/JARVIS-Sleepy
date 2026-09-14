@@ -129,6 +129,20 @@ class ContinuousListener:
             "off", "end", "try", "use", "yet", "now",
             "six", "ten", "two", "one",
         }
+
+        # JARVIS_DE_SHORT_REPLIES
+        self._valid_short_replies.update({
+            "ja", "nein", "nee", "nö",
+            "okay", "ok", "gut",
+            "danke", "bitte",
+            "stopp", "stop",
+            "abbrechen", "weiter",
+            "richtig", "falsch",
+            "genau", "klar",
+            "mach", "los",
+            "jetzt", "später",
+            "nochmal", "wiederholen",
+        })
         
         # Initialize RNNoise for audio denoising
         self.use_rnnoise = config.get("audio.use_rnnoise", True) and RNNOISE_AVAILABLE
@@ -451,8 +465,27 @@ class ContinuousListener:
                 word_clean = word.strip('.,!?;:')
 
                 # Check similarity to "jarvis"
-                similarity = SequenceMatcher(None, self.wake_word, word_clean).ratio()
-
+                # JARVIS_DE_WAKE_ALIASES
+                # Typische deutsche Whisper-Varianten von 'Jarvis'.
+                # Die strenge 0.80-Schwelle bleibt erhalten.
+                wake_aliases = {
+                    "jarvis",
+                    "jarwis",
+                    "jarwiss",
+                    "charvis",
+                    "charwis",
+                    "chauvis",
+                    "chauwis",
+                    "scharvis",
+                    "djarvis",
+                    "dscharvis",
+                    "tscharvis",
+                    self.wake_word,
+                }
+                similarity = max(
+                    SequenceMatcher(None, alias, word_clean).ratio()
+                    for alias in wake_aliases
+                )
                 if similarity >= 0.80:  # Raised from 0.7 to eliminate "paris" (0.73) etc.
                     self.logger.info(f"✅ Wake word detected (similarity: {similarity:.2f}): {word_clean} in {text}")
                     wake_word_found = True

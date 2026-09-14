@@ -150,7 +150,7 @@ class WeatherDB:
         # Database path
         self.db_path = Path(config.get(
             "weather.db_path",
-            "/mnt/storage/jarvis/data/weather.db",
+            "/home/alex/jarvis-data/data/weather.db",
         ))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_lock = threading.Lock()

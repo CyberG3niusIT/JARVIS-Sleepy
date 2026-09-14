@@ -44,7 +44,7 @@ class PeopleManager:
 
         # Database
         self.db_path = Path(config.get("people.db_path",
-            "/mnt/storage/jarvis/data/people.db"))
+            "/home/alex/jarvis-data/data/people.db"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_lock = threading.Lock()
         self._init_db()

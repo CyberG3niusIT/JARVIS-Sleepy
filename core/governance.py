@@ -150,7 +150,7 @@ class Governance:
 
         # Proposal persistence (H13) — SQLite backing store
         storage_path = Path(config.get(
-            "system.storage_path", "/mnt/storage/jarvis"))
+            "system.storage_path", "/home/alex/jarvis-data"))
         self._proposals_db_path = str(storage_path / "data" / "governance_proposals.db")
         self._init_proposals_db()
         self._load_proposals()

@@ -24,6 +24,21 @@ class AppLauncherSkill(BaseSkill):
 
         self.register_semantic_intent(
             examples=[
+                "öffne explorer",
+                "starte explorer",
+                "öffne chrome",
+                "starte chrome",
+                "öffne edge",
+                "öffne vs code",
+                "starte vs code",
+                "öffne powershell",
+                "starte powershell",
+                "öffne terminal",
+                "öffne editor",
+                "öffne den editor",
+                "öffne rechner",
+                "öffne den rechner",
+                "öffne einstellungen",
                 "open chrome",
                 "launch brave",
                 "start firefox",
@@ -649,3 +664,45 @@ class AppLauncherSkill(BaseSkill):
     def _no_window_response(self, action: str) -> str:
         """Response when no window can be found for the requested action."""
         return f"I couldn't find a window to {action}, {self.honorific}."
+
+# BEGIN JARVIS DE-DE APP RESPONSES
+_original_launch_app_de = AppLauncherSkill.launch_app
+
+
+def _launch_app_de(self, entities=None):
+    result = _original_launch_app_de(self, entities)
+
+    if not isinstance(result, str):
+        return result
+
+    h = self.honorific
+
+    m = re.fullmatch(r"Launching (.+), .+\.", result)
+    if m:
+        return f"Ich öffne {m.group(1)}, {h}."
+
+    m = re.fullmatch(
+        r"I couldn't find the executable for (.+), .+\.",
+        result
+    )
+    if m:
+        return f"Ich konnte {m.group(1)} nicht starten, {h}."
+
+    m = re.fullmatch(
+        r"Something went wrong launching (.+), .+\.",
+        result
+    )
+    if m:
+        return f"Beim Starten von {m.group(1)} ist etwas schiefgegangen, {h}."
+
+    if result.startswith("I don't recognize that application"):
+        return (
+            f"Diese Anwendung kenne ich noch nicht, {h}. "
+            "Ich kann die konfigurierten Programme auflisten."
+        )
+
+    return result
+
+
+AppLauncherSkill.launch_app = _launch_app_de
+# END JARVIS DE-DE APP RESPONSES

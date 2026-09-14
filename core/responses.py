@@ -269,3 +269,102 @@ def get_response_library() -> ResponseLibrary:
     if _response_library is None:
         _response_library = ResponseLibrary()
     return _response_library
+
+# BEGIN JARVIS DE-DE RESPONSES
+_original_response_init_de = ResponseLibrary.__init__
+
+
+def _response_init_de(self, history_size: int = 5):
+    _original_response_init_de(self, history_size)
+
+    self.responses.update({
+
+        "acknowledgment": [
+            "Sehr wohl, {honorific}.",
+            "Sofort, {honorific}.",
+            "Verstanden.",
+            "Ich kümmere mich darum, {honorific}.",
+            "Bin dabei, {honorific}.",
+        ],
+
+        "confirmation": [
+            "Erledigt, {honorific}.",
+            "Fertig.",
+            "Ausgeführt, {honorific}.",
+            "Das wäre geschafft.",
+        ],
+
+        "error_no_audio": [
+            "Entschuldigung, das habe ich nicht verstanden. Noch einmal, {honorific}?",
+            "Ich habe Sie nicht deutlich gehört, {honorific}.",
+            "Das kam nicht sauber an. Bitte noch einmal, {honorific}.",
+        ],
+
+        "error_no_transcription": [
+            "Das habe ich nicht verstanden, {honorific}. Bitte noch einmal.",
+            "Die Spracheingabe war nicht eindeutig, {honorific}.",
+        ],
+
+        "greeting_morning": [
+            "Guten Morgen, {honorific}.",
+            "Morgen, {honorific}.",
+            "Guten Morgen. Ich hoffe, Sie haben gut geschlafen.",
+        ],
+
+        "greeting_afternoon": [
+            "Guten Tag, {honorific}.",
+            "Guten Nachmittag, {honorific}.",
+        ],
+
+        "greeting_evening": [
+            "Guten Abend, {honorific}.",
+            "Abend, {honorific}.",
+        ],
+
+        "greeting_night": [
+            "Guten Abend, {honorific}.",
+            "Noch immer wach, {honorific}?",
+            "Späte Stunde, {honorific}.",
+        ],
+
+        "processing": [
+            "Einen Moment, {honorific}.",
+            "Sekunde.",
+            "Ich bin dran, {honorific}.",
+            "Sofort.",
+        ],
+
+        "searching": [
+            "Ich sehe nach, {honorific}.",
+            "Ich suche danach.",
+            "Einen Moment, ich prüfe das.",
+        ],
+
+        "farewell": [
+            "Sehr wohl, {honorific}.",
+            "Bis später, {honorific}.",
+            "Auf Wiedersehen, {honorific}.",
+            "Gute Nacht, {honorific}. Ich behalte alles im Auge.",
+        ],
+
+        "affirmative": [
+            "Ja, {honorific}.",
+            "Korrekt.",
+            "Ganz genau, {honorific}.",
+        ],
+
+        "negative": [
+            "Leider nicht, {honorific}.",
+            "Nein, {honorific}.",
+            "Im Moment nicht, {honorific}.",
+        ],
+
+        "unable": [
+            "Das kann ich derzeit noch nicht, {honorific}.",
+            "Diese Funktion steht mir noch nicht zur Verfügung, {honorific}.",
+        ],
+    })
+
+
+ResponseLibrary.__init__ = _response_init_de
+# END JARVIS DE-DE RESPONSES

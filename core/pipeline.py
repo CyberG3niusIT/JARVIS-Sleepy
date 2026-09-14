@@ -60,7 +60,7 @@ def _get_display_router(config):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             '_display',
-            '/mnt/storage/jarvis/skills/system/developer_tools/_display.py',
+            '/home/alex/jarvis-data/skills/system/developer_tools/_display.py',
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -790,7 +790,27 @@ class Coordinator:
         matched_word = ""
         for word in words:
             word_clean = word.strip('.,!?;:')
-            similarity = SequenceMatcher(None, self.wake_word, word_clean).ratio()
+            # JARVIS_DE_WAKE_ALIASES
+            # Typische deutsche Whisper-Varianten von 'Jarvis'.
+            # Die strenge 0.80-Schwelle bleibt erhalten.
+            wake_aliases = {
+                "jarvis",
+                "jarwis",
+                "jarwiss",
+                "charvis",
+                "charwis",
+                "chauvis",
+                "chauwis",
+                "scharvis",
+                "djarvis",
+                "dscharvis",
+                "tscharvis",
+                self.wake_word,
+            }
+            similarity = max(
+                SequenceMatcher(None, alias, word_clean).ratio()
+                for alias in wake_aliases
+            )
             if similarity >= 0.80:
                 self.logger.info(f"Wake word detected (similarity: {similarity:.2f}): {word_clean} in {text}")
                 wake_word_found = True

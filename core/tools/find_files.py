@@ -28,7 +28,7 @@ _DIR_MAP = {
     "jarvis": Path.home() / "jarvis",
     "core": Path.home() / "jarvis" / "core",
     "tools": Path.home() / "jarvis" / "core" / "tools",
-    "skills": Path("/mnt/storage/jarvis/skills"),
+    "skills": Path("/home/alex/jarvis-data/skills"),
     "models": Path("/mnt/models"),
     "storage": Path("/mnt/storage"),
     "tmp": Path("/tmp"),

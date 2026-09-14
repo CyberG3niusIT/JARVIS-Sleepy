@@ -105,7 +105,7 @@ class InteractionCache:
     def __init__(self, config):
         storage_path = Path(config.get(
             "system.storage_path",
-            "/mnt/storage/jarvis",
+            "/home/alex/jarvis-data",
         ))
         self.db_path = storage_path / "data" / "interaction_cache.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

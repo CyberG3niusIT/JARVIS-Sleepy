@@ -163,7 +163,7 @@ class ContextWindow:
         self._db_path = Path(config.get(
             "context_window.db_path",
             config.get("conversational_memory.db_path",
-                       "/mnt/storage/jarvis/data/memory.db")
+                       "/home/alex/jarvis-data/data/memory.db")
         ))
         self._db_lock = threading.Lock()
         self._session_id = uuid.uuid4().hex[:12]

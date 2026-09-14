@@ -18,7 +18,7 @@ except ImportError:
     AVAILABLE = False
 
 class SemanticMatcher:
-    def __init__(self, model_name="nomic-ai/nomic-embed-text-v1.5", cache_dir=None,
+    def __init__(self, model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", cache_dir=None,
                  device="cuda:0"):
         if not AVAILABLE:
             raise ImportError("sentence-transformers not installed")
@@ -26,7 +26,7 @@ class SemanticMatcher:
             Path(cache_dir).mkdir(parents=True, exist_ok=True)
         print(f"Loading model: {model_name}...")
         self.model = SentenceTransformer(
-            model_name, trust_remote_code=True, device=device, cache_folder=cache_dir
+            model_name, device=device, cache_folder=cache_dir
         )
         print("✓ Semantic matcher ready")
         self.intent_embeddings = {}

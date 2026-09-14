@@ -1,18 +1,18 @@
 system:
   wake_word: jarvis
-  language: en-US
-  storage_path: /mnt/storage/jarvis
+  language: de-DE
+  storage_path: /home/alex/jarvis-data
 location:
-  home_address: "5801 Ashley Dr, Gardendale, Alabama 35071"
-  home_lat: 33.6662
-  home_lon: -86.8128
+  home_address: "Esslingen am Neckar, Baden-Württemberg, Germany"
+  home_lat: 48.7396
+  home_lon: 9.3047
 weather:
   youtube_tv_channel_code: "V_Zzi6Sz3eI"  # WBRC Local News Station
 audio:
-  mic_device: USB PnP Audio Device
+  mic_device: pulse
   sample_rate: 16000
   channels: 1
-  output_device: Generic              # Realtek ALCS1200A — resolved by name at startup
+  output_device: default              # WSLg PulseAudio default output
   use_rnnoise: false
   device_monitor_interval: 5.0      # Seconds between hot-plug checks
   startup_retry_count: 5             # Max mic retries at boot
@@ -24,7 +24,7 @@ vad:
   buffer_duration: 3.0
 llm:
   local:
-    model_path: /mnt/storage/jarvis/models/llm/Qwen3.5-35B-A3B-Q3_K_M.gguf
+    model_path: /home/alex/jarvis-data/models/llm/Qwen3.5-35B-A3B-abliterated-Q3_K_M.gguf
     context_size: 32768
     gpu_layers: 999
     batch_size: 512
@@ -45,13 +45,24 @@ llm:
     model: claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
 stt:
-  model_path: /mnt/storage/jarvis/models/whisper/ggml-base.bin
+  backend: qwen3
+  model_path: /home/alex/jarvis-data/models/whisper/ggml-base.bin
   whisper_bin: ~/whisper.cpp/build/bin/whisper-cli
-  language: en
+  language: de
   debug_save_audio: false          # Set true for diagnosis sessions only
   gain_enabled: false              # FIFINE K669B has strong output; software gain was for weak EMEET webcam mic
+
+  # BEGIN QWEN3 ASR
+  qwen3:
+    model_dir: /home/alex/jarvis-data/models/qwen3-asr/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25
+    hotwords: "Jarvis,Hey Jarvis"
+    num_threads: 6
+    provider: cpu
+    max_total_len: 512
+    max_new_tokens: 128
+  # END QWEN3 ASR
 tts:
-  engine: kokoro                    # 'kokoro' or 'piper'
+  engine: piper
   # Kokoro settings
   kokoro_voice_a: bm_fable
   kokoro_voice_b: bm_george
@@ -62,15 +73,16 @@ tts:
   # Example: { "nginx": "ˈɛndʒɪnˌɛks" }
   kokoro_pronunciations: {}
   # Piper settings (fallback)
-  model_path: /mnt/storage/jarvis/models/piper/en_GB-northern_english_male-medium.onnx
-  config_path: /mnt/storage/jarvis/models/piper/en_GB-northern_english_male-medium.onnx.json
-  piper_bin: /home/user/.local/bin/piper
-  length_scale: 1.12
-  noise_scale: 0.55
-  noise_w_scale: 0.68
+  model_path: /home/alex/jarvis-data/models/piper/jarvis-de-high/model.onnx
+  config_path: /home/alex/jarvis-data/models/piper/jarvis-de-high/config.json
+  piper_bin: /home/alex/jarvis-venv/bin/piper
+  length_scale: 1.0
+  noise_scale: 0.667
+  noise_w_scale: 0.8
   sentence_silence: 0.2
   normalization_enabled: true
 wake_word:
+  keyword: jarvis
   access_key_env: PORCUPINE_ACCESS_KEY
   sensitivity: 0.5
 conversation:
@@ -97,10 +109,10 @@ embeddings:
 skills:
   auto_discover: true
   safe_mode: false
-  skills_path: /mnt/storage/jarvis/skills
+  skills_path: /home/alex/jarvis/skills
 logging:
   level: INFO
-  file: /mnt/storage/jarvis/data/logs/jarvis.log
+  file: /home/alex/jarvis-data/data/logs/jarvis.log
   console: true
   max_size_mb: 50
   backup_count: 3
@@ -133,15 +145,15 @@ diagnostics:
 
 # LLM metrics tracking (dashboard + analytics)
 metrics:
-  db_path: /mnt/storage/jarvis/data/metrics.db
+  db_path: /home/alex/jarvis-data/data/metrics.db
   retention_days: 180
 
 # Image generation (FLUX.2 Klein 4B via GPU swap)
 image_generation:
   enabled: true
-  model_path: /mnt/storage/jarvis/models/flux/FLUX.2-klein-4B
+  model_path: /home/alex/jarvis-data/models/flux/FLUX.2-klein-4B
   server_port: 8190
-  output_dir: /home/user/jarvis/generated_images
+  output_dir: /home/alex/jarvis-data/generated_images
   default_width: 1024
   default_height: 1024
   default_steps: 20
@@ -149,16 +161,16 @@ image_generation:
 
 semantic_matching:
   enabled: true
-  model: all-MiniLM-L6-v2
-  cache_dir: /mnt/storage/jarvis/models/sentence-transformers
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  cache_dir: /home/alex/jarvis-data/models/sentence-transformers
   default_threshold: 0.85
   fallback_to_llm: true
 
 # Conversational memory system (fact store + FAISS RAG + proactive surfacing)
 conversational_memory:
   enabled: true                 # Enabled Feb 17 — all 6 phases complete
-  db_path: /mnt/storage/jarvis/data/memory.db
-  faiss_index_path: /mnt/storage/jarvis/data/memory_faiss
+  db_path: /home/alex/jarvis-data/data/memory.db
+  faiss_index_path: /home/alex/jarvis-data/data/memory_faiss
   batch_extraction_interval: 25
   proactive_surfacing: true
   proactive_confidence_threshold: 0.45
@@ -171,7 +183,7 @@ context_window:
   verbatim_recent_messages: 10
   token_budget: 24000
   summarize_closed_segments: true
-  db_path: /mnt/storage/jarvis/data/memory.db
+  db_path: /home/alex/jarvis-data/data/memory.db
   segment_retention_days: 7
 
 # Awareness layer (unified context assembly + proactive surfacing)
@@ -190,7 +202,7 @@ awareness:
 # People manager (social introductions + pronunciation)
 people:
   enabled: true
-  db_path: /mnt/storage/jarvis/data/people.db
+  db_path: /home/alex/jarvis-data/data/people.db
 
 # System health check
 health_check:
@@ -215,7 +227,7 @@ pipeline:
 # Reminder system
 reminders:
   enabled: true
-  db_path: /mnt/storage/jarvis/data/reminders.db
+  db_path: /home/alex/jarvis-data/data/reminders.db
   poll_interval_seconds: 30
   missed_lookback_hours: 24
   startup_announce_delay_seconds: 5
@@ -238,12 +250,12 @@ reminders:
 google_calendar:
   enabled: true
   credentials_path: ~/jarvis/credentials.json
-  token_path: /mnt/storage/jarvis/data/google_token.json
-  sync_token_path: /mnt/storage/jarvis/data/google_sync_token.json
+  token_path: /home/alex/jarvis-data/data/google_token.json
+  sync_token_path: /home/alex/jarvis-data/data/google_sync_token.json
   sync_interval_seconds: 300
   jarvis_calendar_name: "JARVIS"
   include_primary_in_rundown: true
-  timezone: "America/Your_Timezone"
+  timezone: "Europe/Berlin"
 
 # CalDAV calendar (iCloud) — secondary user
 caldav:
@@ -252,13 +264,13 @@ caldav:
   username: ""    # iCloud Apple ID email
   password: ""    # App-specific password (NOT iCloud password)
   calendar_name: null  # null = first available calendar
-  timezone: "America/Your_Timezone"
+  timezone: "Europe/Berlin"
   sync_interval_seconds: 300
 
 # News headlines monitoring
 news:
   enabled: true
-  db_path: /mnt/storage/jarvis/data/news_headlines.db
+  db_path: /home/alex/jarvis-data/data/news_headlines.db
   poll_interval_seconds: 900
   max_headlines_per_feed: 3
   dedup_threshold: 0.82
@@ -345,33 +357,48 @@ news:
       url: "https://news.google.com/rss/search?q=when:24h+Your+City&ceid=US:en&hl=en-US&gl=US"
       category: "local"
 
-# App launcher — voice-controlled app launching + window management
+# App launcher — Windows host control via WSLInterop
 app_launcher:
   apps:
+    explorer:
+      exec: "explorer.exe"
+      name: "Windows Explorer"
+
     chrome:
-      exec: "google-chrome --ozone-platform=x11"
+      exec: "cmd.exe /c start chrome"
       name: "Google Chrome"
-    brave:
-      exec: "brave-browser --ozone-platform=x11"
-      name: "Brave"
-    firefox:
-      exec: "firefox"
-      name: "Firefox"
+
+    edge:
+      exec: "cmd.exe /c start msedge"
+      name: "Microsoft Edge"
+
     code:
-      exec: "code"
+      exec: "cmd.exe /c code"
       name: "VS Code"
+
     terminal:
-      exec: "gnome-terminal"
-      name: "Terminal"
+      exec: "wt.exe"
+      name: "Windows Terminal"
+
+    powershell:
+      exec: "powershell.exe"
+      name: "PowerShell"
+
+    cmd:
+      exec: "cmd.exe"
+      name: "Eingabeaufforderung"
+
+    notepad:
+      exec: "notepad.exe"
+      name: "Editor"
+
     calculator:
-      exec: "gnome-calculator"
-      name: "Calculator"
-    files:
-      exec: "nautilus"
-      name: "Files"
+      exec: "calc.exe"
+      name: "Rechner"
+
     settings:
-      exec: "gnome-control-center"
-      name: "Settings"
+      exec: "cmd.exe /c start ms-settings:"
+      name: "Windows Einstellungen"
 
 # Desktop integration (GNOME Shell extension + pactl + notify-send + wl-clipboard)
 desktop:
@@ -408,7 +435,7 @@ vision:
 web:
   port: 8088
   host: "0.0.0.0"
-  auth_token: "I5ck6KNwxPC3dzhm-zTssuMThON4hj3Bwo8t08jGVyg"
+  auth_token: ${JARVIS_WEB_AUTH_TOKEN}
   tls:
     enabled: true
     cert: ".certs/ts.crt"
@@ -417,8 +444,8 @@ web:
 
 # Fine-tuned Whisper model (custom accent training)
 stt_finetuned:
-  enabled: true
-  model_path: /mnt/storage/jarvis/models/voice_training/whisper_finetuned/final
+  enabled: false
+  model_path: /home/alex/jarvis-data/models/voice_training/whisper_finetuned/final
   user: christopher              # speaker this fine-tuned model belongs to
   fallback_model: base           # stock model for other / unknown speakers
 

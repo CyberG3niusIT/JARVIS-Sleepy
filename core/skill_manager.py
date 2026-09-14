@@ -122,10 +122,15 @@ class SkillManager:
         _emb_device = embedding_device or config.get("embeddings.voice_device", "cuda:0")
         try:
             from sentence_transformers import SentenceTransformer
+            _emb_model = config.get("semantic_matching.model", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+            _emb_cache = config.get("semantic_matching.cache_dir", None)
             self._embedding_model = SentenceTransformer(
-                'nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True, device=_emb_device
+                _emb_model, device=_emb_device, cache_folder=_emb_cache
             )
-            self.logger.info("Semantic embedding model pre-loaded (nomic-embed-text-v1.5, %s)", _emb_device)
+            self.logger.info(
+                "Semantic embedding model pre-loaded (%s, %s)",
+                _emb_model, _emb_device
+            )
         except Exception as e:
             self.logger.warning(f"Failed to pre-load embedding model: {e}")
 
@@ -229,6 +234,23 @@ class SkillManager:
                 self.logger.error(f"Skill {metadata.name} failed to initialize")
                 return False
             
+            # JARVIS_DE_SKILL_LOCALIZATION
+            try:
+                from core.de_localization import localize_skill
+                de_count = localize_skill(skill)
+                if de_count:
+                    self.logger.info(
+                        "German localization: added %d examples to %s",
+                        de_count,
+                        metadata.name,
+                    )
+            except Exception as e:
+                self.logger.warning(
+                    "German skill localization failed for %s: %s",
+                    metadata.name,
+                    e,
+                )
+
             # Store skill
             self.skills[metadata.name] = skill
             self.skill_metadata[metadata.name] = metadata

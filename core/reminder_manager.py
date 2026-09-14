@@ -49,7 +49,7 @@ class ReminderManager:
 
         # Database
         db_path = config.get("reminders.db_path",
-                             "/mnt/storage/jarvis/data/reminders.db")
+                             "/home/alex/jarvis-data/data/reminders.db")
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_lock = threading.Lock()

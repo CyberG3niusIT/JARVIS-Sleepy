@@ -54,11 +54,11 @@ class GoogleCalendarManager:
         )
         self._token_path = os.path.expanduser(
             config.get("google_calendar.token_path",
-                        "/mnt/storage/jarvis/data/google_token.json")
+                        "/home/alex/jarvis-data/data/google_token.json")
         )
         self._sync_token_path = os.path.expanduser(
             config.get("google_calendar.sync_token_path",
-                        "/mnt/storage/jarvis/data/google_sync_token.json")
+                        "/home/alex/jarvis-data/data/google_sync_token.json")
         )
 
         # Config

@@ -127,7 +127,7 @@ class ModificationEngine:
         self.config_path = self.project_root / "config.yaml"
         self.snapshot_dir = Path(config.get(
             "system.storage_path",
-            "/mnt/storage/jarvis",
+            "/home/alex/jarvis-data",
         )) / "data" / "config_snapshots"
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         self._history: list[dict] = []

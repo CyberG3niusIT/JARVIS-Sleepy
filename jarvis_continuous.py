@@ -87,7 +87,34 @@ class JarvisContinuous:
         self.logger.info("Initializing Jarvis components...")
 
         self.tts = TextToSpeech(config)
-        self.stt = SpeechToText(config)
+
+        # Selectable STT backend.
+        # Whisper remains installed and available as fallback.
+        _stt_backend = config.get(
+            "stt.backend",
+            "faster_whisper"
+        ).lower()
+
+        if _stt_backend in (
+            "qwen3",
+            "qwen3_asr",
+            "sherpa_qwen3",
+        ):
+            from core.stt_qwen3 import Qwen3SpeechToText
+
+            self.logger.info(
+                "STT backend: Qwen3-ASR / sherpa-onnx"
+            )
+
+            self.stt = Qwen3SpeechToText(config)
+
+        else:
+            self.logger.info(
+                "STT backend: faster-whisper"
+            )
+
+            self.stt = SpeechToText(config)
+
         self.conversation = ConversationManager(config)
         self.responses = get_response_library()
         self.llm = LLMRouter(config)

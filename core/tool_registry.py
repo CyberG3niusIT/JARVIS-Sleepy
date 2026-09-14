@@ -222,7 +222,7 @@ def parse_tool_result(result) -> tuple:
     return result, None
 
 
-_IMAGES_DIR = "/mnt/storage/jarvis/data/images"  # configurable via storage.images_path
+_IMAGES_DIR = "/home/alex/jarvis-data/data/images"  # configurable via storage.images_path
 
 
 def get_images_dir() -> str:

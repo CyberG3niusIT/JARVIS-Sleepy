@@ -36,7 +36,7 @@ class MetricsTracker:
     def __init__(self, config):
         self.db_path = Path(config.get(
             "metrics.db_path",
-            "/mnt/storage/jarvis/data/metrics.db",
+            "/home/alex/jarvis-data/data/metrics.db",
         ))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.retention_days = config.get("metrics.retention_days", 180)

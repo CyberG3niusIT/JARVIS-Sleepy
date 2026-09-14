@@ -536,7 +536,7 @@ def check_internals(coordinator=None):
 def check_data_stores(config):
     """Check databases, chat history, FAISS index."""
     results = []
-    data_dir = Path(config.get("system.storage_path", "/mnt/storage/jarvis")) / "data"
+    data_dir = Path(config.get("system.storage_path", "/home/alex/jarvis-data")) / "data"
 
     # --- reminders.db ---
     db_path = config.get("reminders.db_path", str(data_dir / "reminders.db"))

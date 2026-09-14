@@ -100,3 +100,8 @@ memory/
 # Environment
 .env
 governance/.governance_pw
+
+# Sleepy/JARVIS local migration backups
+backups/
+*.bak-*
+*.bak-*/
