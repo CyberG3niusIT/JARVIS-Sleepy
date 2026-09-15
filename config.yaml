@@ -64,7 +64,8 @@ stt:
 tts:
   engine: chatterbox                # active engine — see docs/ARCHITECTURE.md
   chatterbox_endpoint: http://127.0.0.1:8765/tts
-  chatterbox_timeout: 60
+  chatterbox_timeout: 60         # generation (read) timeout — GPU work can legitimately take a while
+  chatterbox_connect_timeout: 2  # separate, short — TCP connect on localhost/LAN shouldn't ever need long
   # tools/chatterbox_server.py is a separate GPU process and does NOT read
   # this file — its generation params (exaggeration, cfg_weight,
   # temperature, repetition_penalty, min_p, top_p, tempo) are tuned via

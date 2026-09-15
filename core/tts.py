@@ -8,7 +8,6 @@ Configured via tts.engine in config.yaml.
 
 import subprocess
 import json
-import urllib.request
 import os
 import io
 import wave
@@ -247,6 +246,13 @@ class TextToSpeech:
     _CHATTERBOX_HEALTH_RECHECK_OK = 5.0
     _CHATTERBOX_HEALTH_RECHECK_DOWN = 1.0
     _CHATTERBOX_HEALTH_TIMEOUT = 1.5
+    # Circuit breaker: after this many consecutive real request failures
+    # (not health-check misses — actual /tts call failures), stop trying
+    # Chatterbox entirely for the cooldown period instead of paying a
+    # health-check round-trip (or worse, a full request) per utterance
+    # against a server that's clearly not coming back immediately.
+    _CHATTERBOX_CIRCUIT_FAILURE_THRESHOLD = 3
+    _CHATTERBOX_CIRCUIT_COOLDOWN = 15.0
 
     def _init_chatterbox(self, config):
         self.chatterbox_endpoint = config.get(
@@ -256,12 +262,33 @@ class TextToSpeech:
         self.chatterbox_timeout = float(
             config.get("tts.chatterbox_timeout", 60)
         )
+        # Separate, short connect timeout — a generation request
+        # legitimately needs up to chatterbox_timeout to *complete*
+        # (real GPU work), but establishing the TCP connection itself
+        # should never take more than a couple seconds against a
+        # server on localhost/LAN.
+        self.chatterbox_connect_timeout = float(
+            config.get("tts.chatterbox_connect_timeout", 2.0)
+        )
         self.sample_rate = 24000
+
+        # requests.Session (already a project dependency) instead of
+        # urllib.request: reuses the underlying TCP connection across
+        # sentences via connection pooling/keep-alive, instead of a
+        # fresh handshake per utterance, and supports separate
+        # connect/read timeouts natively.
+        import requests
+        self._chatterbox_session = requests.Session()
 
         # Throttled health-check state (see _chatterbox_available). Start
         # at 0 so the very first call always probes.
         self._chatterbox_next_health_check = 0.0
         self._chatterbox_last_health_ok = True
+
+        # Circuit breaker state (see _chatterbox_available /
+        # _chatterbox_record_failure/_success).
+        self._chatterbox_consecutive_failures = 0
+        self._chatterbox_circuit_open_until = 0.0
 
         self.logger.info(
             f"Chatterbox TTS service: {self.chatterbox_endpoint}"
@@ -306,27 +333,56 @@ class TextToSpeech:
             base = base[: -len("/tts")]
         return base + "/health"
 
+    def _chatterbox_circuit_open(self) -> bool:
+        return time.monotonic() < self._chatterbox_circuit_open_until
+
+    def _chatterbox_record_failure(self):
+        """Called after a real /tts request fails (not a health-check
+        miss). Opens the circuit breaker after enough consecutive
+        failures so a persistently-failing server (up per /health, but
+        erroring on generation) stops eating a full request per
+        utterance during the cooldown."""
+        self._chatterbox_consecutive_failures += 1
+        if self._chatterbox_consecutive_failures >= self._CHATTERBOX_CIRCUIT_FAILURE_THRESHOLD:
+            self._chatterbox_circuit_open_until = (
+                time.monotonic() + self._CHATTERBOX_CIRCUIT_COOLDOWN
+            )
+            self.logger.warning(
+                "Chatterbox circuit breaker OPEN after %d consecutive "
+                "failures — skipping requests for %.0fs",
+                self._chatterbox_consecutive_failures,
+                self._CHATTERBOX_CIRCUIT_COOLDOWN,
+            )
+
+    def _chatterbox_record_success(self):
+        self._chatterbox_consecutive_failures = 0
+        self._chatterbox_circuit_open_until = 0.0
+
     def _chatterbox_available(self) -> bool:
-        """Cheap, throttled health probe.
+        """Cheap, throttled health probe (plus circuit breaker gate).
 
         A dead Chatterbox server used to only be discovered by letting a
         real synthesis request run into the full chatterbox_timeout
         (default 60s) before falling back to Piper. This probes /health
         with a short timeout instead, and only re-probes periodically
         (not on every single utterance) so a healthy server pays no
-        extra latency on the happy path.
+        extra latency on the happy path. If the circuit breaker is open
+        (repeated real request failures), skips even the health probe.
         """
+        if self._chatterbox_circuit_open():
+            return False
+
         now = time.monotonic()
         if now < self._chatterbox_next_health_check:
             return self._chatterbox_last_health_ok
 
         ok = False
         try:
-            with urllib.request.urlopen(
+            response = self._chatterbox_session.get(
                 self._chatterbox_health_url(),
-                timeout=self._CHATTERBOX_HEALTH_TIMEOUT,
-            ) as response:
-                ok = response.status == 200
+                timeout=(self.chatterbox_connect_timeout, self._CHATTERBOX_HEALTH_TIMEOUT),
+            )
+            ok = response.status_code == 200
         except Exception:
             ok = False
 
@@ -356,8 +412,10 @@ class TextToSpeech:
         """
         try:
             url = self.chatterbox_endpoint.rsplit("/tts", 1)[0] + "/config"
-            with urllib.request.urlopen(url, timeout=3) as response:
-                cfg = json.loads(response.read())
+            response = self._chatterbox_session.get(
+                url, timeout=(self.chatterbox_connect_timeout, 3)
+            )
+            cfg = response.json()
             import hashlib
             digest = hashlib.sha256(
                 json.dumps(cfg, sort_keys=True).encode("utf-8")
@@ -374,23 +432,17 @@ class TextToSpeech:
             return False
 
         try:
-            payload = json.dumps({"text": text}).encode("utf-8")
-            request = urllib.request.Request(
-                self.chatterbox_endpoint,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-
             t0 = time.time()
-            with urllib.request.urlopen(
-                request,
-                timeout=self.chatterbox_timeout
-            ) as response:
-                wav = response.read()
+            response = self._chatterbox_session.post(
+                self.chatterbox_endpoint,
+                json={"text": text},
+                timeout=(self.chatterbox_connect_timeout, self.chatterbox_timeout),
+            )
+            wav = response.content
 
             if not wav.startswith(b"RIFF"):
                 self.logger.error("Chatterbox returned invalid WAV data")
+                self._chatterbox_record_failure()
                 return False
 
             aplay = subprocess.Popen(
@@ -416,6 +468,7 @@ class TextToSpeech:
                 )
                 return False
 
+            self._chatterbox_record_success()
             self.logger.info(
                 "Chatterbox TTS completed in %.2fs",
                 time.time() - t0
@@ -424,6 +477,7 @@ class TextToSpeech:
 
         except Exception as e:
             self.logger.error(f"Chatterbox TTS failed: {e}")
+            self._chatterbox_record_failure()
             return False
 
     def _chatterbox_generate_pcm(self, text: str):
@@ -440,29 +494,27 @@ class TextToSpeech:
             return None, None
 
         try:
-            payload = json.dumps({"text": text}).encode("utf-8")
-            request = urllib.request.Request(
+            response = self._chatterbox_session.post(
                 self.chatterbox_endpoint,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
+                json={"text": text},
+                timeout=(self.chatterbox_connect_timeout, self.chatterbox_timeout),
             )
-            with urllib.request.urlopen(
-                request, timeout=self.chatterbox_timeout
-            ) as response:
-                wav_bytes = response.read()
+            wav_bytes = response.content
 
             if not wav_bytes.startswith(b"RIFF"):
                 self.logger.error("Chatterbox returned invalid WAV data")
+                self._chatterbox_record_failure()
                 return None, None
 
             with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
                 sample_rate = wf.getframerate()
                 pcm = wf.readframes(wf.getnframes())
+            self._chatterbox_record_success()
             return pcm, sample_rate
 
         except Exception as e:
             self.logger.error(f"Chatterbox generate failed: {e}")
+            self._chatterbox_record_failure()
             return None, None
 
     def _resample_pcm(self, pcm_bytes: bytes, src_rate: int, dst_rate: int) -> bytes:
