@@ -949,7 +949,7 @@ class DeveloperToolsSkill(BaseSkill):
                     self._check_show_me = original_check
 
         # Couldn't determine what to show — ask
-        return f"What would you like me to display, {self.honorific}? For example, the git diff, process list, or network info."
+        return f"Was soll ich anzeigen, {self.honorific}? Zum Beispiel den Git-Diff, die Prozessliste oder Netzwerkinfos."
 
     def confirm_action(self, entities: dict) -> str:
         """Handle confirmation for destructive operations. (Phase 4)"""
@@ -959,11 +959,19 @@ class DeveloperToolsSkill(BaseSkill):
         command, expiry = self._pending_confirmation
         if time.time() > expiry:
             self._pending_confirmation = None
-            return f"That confirmation has expired, {self.honorific}. Please issue the command again."
+            return f"Die Bestätigung ist abgelaufen, {self.honorific}. Bitte den Befehl erneut geben."
 
         text = entities.get('original_text', '').lower()
-        affirmatives = {'yes', 'go ahead', 'proceed', 'do it', 'confirmed', 'affirmative'}
-        negatives = {'no', 'cancel', 'abort', 'never mind', 'stop', 'don\'t'}
+        # German first (this is the active language) — English kept as a
+        # fallback since text may still arrive un-normalized.
+        affirmatives = {
+            'ja', 'mach das', 'weiter', 'los', 'bestätigt', 'bestätigen', 'tu es',
+            'yes', 'go ahead', 'proceed', 'do it', 'confirmed', 'affirmative',
+        }
+        negatives = {
+            'nein', 'abbrechen', 'stopp', 'stop', 'vergiss es', 'lass es',
+            'no', 'cancel', 'abort', 'never mind', "don't",
+        }
 
         if any(word in text for word in affirmatives):
             self._pending_confirmation = None
@@ -976,14 +984,14 @@ class DeveloperToolsSkill(BaseSkill):
                     summary, output, 'general', f'Confirmed: {command}', entities
                 )
             else:
-                return f"The command failed, {self.honorific}. {output[:200]}"
+                return f"Der Befehl ist fehlgeschlagen, {self.honorific}. {output[:200]}"
 
         if any(word in text for word in negatives):
             self._pending_confirmation = None
             return random.choice([
-                f"Cancelled, {self.honorific}.",
-                f"Very well, {self.honorific}. Operation cancelled.",
-                f"Understood, {self.honorific}. Standing down.",
+                f"Abgebrochen, {self.honorific}.",
+                f"Sehr gut, {self.honorific}. Vorgang abgebrochen.",
+                f"Verstanden, {self.honorific}. Ich lasse es.",
             ])
 
-        return f"I didn't catch that, {self.honorific}. Shall I proceed, or cancel?"
+        return f"Das habe ich nicht verstanden, {self.honorific}. Soll ich fortfahren oder abbrechen?"

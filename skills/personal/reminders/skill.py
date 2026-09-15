@@ -155,14 +155,17 @@ class ReminderSkill(BaseSkill):
         """Handle 'remind me to X at Y' commands."""
         text = getattr(self, "_last_user_text", "")
         if not text:
-            return self.respond("I didn't quite catch that. What would you like to be reminded about?")
+            return self.respond("Das habe ich nicht ganz verstanden. Woran soll ich Sie erinnern?")
 
         # Normalize spoken numbers to digits: "two minutes" -> "2 minutes"
         text = self._normalize_numbers(text)
 
         parsed = self._parse_reminder_command(text)
         if not parsed:
-            return self.respond("I couldn't parse that reminder. Try something like: remind me to call mom tomorrow at 6 PM.")
+            return self.respond(
+                "Das habe ich nicht als Erinnerung verstanden. Versuchen Sie es "
+                "zum Beispiel so: Erinnere mich morgen um 18 Uhr daran, Mama anzurufen."
+            )
 
         title = parsed["title"]
         time_text = parsed["time_text"]
@@ -172,7 +175,10 @@ class ReminderSkill(BaseSkill):
 
         reminder_time = self.manager.parse_natural_time(time_text)
         if not reminder_time:
-            return self.respond(f"I'll remind you to {title}, but I couldn't figure out when. Could you say the time again?")
+            return self.respond(
+                f"Ich soll Sie daran erinnern, {title}, aber mir ist der Zeitpunkt "
+                "nicht klar geworden. Können Sie die Uhrzeit noch einmal sagen?"
+            )
 
         rid = self.manager.add_reminder(
             title=title,
@@ -184,20 +190,27 @@ class ReminderSkill(BaseSkill):
         time_desc = self._format_time_natural(reminder_time)
         priority_note = ""
         if priority <= 2:
-            priority_note = " Marked as urgent."
+            priority_note = " Als dringend markiert."
 
-        return self.respond(f"Reminder set, {self.honorific}. I'll remind you to {title} {time_desc}.{priority_note}")
+        return self.respond(
+            f"Erinnerung gesetzt, {self.honorific}. Ich erinnere Sie daran, "
+            f"{title}, {time_desc}.{priority_note}"
+        )
 
     def set_recurring(self) -> str:
         """Handle recurring reminder commands."""
         text = getattr(self, "_last_user_text", "")
         if not text:
-            return self.respond("What would you like to be reminded about regularly?")
+            return self.respond("Woran möchten Sie regelmäßig erinnert werden?")
 
         text = self._normalize_numbers(text)
         parsed = self._parse_recurring_command(text)
         if not parsed:
-            return self.respond("I couldn't parse that recurring reminder. Try: remind me every Tuesday at 7 PM to take out the trash.")
+            return self.respond(
+                "Das habe ich nicht als wiederkehrende Erinnerung verstanden. "
+                "Versuchen Sie es zum Beispiel so: Erinnere mich jeden Dienstag "
+                "um 19 Uhr daran, den Müll rauszubringen."
+            )
 
         title = parsed["title"]
         rule = parsed["rule"]
@@ -213,7 +226,10 @@ class ReminderSkill(BaseSkill):
             created_by=self.current_user,
         )
 
-        return self.respond(f"Recurring reminder set, {self.honorific}. I'll remind you to {title} {parsed['description']}.")
+        return self.respond(
+            f"Wiederkehrende Erinnerung gesetzt, {self.honorific}. Ich erinnere Sie "
+            f"daran, {title}, {parsed['description']}."
+        )
 
     def list_reminders(self) -> str:
         """List upcoming reminders."""
@@ -222,19 +238,19 @@ class ReminderSkill(BaseSkill):
         all_reminders = fired + pending  # Show fired (awaiting ack) first
 
         if not all_reminders:
-            return self.respond(f"You have no upcoming reminders, {self.honorific}.")
+            return self.respond(f"Sie haben keine anstehenden Erinnerungen, {self.honorific}.")
 
         count = len(all_reminders)
         if count == 1:
             r = all_reminders[0]
             time_desc = self._format_reminder_time(r["reminder_time"])
-            status_note = " awaiting your confirmation" if r["status"] == "fired" else ""
-            return self.respond(f"You have one reminder{status_note}: {r['title']}, {time_desc}.")
+            status_note = " (wartet auf Bestätigung)" if r["status"] == "fired" else ""
+            return self.respond(f"Sie haben eine Erinnerung{status_note}: {r['title']}, {time_desc}.")
 
-        lines = [f"You have {count} reminders, {self.honorific}."]
+        lines = [f"Sie haben {count} Erinnerungen, {self.honorific}."]
         for r in all_reminders:
             time_desc = self._format_reminder_time(r["reminder_time"])
-            prefix = "Awaiting confirmation: " if r["status"] == "fired" else ""
+            prefix = "Wartet auf Bestätigung: " if r["status"] == "fired" else ""
             lines.append(f"{prefix}{r['title']}, {time_desc}.")
 
         return self.respond(" ".join(lines))
@@ -243,20 +259,23 @@ class ReminderSkill(BaseSkill):
         """Cancel a reminder by title match."""
         text = getattr(self, "_last_user_text", "")
 
-        # Extract title fragment from command
+        # Extract title fragment from command. German first (the active
+        # language) — English kept as a fallback for un-normalized text.
         fragment = re.sub(
-            r"^(?:cancel|delete|remove)\s+(?:the\s+)?(?:reminder\s+)?(?:about\s+|for\s+)?",
+            r"^(?:lösche|entferne|storniere|streiche|cancel|delete|remove)\s+"
+            r"(?:die\s+|den\s+)?(?:erinnerung\s+|reminder\s+)?"
+            r"(?:an\s+|über\s+|für\s+|about\s+|for\s+)?",
             "", text, flags=re.I
         ).strip()
 
         if not fragment or len(fragment) < 3:
-            return self.respond("Which reminder would you like me to cancel?")
+            return self.respond("Welche Erinnerung soll ich stornieren?")
 
         cancelled = self.manager.cancel_by_title(fragment, created_by=self.current_user)
         if cancelled:
-            return self.respond(f"Done, {self.honorific}. I've cancelled the reminder: {cancelled['title']}.")
+            return self.respond(f"Erledigt, {self.honorific}. Ich habe die Erinnerung storniert: {cancelled['title']}.")
         else:
-            return self.respond(f"I couldn't find a reminder matching '{fragment}', {self.honorific}.")
+            return self.respond(f"Ich konnte keine Erinnerung zu '{fragment}' finden, {self.honorific}.")
 
     def acknowledge_current(self) -> str:
         """Acknowledge the most recently fired reminder."""
@@ -267,13 +286,13 @@ class ReminderSkill(BaseSkill):
         reminder = self.manager.acknowledge_last(created_by=self.current_user)
         if reminder:
             responses = [
-                f"Noted, {self.honorific}. '{reminder['title']}' cleared.",
-                f"Very good, {self.honorific}. I've cleared that reminder.",
-                f"Understood. '{reminder['title']}' marked as done.",
-                f"Acknowledged, {self.honorific}.",
+                f"Notiert, {self.honorific}. '{reminder['title']}' erledigt.",
+                f"Sehr gut, {self.honorific}. Die Erinnerung ist erledigt.",
+                f"Verstanden. '{reminder['title']}' als erledigt markiert.",
+                f"Bestätigt, {self.honorific}.",
             ]
             return self.respond(random.choice(responses))
-        return self.respond(f"I don't have any reminders awaiting confirmation, {self.honorific}.")
+        return self.respond(f"Ich habe keine Erinnerungen, die auf Bestätigung warten, {self.honorific}.")
 
     def snooze_current(self) -> str:
         """Snooze the most recently fired reminder."""
@@ -281,18 +300,18 @@ class ReminderSkill(BaseSkill):
 
         # Try to extract snooze duration
         minutes = None
-        m = re.search(r"(\d+)\s*(?:minute|min)", text, re.I)
+        m = re.search(r"(\d+)\s*(?:minute|min|minuten)", text, re.I)
         if m:
             minutes = int(m.group(1))
 
         if not self.manager.is_awaiting_ack():
-            return self.respond(f"There's nothing to snooze at the moment, {self.honorific}.")
+            return self.respond(f"Im Moment gibt es nichts zu verschieben, {self.honorific}.")
 
         reminder = self.manager.snooze_last(minutes)
         if reminder:
             snooze_min = minutes or self.manager.default_snooze
-            return self.respond(f"Snoozed, {self.honorific}. I'll remind you again in {snooze_min} minutes.")
-        return self.respond(f"I couldn't find a reminder to snooze, {self.honorific}.")
+            return self.respond(f"Verschoben, {self.honorific}. Ich erinnere Sie in {snooze_min} Minuten erneut.")
+        return self.respond(f"Ich konnte keine Erinnerung zum Verschieben finden, {self.honorific}.")
 
     def daily_rundown(self) -> str:
         """Provide the daily rundown of today's reminders."""

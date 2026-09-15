@@ -280,7 +280,7 @@ def _response_init_de(self, history_size: int = 5):
     self.responses.update({
 
         "acknowledgment": [
-            "Sehr wohl, {honorific}.",
+            "Alles klar, {honorific}.",
             "Sofort, {honorific}.",
             "Verstanden.",
             "Ich kümmere mich darum, {honorific}.",
@@ -341,7 +341,7 @@ def _response_init_de(self, history_size: int = 5):
         ],
 
         "farewell": [
-            "Sehr wohl, {honorific}.",
+            "Alles klar, {honorific}.",
             "Bis später, {honorific}.",
             "Auf Wiedersehen, {honorific}.",
             "Gute Nacht, {honorific}. Ich behalte alles im Auge.",

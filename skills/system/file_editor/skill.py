@@ -1652,8 +1652,16 @@ class FileEditorSkill(BaseSkill):
             return f"That confirmation has expired, {self.honorific}. Please issue the command again."
 
         text = entities.get('original_text', '').lower()
-        affirmatives = {'yes', 'yeah', 'yep', 'go ahead', 'proceed', 'do it', 'confirmed', 'affirmative', 'sure'}
-        negatives = {'no', 'nope', 'cancel', 'abort', 'never mind', 'stop', "don't"}
+        # German first (this is the active language) — English kept as a
+        # fallback since text may still arrive un-normalized.
+        affirmatives = {
+            'ja', 'jep', 'mach das', 'weiter', 'los', 'bestätigt', 'klar',
+            'yes', 'yeah', 'yep', 'go ahead', 'proceed', 'do it', 'confirmed', 'affirmative', 'sure',
+        }
+        negatives = {
+            'nein', 'abbrechen', 'stopp', 'stop', 'vergiss es', 'lass es',
+            'no', 'nope', 'cancel', 'abort', 'never mind', "don't",
+        }
 
         if any(word in text for word in affirmatives):
             self._pending_confirmation = None
@@ -1664,11 +1672,11 @@ class FileEditorSkill(BaseSkill):
                     target.unlink()
                     self.logger.info(f"[file_editor] deleted share/{detail['filename']}")
                     return random.choice([
-                        f"Done, {self.honorific}. {detail['filename']} has been deleted.",
-                        f"{detail['filename']} removed, {self.honorific}.",
-                        f"Deleted, {self.honorific}.",
+                        f"Erledigt, {self.honorific}. {detail['filename']} wurde gelöscht.",
+                        f"{detail['filename']} entfernt, {self.honorific}.",
+                        f"Gelöscht, {self.honorific}.",
                     ])
-                return f"The file no longer exists, {self.honorific}."
+                return f"Die Datei existiert nicht mehr, {self.honorific}."
 
             elif action == 'overwrite':
                 self.logger.info(f"[file_editor] overwriting share/{detail['filename']}")
@@ -1677,17 +1685,17 @@ class FileEditorSkill(BaseSkill):
                     detail['description'], detail['user_text']
                 )
 
-            return f"Action completed, {self.honorific}."
+            return f"Erledigt, {self.honorific}."
 
         if any(word in text for word in negatives):
             self._pending_confirmation = None
             return random.choice([
-                f"Cancelled, {self.honorific}.",
-                f"Very well, {self.honorific}. Operation cancelled.",
-                f"Understood, {self.honorific}. Standing down.",
+                f"Abgebrochen, {self.honorific}.",
+                f"Sehr gut, {self.honorific}. Vorgang abgebrochen.",
+                f"Verstanden, {self.honorific}. Ich lasse es.",
             ])
 
-        return f"I didn't catch that, {self.honorific}. Should I proceed, or cancel?"
+        return f"Das habe ich nicht verstanden, {self.honorific}. Soll ich fortfahren oder abbrechen?"
 
     # ------------------------------------------------------------------
     # Utilities

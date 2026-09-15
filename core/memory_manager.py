@@ -697,7 +697,7 @@ class MemoryManager:
                 matching_facts = [f for f in semantic if f.get("score", 0) >= 0.5]
 
         if not matching_facts:
-            return f"I don't have any stored memories about that, {get_honorific()}."
+            return f"Dazu habe ich nichts gespeichert, {get_honorific()}."
 
         # Store pending deletion for confirmation
         self._pending_forget = {
@@ -728,7 +728,7 @@ class MemoryManager:
 
         if not self._pending_forget or time.time() > self._pending_forget["expires"]:
             self._pending_forget = None
-            return f"The deletion request has expired, {h}."
+            return f"Die Löschanfrage ist abgelaufen, {h}."
 
         deleted = 0
         for fact in self._pending_forget["facts"]:
@@ -738,14 +738,14 @@ class MemoryManager:
         self._pending_forget = None
         self.logger.info(f"Forget confirmed: {deleted} facts soft-deleted")
         if deleted == 1:
-            return f"Consider it forgotten, {h}."
-        return f"Consider them forgotten, {h}. {deleted} items removed."
+            return f"Betrachten Sie es als vergessen, {h}."
+        return f"Betrachten Sie es als vergessen, {h}. {deleted} Einträge entfernt."
 
     def cancel_forget(self) -> str:
         """Cancel pending forget request."""
         from core.honorific import get_honorific
         self._pending_forget = None
-        return f"Understood, {get_honorific()}. I'll keep those memories."
+        return f"Verstanden, {get_honorific()}. Ich behalte diese Erinnerungen."
 
     def handle_transparency(self, query: str, user_id: str = "primary_user") -> str:
         """Return a natural summary of stored facts with examples."""
@@ -759,7 +759,7 @@ class MemoryManager:
                  and not f.get("content", "").startswith("The user ")]
 
         if not facts:
-            return f"I haven't stored any specific facts about you yet, {h}."
+            return f"Ich habe noch keine konkreten Fakten über Sie gespeichert, {h}."
 
         total = len(facts)
 
@@ -936,7 +936,7 @@ class MemoryManager:
         from core.honorific import get_honorific
         facts = self.get_facts(user_id, category=category)
         if not facts:
-            return f"No facts in that category, {get_honorific()}."
+            return f"Keine Fakten in dieser Kategorie, {get_honorific()}."
 
         lines = []
         for f in facts:

@@ -623,12 +623,12 @@ class LLMRouter:
         # If response is suspiciously short (< 5 chars), it's probably a fragment - return empty
         if len(text) < 5:
             self.logger.warning(f"LLM output too short after cleaning: '{text}'")
-            return f"I apologize, {get_honorific()}, but I'm having trouble formulating a response."
+            return f"Entschuldigung, {get_honorific()}, mir fällt gerade keine passende Antwort ein."
         
         # Final check: if still contains "You are JARVIS", something went wrong
         if "You are JARVIS" in text:
             self.logger.error("Failed to clean LLM output - prompt still present")
-            return f"Good morning, {get_honorific()}."  # Safe fallback
+            return f"Guten Morgen, {get_honorific()}."  # Safe fallback
         
         return text
     

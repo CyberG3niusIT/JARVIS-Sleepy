@@ -677,13 +677,13 @@ class ReminderManager:
         # Build announcement — use commas for natural speech flow
         cap_title = title[0].upper() + title[1:] if title else title
         if priority == 1:
-            prefix = f"Urgent reminder, {get_honorific()}."
+            prefix = f"Dringende Erinnerung, {get_honorific()}."
         elif priority == 2:
-            prefix = f"Reminder, {get_honorific()}."
+            prefix = f"Erinnerung, {get_honorific()}."
         elif priority == 3:
-            prefix = f"Just a reminder, {get_honorific()}."
+            prefix = f"Nur zur Erinnerung, {get_honorific()}."
         else:
-            prefix = f"By the way, {get_honorific()}."
+            prefix = f"Übrigens, {get_honorific()}."
 
         # When fired before event time, add "in X minutes" context
         time_phrase = None
@@ -692,22 +692,30 @@ class ReminderManager:
             try:
                 event_dt = datetime.strptime(event_time_str, "%Y-%m-%d %H:%M:%S")
                 minutes_until = max(1, int((event_dt - datetime.now()).total_seconds() / 60))
+
+                def _de_unit(n, singular, plural):
+                    return f"{n} {singular if n == 1 else plural}"
+
                 if minutes_until >= 1440:  # 24 hours+
                     days = minutes_until // 1440
                     remaining_hours = (minutes_until % 1440) // 60
+                    days_str = _de_unit(days, "Tag", "Tagen")
                     if remaining_hours:
-                        time_phrase = f"in {days} day{'s' if days != 1 else ''} and {remaining_hours} hour{'s' if remaining_hours != 1 else ''}"
+                        hours_str = _de_unit(remaining_hours, "Stunde", "Stunden")
+                        time_phrase = f"in {days_str} und {hours_str}"
                     else:
-                        time_phrase = f"in {days} day{'s' if days != 1 else ''}"
+                        time_phrase = f"in {days_str}"
                 elif minutes_until >= 60:
                     hours = minutes_until // 60
                     remaining = minutes_until % 60
+                    hours_str = _de_unit(hours, "Stunde", "Stunden")
                     if remaining:
-                        time_phrase = f"in {hours} hour{'s' if hours != 1 else ''} and {remaining} minutes"
+                        minutes_str = _de_unit(remaining, "Minute", "Minuten")
+                        time_phrase = f"in {hours_str} und {minutes_str}"
                     else:
-                        time_phrase = f"in {hours} hour{'s' if hours != 1 else ''}"
+                        time_phrase = f"in {hours_str}"
                 else:
-                    time_phrase = f"in {minutes_until} minute{'s' if minutes_until != 1 else ''}"
+                    time_phrase = f"in {_de_unit(minutes_until, 'Minute', 'Minuten')}"
             except (ValueError, TypeError):
                 pass
 
@@ -1088,15 +1096,19 @@ class ReminderManager:
             time.sleep(0.3)
 
             if len(critical) == 1:
-                self.tts.speak("Sir, you missed an urgent reminder while you were away.")
+                self.tts.speak(
+                    f"{get_honorific()}, Sie haben eine dringende Erinnerung verpasst, "
+                    "während Sie weg waren."
+                )
             else:
                 self.tts.speak(
-                    f"Sir, you missed {len(critical)} urgent reminders while you were away."
+                    f"{get_honorific()}, Sie haben {len(critical)} dringende Erinnerungen "
+                    "verpasst, während Sie weg waren."
                 )
             time.sleep(0.3)
 
             for r in critical:
-                self.tts.speak(f"{r['title']}. Did you get to that, {get_honorific()}?")
+                self.tts.speak(f"{r['title']}. Haben Sie das erledigt, {get_honorific()}?")
                 time.sleep(0.5)
                 # Mark as fired (awaiting ack)
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1112,10 +1124,10 @@ class ReminderManager:
         if normal:
             time.sleep(0.5)
             if len(normal) == 1:
-                self.tts.speak("You also had a reminder while you were away.")
+                self.tts.speak("Außerdem gab es eine Erinnerung, während Sie weg waren.")
             else:
                 self.tts.speak(
-                    f"You also had {len(normal)} other reminders while you were away."
+                    f"Außerdem gab es {len(normal)} weitere Erinnerungen, während Sie weg waren."
                 )
 
             for r in normal:
@@ -1287,7 +1299,7 @@ class ReminderManager:
             self._pause_listener_callback()
         self._play_rundown_tone("daily")
         time.sleep(0.3)
-        self.tts.speak(f"Good morning, {get_honorific()}. Here's your rundown for today. {rundown}")
+        self.tts.speak(f"Guten Morgen, {get_honorific()}. Hier ist Ihre Übersicht für heute. {rundown}")
         if self._resume_listener_callback:
             self._resume_listener_callback()
 
@@ -1314,7 +1326,10 @@ class ReminderManager:
 
         self._play_rundown_tone(kind)
         time.sleep(0.3)
-        self.tts.speak(f"Good morning, {get_honorific()}. Are you ready for the {kind} rundown?")
+        kind_de = "wöchentliche" if kind == "weekly" else "tägliche"
+        self.tts.speak(
+            f"Guten Morgen, {get_honorific()}. Sind Sie bereit für die {kind_de} Übersicht?"
+        )
 
         if self._resume_listener_callback:
             self._resume_listener_callback()
@@ -1333,7 +1348,7 @@ class ReminderManager:
         if self._pause_listener_callback:
             self._pause_listener_callback()
 
-        self.tts.speak("Sir, shall I proceed with the rundown?")
+        self.tts.speak(f"{get_honorific()}, soll ich mit der Übersicht fortfahren?")
 
         if self._resume_listener_callback:
             self._resume_listener_callback()
@@ -1360,7 +1375,7 @@ class ReminderManager:
             self.logger.info(f"Weekly rundown: {rundown}")
             if self._pause_listener_callback:
                 self._pause_listener_callback()
-            self.tts.speak(f"Here's your weekly rundown, {get_honorific()}. {rundown}")
+            self.tts.speak(f"Hier ist Ihre wöchentliche Übersicht, {get_honorific()}. {rundown}")
             if self._resume_listener_callback:
                 self._resume_listener_callback()
             # Weekly rundown covers today's events grouped by day — no separate daily needed
@@ -1369,7 +1384,7 @@ class ReminderManager:
             self.logger.info(f"Daily rundown: {rundown}")
             if self._pause_listener_callback:
                 self._pause_listener_callback()
-            self.tts.speak(f"Here's your rundown for today, {get_honorific()}. {rundown}")
+            self.tts.speak(f"Hier ist Ihre Übersicht für heute, {get_honorific()}. {rundown}")
             if self._resume_listener_callback:
                 self._resume_listener_callback()
 
