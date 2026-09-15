@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>JARVIS HUD</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/hud.css?v=1">
+</head>
+<body>
+
+<div id="hud-root" class="hud-root" data-state="offline">
+
+  <!-- ============================================================
+       Central JARVIS eye — layered SVG, all animation driven by
+       hud.js via CSS custom properties + direct attribute updates.
+       See docs/UI_INTEGRATION.md for the state contract and
+       CONFIG in hud.js for every tunable visual parameter.
+  ============================================================= -->
+  <div class="eye-stage">
+    <svg id="eye" class="eye" viewBox="-300 -300 600 600" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <filter id="glow-soft" x="-150%" y="-150%" width="400%" height="400%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur1"/>
+          <feMerge>
+            <feMergeNode in="blur1"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        <filter id="glow-strong" x="-200%" y="-200%" width="500%" height="500%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur2"/>
+          <feMerge>
+            <feMergeNode in="blur2"/>
+            <feMergeNode in="blur2"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        <radialGradient id="core-gradient" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--eye-core-center)"/>
+          <stop offset="55%" stop-color="var(--eye-core-mid)"/>
+          <stop offset="100%" stop-color="var(--eye-core-edge)" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="backdrop-gradient" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--eye-backdrop-center)"/>
+          <stop offset="100%" stop-color="var(--eye-backdrop-edge)" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <!-- Ambient backdrop bloom -->
+      <circle id="backdrop" cx="0" cy="0" r="280" fill="url(#backdrop-gradient)"/>
+
+      <!-- Faint particle field -->
+      <g id="particles" class="particles"></g>
+
+      <!-- Outer static HUD ring with tick marks -->
+      <g id="ring-hud-outer" class="ring ring-hud-outer">
+        <circle cx="0" cy="0" r="248" class="ring-track"/>
+        <g id="ticks-outer"></g>
+      </g>
+
+      <!-- Rotating dashed ring (clockwise) -->
+      <g id="ring-rotor-a" class="ring ring-rotor-a">
+        <circle cx="0" cy="0" r="214" class="ring-dashed"/>
+      </g>
+
+      <!-- Rotating segmented ring (counter-clockwise) -->
+      <g id="ring-rotor-b" class="ring ring-rotor-b">
+        <circle cx="0" cy="0" r="184" class="ring-segmented"/>
+      </g>
+
+      <!-- Energy / audio-reactive ring -->
+      <g id="ring-energy" class="ring ring-energy" filter="url(#glow-soft)">
+        <circle id="ring-energy-track" cx="0" cy="0" r="150" class="ring-energy-track"/>
+        <path id="ring-energy-wave" class="ring-energy-wave" d=""/>
+      </g>
+
+      <!-- Fine inner marker ring -->
+      <g id="ring-markers" class="ring ring-markers">
+        <g id="markers-inner"></g>
+      </g>
+
+      <!-- Core -->
+      <g id="core-group" filter="url(#glow-strong)">
+        <circle id="core" cx="0" cy="0" r="86" fill="url(#core-gradient)"/>
+      </g>
+
+      <!-- Scan sweep (transcribing) -->
+      <g id="scan-sweep" class="scan-sweep">
+        <path d="M 0 0 L 0 -248 A 248 248 0 0 1 40 -244 Z"/>
+      </g>
+
+      <!-- Error ring accent (hidden unless state=error) -->
+      <circle id="ring-error" cx="0" cy="0" r="230" class="ring-error"/>
+    </svg>
+  </div>
+
+  <!-- ============================================================
+       HUD info overlay — deliberately sparse. The eye stays the
+       focal point; these are peripheral readouts, not a dashboard.
+  ============================================================= -->
+  <header class="hud-topbar">
+    <div class="hud-brand">JARVIS</div>
+    <div class="hud-clock" id="hud-clock">--:--</div>
+  </header>
+
+  <div class="hud-status-line">
+    <span class="hud-status-dot" id="hud-status-dot"></span>
+    <span class="hud-status-text" id="hud-status-text">Offline</span>
+  </div>
+
+  <div class="hud-corner hud-corner-bl" id="hud-user-block">
+    <div class="hud-label">Benutzer</div>
+    <div class="hud-value" id="hud-user">—</div>
+  </div>
+
+  <div class="hud-corner hud-corner-br" id="hud-mode-block">
+    <div class="hud-label">Modus</div>
+    <div class="hud-value" id="hud-mode">Lokal</div>
+  </div>
+
+  <div class="hud-command" id="hud-command" hidden></div>
+
+  <!-- ============================================================
+       Demo / debug control panel — only rendered when ?demo=1.
+       Lets every state (and a synthetic speaking envelope) be
+       triggered without a running backend, for visual tuning.
+  ============================================================= -->
+  <div class="hud-demo-panel" id="demo-panel" hidden>
+    <div class="hud-demo-title">Demo-Modus</div>
+    <div class="hud-demo-grid" id="demo-state-buttons"></div>
+    <label class="hud-demo-row">
+      <span>Audio-Pegel (Speaking)</span>
+      <input type="range" id="demo-audio-level" min="0" max="100" value="40">
+    </label>
+    <label class="hud-demo-row">
+      <input type="checkbox" id="demo-reduced-motion">
+      <span>Reduced motion simulieren</span>
+    </label>
+    <div class="hud-demo-hint">?demo=1 · nicht sichtbar im Normalbetrieb</div>
+  </div>
+</div>
+
+<script src="/hud.js?v=1"></script>
+</body>
+</html>

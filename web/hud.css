@@ -1,0 +1,385 @@
+/*
+ * JARVIS HUD — visual theme + layout.
+ *
+ * All animation TIMING lives in hud.js (CONFIG object) since durations
+ * need to be computed/JS-driven per state. Colors, sizes and glow live
+ * here as CSS custom properties on :root — this is the single place to
+ * retune the palette tomorrow against the user's visual reference.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- Palette (retune here) -------------------------------------- */
+  --bg: #05070a;
+  --bg-vignette: #000000;
+
+  --eye-core-center: #eafcff;
+  --eye-core-mid: #4fd8ff;
+  --eye-core-edge: #0a3a4a;
+  --eye-backdrop-center: #0d3a52;
+  --eye-backdrop-edge: #05070a;
+
+  --ring-color: #3fd6ff;
+  --ring-color-dim: #1c5a70;
+  --ring-track-color: rgba(63, 214, 255, 0.14);
+
+  --hud-text: #d9f6ff;
+  --hud-text-dim: #6f96a3;
+  --hud-accent: #3fd6ff;
+
+  --state-idle: #3fd6ff;
+  --state-listening: #48f0c0;
+  --state-thinking: #a978ff;
+  --state-speaking: #3fd6ff;
+  --state-tool: #ffb648;
+  --state-error: #ff4d5e;
+  --state-offline: #4a5560;
+  --state-interrupted: #ff9640;
+
+  /* ---- Sizing -------------------------------------------------------
+     The eye is drawn in a 600x600 SVG viewBox (-300..300); this scales
+     the whole stage responsively. Keep the eye the dominant element at
+     every breakpoint (see media queries below). */
+  --eye-size: min(64vh, 64vw, 620px);
+  --eye-size-mobile: min(58vh, 82vw, 420px);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* no scrolling on the main HUD view, ever */
+  background: var(--bg);
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.hud-root {
+  position: relative;
+  width: 100vw;
+  height: 100dvh;
+  background:
+    radial-gradient(ellipse at center, rgba(15, 40, 55, 0.35) 0%, transparent 60%),
+    var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Subtle vignette for depth, fullscreen-friendly */
+.hud-root::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 45%, var(--bg-vignette) 115%);
+}
+
+/* ---- Eye stage ------------------------------------------------------ */
+
+.eye-stage {
+  position: relative;
+  width: var(--eye-size);
+  height: var(--eye-size);
+  z-index: 1;
+}
+
+.eye {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.ring-track {
+  fill: none;
+  stroke: var(--ring-track-color);
+  stroke-width: 1.5;
+}
+
+.ring-dashed {
+  fill: none;
+  stroke: var(--ring-color-dim);
+  stroke-width: 2;
+  stroke-dasharray: 4 10;
+}
+
+.ring-segmented {
+  fill: none;
+  stroke: var(--ring-color);
+  stroke-width: 3;
+  stroke-dasharray: 22 14;
+  opacity: 0.55;
+}
+
+.ring-energy-track {
+  fill: none;
+  stroke: var(--ring-color);
+  stroke-width: 2.5;
+  opacity: 0.5;
+}
+
+.ring-energy-wave {
+  fill: none;
+  stroke: var(--ring-color);
+  stroke-width: 2.5;
+  opacity: 0.9;
+  stroke-linejoin: round;
+}
+
+.ring-markers circle,
+.ring-markers rect {
+  fill: var(--ring-color);
+}
+
+#backdrop {
+  opacity: 0.5;
+}
+
+.scan-sweep {
+  transform-origin: 0 0;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.scan-sweep path {
+  fill: var(--hud-accent);
+  opacity: 0.08;
+}
+
+.ring-error {
+  fill: none;
+  stroke: var(--state-error);
+  stroke-width: 3;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.particles circle {
+  fill: var(--ring-color);
+}
+
+/* ---- State color mapping --------------------------------------------
+   Each state gets one accent color applied via a CSS var the JS sets on
+   #hud-root; everything downstream (core glow, rings, status dot) reads
+   from --state-color so there is exactly one place per state to tune. */
+
+.hud-root { --state-color: var(--state-offline); }
+.hud-root[data-state="idle"]          { --state-color: var(--state-idle); }
+.hud-root[data-state="wake_detected"] { --state-color: var(--state-listening); }
+.hud-root[data-state="listening"]     { --state-color: var(--state-listening); }
+.hud-root[data-state="transcribing"]  { --state-color: var(--state-listening); }
+.hud-root[data-state="thinking"]      { --state-color: var(--state-thinking); }
+.hud-root[data-state="tool_execution"]{ --state-color: var(--state-tool); }
+.hud-root[data-state="speaking"]      { --state-color: var(--state-speaking); }
+.hud-root[data-state="interrupted"]   { --state-color: var(--state-interrupted); }
+.hud-root[data-state="error"]         { --state-color: var(--state-error); }
+.hud-root[data-state="offline"]       { --state-color: var(--state-offline); }
+
+.eye #ring-rotor-b circle,
+.eye #ring-energy-track,
+.eye #ring-energy-wave,
+.eye .ring-markers circle,
+.eye .ring-markers rect,
+.eye .particles circle {
+  stroke: var(--state-color);
+  fill: var(--state-color);
+  transition: stroke 0.4s ease, fill 0.4s ease;
+}
+.eye #ring-rotor-a circle { stroke: var(--state-color); transition: stroke 0.4s ease; opacity: 0.6; }
+.eye #core { transition: filter 0.4s ease; }
+
+.hud-root[data-state="error"] .ring-error { opacity: 0.8; }
+.hud-root[data-state="transcribing"] .scan-sweep { opacity: 1; }
+
+/* ---- HUD overlay text ------------------------------------------------ */
+
+.hud-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.4rem 2rem 0;
+  color: var(--hud-text);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.hud-brand {
+  font-size: 0.85rem;
+  letter-spacing: 0.35em;
+  color: var(--hud-text-dim);
+  font-weight: 600;
+}
+
+.hud-clock {
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  color: var(--hud-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-status-line {
+  position: absolute;
+  bottom: 8%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.hud-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-color, var(--state-offline));
+  box-shadow: 0 0 10px 2px var(--state-color, var(--state-offline));
+  transition: background 0.4s ease, box-shadow 0.4s ease;
+}
+
+.hud-status-text {
+  font-size: 0.95rem;
+  letter-spacing: 0.12em;
+  color: var(--hud-text);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.hud-corner {
+  position: absolute;
+  z-index: 2;
+  color: var(--hud-text);
+  pointer-events: none;
+}
+.hud-corner-bl { bottom: 2.2rem; left: 2rem; text-align: left; }
+.hud-corner-br { bottom: 2.2rem; right: 2rem; text-align: right; }
+
+.hud-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.18em;
+  color: var(--hud-text-dim);
+  text-transform: uppercase;
+  margin-bottom: 0.15rem;
+}
+.hud-value {
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+}
+
+.hud-command {
+  position: absolute;
+  top: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(70vw, 640px);
+  text-align: center;
+  color: var(--hud-text);
+  font-size: 0.95rem;
+  opacity: 0.85;
+  z-index: 2;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Demo panel ------------------------------------------------------- */
+
+.hud-demo-panel {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10;
+  background: rgba(6, 12, 16, 0.92);
+  border: 1px solid rgba(63, 214, 255, 0.35);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  width: 240px;
+  color: var(--hud-text);
+  font-size: 0.8rem;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+.hud-demo-title {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
+  color: var(--hud-accent);
+}
+.hud-demo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-bottom: 0.7rem;
+}
+.hud-demo-grid button {
+  background: rgba(63, 214, 255, 0.08);
+  border: 1px solid rgba(63, 214, 255, 0.3);
+  color: var(--hud-text);
+  border-radius: 6px;
+  padding: 0.35rem 0.3rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.hud-demo-grid button:hover { background: rgba(63, 214, 255, 0.2); }
+.hud-demo-grid button.active {
+  background: var(--hud-accent);
+  color: #05131a;
+  font-weight: 600;
+}
+.hud-demo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.hud-demo-row input[type="range"] { flex: 1; }
+.hud-demo-hint {
+  color: var(--hud-text-dim);
+  font-size: 0.65rem;
+  margin-top: 0.3rem;
+}
+
+/* ---- Responsive -------------------------------------------------------- */
+
+@media (max-width: 700px) {
+  .eye-stage { width: var(--eye-size-mobile); height: var(--eye-size-mobile); }
+  .hud-corner-bl { left: 1.1rem; bottom: 1.6rem; }
+  .hud-corner-br { right: 1.1rem; bottom: 1.6rem; }
+  .hud-topbar { padding: 1rem 1.2rem 0; }
+  .hud-demo-panel { width: 200px; right: 0.5rem; top: 0.5rem; }
+}
+
+@media (min-width: 2200px) {
+  :root { --eye-size: min(58vh, 780px); }
+  .hud-brand { font-size: 1rem; }
+  .hud-status-text { font-size: 1.1rem; }
+}
+
+/* ---- Accessibility: reduced motion --------------------------------------
+   hud.js also checks matchMedia and reduces JS-driven animation, but the
+   CSS-only transitions/animations here are gated too, and no state
+   information depends solely on motion — color + the always-visible
+   status text carry state on their own. */
+
+@media (prefers-reduced-motion: reduce) {
+  .ring-error, .scan-sweep, .hud-status-dot,
+  .eye #ring-rotor-a circle, .eye #ring-rotor-b circle,
+  .eye #core, .eye .particles circle {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.hud-root.reduced-motion .ring-rotor-a,
+.hud-root.reduced-motion .ring-rotor-b,
+.hud-root.reduced-motion .particles {
+  animation: none !important;
+}

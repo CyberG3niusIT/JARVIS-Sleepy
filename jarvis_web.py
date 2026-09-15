@@ -191,6 +191,12 @@ class WebTTSProxy:
         self._announcement_queue: list[str] = []
         self._lock = threading.Lock()
         self._command_depth = 0  # >0 while processing user commands
+        # Optional hook: on_state_change(state: str). Wired to
+        # _broadcast_assistant_state() in on_startup() once `app` exists —
+        # every speak() (skills, reminders, alerts, LLM fallback) then
+        # brackets real audio with a 'speaking' / 'idle' assistant_state
+        # event for the /hud view, with no per-call-site plumbing needed.
+        self.on_state_change = None
 
     def speak(self, text, normalize=True):
         """Speak via TTS and optionally queue as announcement banner.
@@ -206,9 +212,18 @@ class WebTTSProxy:
                 self._announcement_queue.append(text)
         if self.hybrid and self.real_tts:
             threading.Thread(
-                target=self.real_tts.speak, args=(text, normalize), daemon=True
+                target=self._speak_and_notify, args=(text, normalize), daemon=True
             ).start()
         return True
+
+    def _speak_and_notify(self, text, normalize=True):
+        if self.on_state_change:
+            self.on_state_change('speaking')
+        try:
+            self.real_tts.speak(text, normalize)
+        finally:
+            if self.on_state_change:
+                self.on_state_change('idle')
 
     def get_pending_announcements(self) -> list[str]:
         with self._lock:
@@ -220,6 +235,43 @@ class WebTTSProxy:
         if self.real_tts:
             return getattr(self.real_tts, name)
         raise AttributeError(f"WebTTSProxy has no real TTS and no attribute '{name}'")
+
+
+# ---------------------------------------------------------------------------
+# Assistant state broadcast — feeds the /hud HUD view (and any other future
+# client) with the same "what is JARVIS doing right now" signal, over the
+# existing /ws connection. No new server/port/protocol: this reuses
+# app['ws_connections'] (already populated for targeted alert routing) and
+# just adds one more message type to the same JSON envelope every other
+# message type already uses. See docs/UI_INTEGRATION.md.
+# ---------------------------------------------------------------------------
+
+def _broadcast_assistant_state(app, state: str, **extra):
+    """Push an assistant_state event to every connected /ws client.
+
+    Also stores it on app['assistant_state'] so a client that connects
+    *between* state changes still gets the current state immediately
+    (see websocket_handler) instead of staying blank until the next event.
+    """
+    payload = {'type': 'assistant_state', 'state': state, 'timestamp': time.time()}
+    payload.update(extra)
+    app['assistant_state'] = payload
+    ws_conns = app.get('ws_connections')
+    if not ws_conns:
+        return
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        return
+    text = json.dumps(payload)
+    for ws_conn in list(ws_conns.keys()):
+        if not ws_conn.closed:
+            try:
+                asyncio.run_coroutine_threadsafe(ws_conn.send_str(text), loop)
+            except Exception:
+                pass
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -2296,16 +2348,21 @@ def _build_stats(match_info, llm, used_llm, t_start, t_match, t_end,
 # ---------------------------------------------------------------------------
 
 async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
-                               doc_buffer, content, msg_image_data):
+                               doc_buffer, content, msg_image_data, app=None):
     """Process a chat message as a background task.
 
     Running this outside the WS read loop allows the loop to continue
     receiving other message types (e.g. frame_response for mobile camera)
     while the LLM / tool pipeline executes.
+
+    `app` is optional (only used to broadcast assistant_state for the
+    /hud view) so existing callers/tests that don't pass it keep working.
     """
     logger.info("User: %s%s (client_type=%s client_id=%s)", content[:200],
                 " [+image]" if msg_image_data else "",
                 conn_ctx.client_type, conn_ctx.client_id)
+    if app is not None:
+        _broadcast_assistant_state(app, 'thinking')
     async with conn_ctx.cmd_lock:
         tts_proxy._command_depth += 1
         try:
@@ -2317,11 +2374,7 @@ async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
             # Speak LLM responses via TTS when voice is enabled
             # (skills already speak internally; this covers LLM fallback)
             if result.get('used_llm') and result['response'] and tts_proxy.hybrid and tts_proxy.real_tts:
-                threading.Thread(
-                    target=tts_proxy.real_tts.speak,
-                    args=(result['response'],),
-                    daemon=True,
-                ).start()
+                tts_proxy.speak(result['response'])
 
             # Check for structured health data from developer_tools
             health_data = _extract_health_data(components['skill_manager'])
@@ -2368,6 +2421,8 @@ async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
             })
         except Exception:
             logger.exception("Error processing command")
+            if app is not None:
+                _broadcast_assistant_state(app, 'error')
             try:
                 await ws.send_json({
                     'type': 'error',
@@ -2377,6 +2432,12 @@ async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
                 pass  # WS may have closed
         finally:
             tts_proxy._command_depth -= 1
+            # If voice is off, nothing else will ever announce 'idle' for
+            # this turn — WebTTSProxy._speak_and_notify() owns that
+            # transition whenever TTS actually runs (hybrid mode), and
+            # broadcasting it here too would race with that thread.
+            if app is not None and not tts_proxy.hybrid:
+                _broadcast_assistant_state(app, 'idle')
 
 
 # ---------------------------------------------------------------------------
@@ -2418,6 +2479,16 @@ async def websocket_handler(request):
     ws_conns = app.get('ws_connections')
     if ws_conns is not None:
         ws_conns[ws] = conn_ctx
+
+    # Send current assistant_state immediately — a client connecting
+    # between state changes (e.g. the /hud view opened mid-conversation)
+    # would otherwise show nothing until the next transition.
+    current_state = app.get('assistant_state')
+    if current_state:
+        try:
+            await ws.send_json(current_state)
+        except Exception:
+            pass
 
     # Send current session messages + session list on connect
     try:
@@ -2495,7 +2566,7 @@ async def websocket_handler(request):
                     # to receive frame_response messages during tool execution
                     asyncio.create_task(_handle_chat_message(
                         ws, conn_ctx, components, tts_proxy, config,
-                        doc_buffer, content, msg_image_data,
+                        doc_buffer, content, msg_image_data, app=app,
                     ))
 
                 elif msg_type == 'slash_command':
@@ -4684,6 +4755,18 @@ async def index_handler(request):
     return resp
 
 
+async def hud_handler(request):
+    """Serve hud.html — the fullscreen JARVIS-eye HUD view (/hud).
+
+    Shares auth, config and the /ws connection with the rest of the web
+    UI; see docs/UI_INTEGRATION.md for the event contract it consumes.
+    """
+    resp = web.FileResponse(Path(__file__).parent / 'web' / 'hud.html')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Content-Security-Policy'] = _CSP
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # Webcam streaming endpoints
 # ---------------------------------------------------------------------------
@@ -4923,6 +5006,7 @@ def create_app(config) -> web.Application:
     app.router.add_get('/api/webcam/status', webcam_status_handler)
     app.router.add_post('/api/generate-image', generate_image_handler)
     app.router.add_get('/api/gpu-status', gpu_status_handler)
+    app.router.add_get('/hud', hud_handler)
     app.router.add_get('/', index_handler)
     # Serve tool-generated images (screenshots, webcam, etc.)
     from core.tool_registry import get_images_dir
@@ -4944,6 +5028,9 @@ async def on_startup(app):
 
     tts_proxy = WebTTSProxy()
     app['tts_proxy'] = tts_proxy
+    # Wire assistant_state broadcasting for every speak() call (skills,
+    # reminders, alerts) — see WebTTSProxy._speak_and_notify().
+    tts_proxy.on_state_change = lambda state: _broadcast_assistant_state(app, state)
 
     logger.info("Initializing JARVIS components...")
     components = await asyncio.to_thread(init_components, config, tts_proxy)
@@ -4951,6 +5038,9 @@ async def on_startup(app):
     app['cmd_lock'] = asyncio.Lock()
     app['dashboard_clients'] = set()
     app['ws_connections'] = {}  # ws → conn_ctx, for targeted alert routing
+    app['assistant_state'] = {
+        'type': 'assistant_state', 'state': 'idle', 'timestamp': time.time(),
+    }
 
     # HTTP session for proxying webcam requests to voice service frame server
     app['http_session'] = _aiohttp_lib.ClientSession()
