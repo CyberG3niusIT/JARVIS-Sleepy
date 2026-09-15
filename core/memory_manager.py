@@ -67,6 +67,30 @@ class MemoryManager:
     })
     _NEGATION_WINDOW = 4  # tokens to look back
 
+    # ------------------------------------------------------------------
+    # Candidate vs. confirmed memory tiers (additive on top of the
+    # existing subject-based dedup/supersede mechanism below — see
+    # store_fact()/_find_similar_fact()).
+    #
+    # A fact starts as a "candidate" when it's below-threshold-confidence
+    # or not explicitly stated by the user (source != "explicit"). It
+    # isn't a separate table/status — is_candidate() just names the
+    # existing confidence semantics so callers (awareness surfacing,
+    # transparency responses) can ask "is this confirmed or just
+    # observed?" without re-deriving the threshold each time.
+    #
+    # Repeated evidence for the SAME candidate fact (exact content match
+    # on a later extraction) reinforces it — confidence grows and
+    # evidence_count increments — instead of silently no-op'ing or
+    # creating a duplicate row. Enough reinforcement naturally crosses
+    # CANDIDATE_CONFIDENCE_THRESHOLD and the fact stops being a
+    # candidate. This is the "promotion via repeated evidence" path;
+    # there's no separate promotion algorithm to keep in sync.
+    # ------------------------------------------------------------------
+    CANDIDATE_CONFIDENCE_THRESHOLD = 0.80
+    MAX_FACT_CONFIDENCE = 0.99
+    EVIDENCE_CONFIDENCE_STEP = 0.05
+
     EXPLICIT_PATTERNS = [
         # Preferences (positive)
         (re.compile(r"\b(?:i|I) (?:really )?(?:prefer|like|love|enjoy|always use|always go with)\s+(.+)", re.IGNORECASE), "preference"),
@@ -171,6 +195,16 @@ class MemoryManager:
                         deleted         INTEGER NOT NULL DEFAULT 0
                     )
                 """)
+
+                # Migration: evidence_count wasn't in the original schema.
+                # Idempotent — SQLite has no "ADD COLUMN IF NOT EXISTS".
+                try:
+                    conn.execute(
+                        "ALTER TABLE facts ADD COLUMN evidence_count "
+                        "INTEGER NOT NULL DEFAULT 1"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # column already exists
 
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(user_id, category)")
@@ -1301,16 +1335,28 @@ class MemoryManager:
     # ------------------------------------------------------------------
 
     def store_fact(self, fact: dict) -> Optional[str]:
-        """Store a new fact. Returns fact_id, or None if duplicate."""
+        """Store a new fact. Returns fact_id (existing, reinforced, or
+        new), or None only if there is truly nothing to do."""
         user_id = fact.get("user_id") or "primary_user"
-        subject = fact.get("subject", "")
+        # Normalize subject casing/whitespace at the point of both write
+        # and lookup — the exact-match branch of _find_similar_fact()
+        # does a case/whitespace-sensitive SQL comparison, so "Editor"
+        # and "editor " used to silently miss each other and fall
+        # through to the weaker substring-fuzzy path (or miss entirely).
+        subject = (fact.get("subject") or "").strip().lower()
         content = fact.get("content", "")
 
         # Check for duplicate/update
         existing = self._find_similar_fact(user_id, subject, content)
         if existing:
             if existing["content"].lower().strip() == content.lower().strip():
-                return None  # Exact duplicate, skip
+                # Exact duplicate of an existing fact: reinforce rather
+                # than silently no-op. Repeated observation of the same
+                # candidate is exactly the evidence that should grow its
+                # confidence over time (see CANDIDATE_CONFIDENCE_THRESHOLD
+                # docstring above) instead of being thrown away.
+                self._reinforce_fact(existing)
+                return existing["fact_id"]
             # Supersede old fact
             new_id = str(uuid.uuid4())
             self.update_fact(existing["fact_id"], superseded_by=new_id)
@@ -1345,6 +1391,36 @@ class MemoryManager:
                 conn.close()
 
         return new_id
+
+    def is_candidate(self, fact: dict) -> bool:
+        """A fact is a 'candidate' (system-observed, not yet a confirmed
+        long-term fact) if it's below the confidence threshold.
+
+        Deliberately confidence-only, not source-gated: an explicit
+        user statement starts above threshold (0.90) and is confirmed
+        immediately, while an inferred observation (0.70) starts as a
+        candidate — but can still be promoted purely through repeated
+        evidence (_reinforce_fact() raises confidence each time the same
+        fact is re-observed), matching "mehrfach bestätigtem Muster"
+        promotion without requiring the user to ever say it explicitly.
+        """
+        return fact.get("confidence", 0.0) < self.CANDIDATE_CONFIDENCE_THRESHOLD
+
+    def _reinforce_fact(self, existing: dict) -> None:
+        """Repeated evidence for an already-stored fact: bump its
+        confidence (capped) and evidence_count instead of inserting a
+        duplicate row or silently discarding the observation."""
+        new_confidence = min(
+            self.MAX_FACT_CONFIDENCE,
+            existing.get("confidence", 0.70) + self.EVIDENCE_CONFIDENCE_STEP,
+        )
+        new_evidence_count = (existing.get("evidence_count") or 1) + 1
+        self.update_fact(
+            existing["fact_id"],
+            confidence=new_confidence,
+            evidence_count=new_evidence_count,
+            last_referenced=time.time(),
+        )
 
     def get_facts(self, user_id: str = "primary_user", category: str = None,
                   limit: int = 50) -> list:
@@ -1409,7 +1485,8 @@ class MemoryManager:
             return False
 
         allowed_fields = {"category", "subject", "content", "confidence",
-                          "last_referenced", "times_referenced", "superseded_by", "deleted"}
+                          "last_referenced", "times_referenced", "superseded_by",
+                          "deleted", "evidence_count"}
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         if not updates:
             return False
