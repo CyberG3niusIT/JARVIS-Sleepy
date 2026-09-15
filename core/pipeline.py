@@ -329,13 +329,26 @@ class _ChatterboxAudioWriter:
     branch, left untouched.
     """
 
+    # A few sentences of read-ahead is enough to keep the pipeline full
+    # without letting a fast producer pile up unbounded PCM in RAM ahead
+    # of a slow/stuck consumer.
+    _QUEUE_MAXSIZE = 4
+    # How long submit()/finish() wait on a full queue before re-checking
+    # whether the writer has already stopped (so a dead consumer can't
+    # make the producer block forever handing off audio nobody will play).
+    _PUT_POLL_INTERVAL = 0.5
+
     def __init__(self, tts, logger):
         self.tts = tts
         self.logger = logger
-        self._queue: queue.Queue = queue.Queue()
+        self._queue: queue.Queue = queue.Queue(maxsize=self._QUEUE_MAXSIZE)
         self.aplay = None
         self.total_samples = 0
         self.error = None
+        # Set once the writer thread has exited (error or drained
+        # sentinel) — lets submit()/finish() give up on a full queue
+        # instead of blocking forever on a consumer that's gone.
+        self._stopped = threading.Event()
         self._thread = threading.Thread(
             target=self._run, daemon=True, name="chatterbox-audio-writer"
         )
@@ -343,15 +356,29 @@ class _ChatterboxAudioWriter:
     def start(self):
         self._thread.start()
 
-    def submit(self, pcm: bytes, sample_rate: int = None):
-        """Queue a PCM chunk for playback, in order.
+    def submit(self, pcm: bytes, sample_rate: int = None) -> bool:
+        """Queue a PCM chunk for playback, in order. Blocks (bounded) if
+        the writer is behind — real backpressure, not an unbounded
+        buffer. Returns False without enqueuing if the writer has
+        already stopped, so the caller (the producer loop) knows to stop
+        generating further chunks nobody will play, instead of blocking
+        forever trying to hand one off.
 
         sample_rate is the rate this specific chunk was generated at —
         it can differ chunk-to-chunk (e.g. a Piper fallback chunk mixed
         into an otherwise-Chatterbox stream); the writer resamples to
         whatever rate the aplay session was opened at.
         """
-        self._queue.put((pcm, sample_rate))
+        return self._put((pcm, sample_rate))
+
+    def _put(self, item) -> bool:
+        while not self._stopped.is_set():
+            try:
+                self._queue.put(item, timeout=self._PUT_POLL_INTERVAL)
+                return True
+            except queue.Full:
+                continue
+        return False
 
     def _run(self):
         tts = self.tts
@@ -383,6 +410,11 @@ class _ChatterboxAudioWriter:
         except Exception as e:
             self.error = self.error or str(e)
         finally:
+            # Unblock any submit()/finish() currently spinning on a full
+            # queue before this thread exits — must happen before
+            # closing stdin so there's no window where a caller is stuck
+            # retrying against a writer that will never drain again.
+            self._stopped.set()
             if self.aplay is not None:
                 try:
                     self.aplay.stdin.close()
@@ -392,8 +424,13 @@ class _ChatterboxAudioWriter:
     def finish_and_wait(self, timeout: float):
         """Signal end-of-stream, wait for the writer thread to close
         stdin, then wait for aplay to actually finish playing everything
-        already written. Returns (ok, total_samples, error)."""
-        self._queue.put(None)
+        already written. Returns (ok, total_samples, error).
+
+        Sentinel delivery uses the same bounded/stoppable _put() as
+        submit() — if the writer already died, there's no queue slot to
+        wait for and no point blocking on one.
+        """
+        self._put(None)
         self._thread.join(timeout=max(30, timeout))
 
         if self.aplay is None:
@@ -619,9 +656,9 @@ class StreamingAudioPipeline:
                             f"{time.time() - t0:.3f}s"
                         )
 
-                    writer.submit(pcm, sr)
+                    submitted = writer.submit(pcm, sr)
 
-                    if writer.error:
+                    if not submitted or writer.error:
                         # Writer already dead (e.g. aplay killed by an
                         # interrupt) — stop generating doomed chunks.
                         break

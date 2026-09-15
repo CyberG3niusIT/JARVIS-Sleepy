@@ -14,6 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 os.environ.setdefault("JARVIS_LOG_FILE_ONLY", "1")
 
+import queue as queue_module
+
 from core.pipeline import StreamingAudioPipeline, _ChatterboxAudioWriter
 
 
@@ -231,6 +233,150 @@ class TestInterruptDoesNotHang:
         # Must terminate (not hang) even though playback breaks partway.
         pipeline = _run_pipeline(tts, [f"s{i}" for i in range(5)], join_timeout=15.0)
         assert pipeline._error is not None
+
+
+class SlowFakeAplay(FakeAplay):
+    """FakeAplay whose stdin.write() blocks until released — simulates a
+    slow/stuck consumer draining the pipe in realtime, so tests can
+    observe real backpressure on a bounded queue."""
+
+    def __init__(self, release_event, writes_before_block=0):
+        super().__init__()
+        self._release_event = release_event
+        self._writes_before_block = writes_before_block
+        self._write_count = 0
+
+        class _Stdin:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def write(self, data):
+                outer = self._outer
+                outer._write_count += 1
+                if outer._write_count > outer._writes_before_block:
+                    outer._release_event.wait(timeout=5)
+                outer.written.extend(data)
+
+            def close(self):
+                self._outer.closed = True
+
+        self.stdin = _Stdin(self)
+
+
+class TestBoundedQueueBackpressure:
+    """core/pipeline.py's _ChatterboxAudioWriter — the task's explicit
+    concern: an unbounded internal queue.Queue() let a fast producer pile
+    up unlimited PCM in RAM ahead of a slow/stuck consumer. Verifies the
+    bounded queue actually blocks (real backpressure), never drops data,
+    keeps order, and can't be deadlocked by a dead consumer."""
+
+    def _make_writer(self, aplay_factory):
+        tts = FakeTTS()
+        tts._open_aplay = aplay_factory
+        logger = _NullLogger()
+        writer = _ChatterboxAudioWriter(tts, logger)
+        return tts, writer
+
+    def test_submit_blocks_when_queue_full_slow_consumer(self):
+        release = threading.Event()
+        # Block forever from the first write — writer never drains.
+        tts, writer = self._make_writer(lambda: SlowFakeAplay(release, writes_before_block=0))
+        writer.start()
+
+        submitted_count = {"n": 0}
+        stop = threading.Event()
+
+        def producer():
+            i = 0
+            while not stop.is_set() and i < 20:
+                if writer.submit(f"chunk{i}".encode(), 24000):
+                    submitted_count["n"] += 1
+                i += 1
+
+        t = threading.Thread(target=producer, daemon=True)
+        t.start()
+        time.sleep(0.3)
+        # Bounded: maxsize (4) + the 1 item already pulled by the writer
+        # thread for its blocked write = at most 5 successfully submitted
+        # while nothing drains. Must NOT have run away to 20.
+        stalled_count = submitted_count["n"]
+        assert 0 < stalled_count <= _ChatterboxAudioWriter._QUEUE_MAXSIZE + 1
+
+        release.set()
+        stop.set()
+        t.join(timeout=5)
+        writer.finish_and_wait(timeout=10)
+
+    def test_no_data_loss_under_backpressure(self):
+        release = threading.Event()
+        release.set()  # never actually blocks — just exercises the bounded path
+        tts, writer = self._make_writer(lambda: SlowFakeAplay(release, writes_before_block=0))
+        writer.start()
+
+        chunks = [bytes([i]) * 20 for i in range(10)]
+        for c in chunks:
+            assert writer.submit(c, 24000) is True
+
+        ok, total_samples, err = writer.finish_and_wait(timeout=10)
+        assert ok is True
+        assert err is None
+        assert total_samples == sum(len(c) for c in chunks) // 2
+
+    def test_order_preserved_under_backpressure(self):
+        release = threading.Event()
+        release.set()
+        tts, writer = self._make_writer(lambda: SlowFakeAplay(release, writes_before_block=0))
+        writer.start()
+
+        markers = [bytes([i]) * 10 for i in range(20)]
+        for m in markers:
+            writer.submit(m, 24000)
+
+        writer.finish_and_wait(timeout=10)
+        aplay = writer.aplay
+        assert bytes(aplay.written) == b"".join(markers)
+
+    def test_consumer_crash_does_not_deadlock_producer(self):
+        # Consumer "crashes" immediately: _open_aplay returns None, so
+        # the writer thread sets self.error and exits right away.
+        tts, writer = self._make_writer(lambda: None)
+        writer.start()
+
+        start = time.monotonic()
+        # First submit is consumed by the writer thread, which then
+        # fails to open aplay and stops — subsequent submits must not
+        # hang forever waiting for a queue slot that will never open up.
+        results = [writer.submit(f"x{i}".encode(), 24000) for i in range(10)]
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 5.0, "submit() blocked instead of detecting the dead writer"
+        assert False in results, "expected at least one submit() to report the writer stopped"
+
+        ok, _total, err = writer.finish_and_wait(timeout=5)
+        assert ok is False
+        assert err == "Failed to open audio device"
+
+    def test_finish_does_not_deadlock_on_full_queue(self):
+        # Writer never drains (blocked on first write); finish() must
+        # still return instead of hanging on a full queue forever, once
+        # the writer is force-stopped.
+        release = threading.Event()
+        tts, writer = self._make_writer(lambda: SlowFakeAplay(release, writes_before_block=0))
+        writer.start()
+
+        for i in range(_ChatterboxAudioWriter._QUEUE_MAXSIZE + 2):
+            writer.submit(f"x{i}".encode(), 24000)
+
+        # Simulate an external interrupt: force the writer to stop so
+        # finish_and_wait() (called from another thread) isn't stuck
+        # forever on a full queue with nobody home.
+        def releaser():
+            time.sleep(0.5)
+            release.set()
+
+        threading.Thread(target=releaser, daemon=True).start()
+        ok, _total, _err = writer.finish_and_wait(timeout=10)
+        assert ok is True
 
 
 class TestAckCacheRace:
