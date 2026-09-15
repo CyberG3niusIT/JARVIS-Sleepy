@@ -35,9 +35,55 @@ class TestThousandsGrouping:
 
     def test_short_english_style_decimal_not_grouped(self):
         # "3.5" only has one digit after the dot — not a 3-digit group,
-        # so it must fall through to normalize_decimals, not be silently
-        # dropped or mis-split by the thousands regex.
+        # so it must fall through to the decimal case, not be silently
+        # dropped or mis-split by the thousands grouping.
         assert "drei Komma fünf" in _norm("Version 3.5 ist neu.")
+
+
+class TestUnitBearingNumbersWithGrouping:
+    """A number with a unit (currency/percent/file-size/temperature) must
+    be captured as ONE token even when German-thousands-grouped — a
+    narrower per-unit regex used to only match the last 3-digit group,
+    e.g. "1.234,56 €" produced the garbage "1.zweihundertvierunddreißig
+    Komma fünf sechs Euro" (stray literal "1." left over)."""
+
+    def test_grouped_euro_symbol_suffix(self):
+        assert _norm("Das kostet 10.000 €.") == "Das kostet zehntausend Euro."
+
+    def test_grouped_percent(self):
+        assert _norm("Das sind 10.000 % mehr.") == "Das sind zehntausend Prozent mehr."
+
+    def test_grouped_file_size(self):
+        assert _norm("Die Datei ist 10.000 MB groß.") == "Die Datei ist zehntausend Megabyte groß."
+
+    def test_grouped_with_decimal_tail_euro(self):
+        result = _norm("Der Umsatz betrug 1.234,56 €.")
+        assert "1." not in result  # no stray leftover fragment
+        assert result == "Der Umsatz betrug eintausendzweihundertvierunddreißig Komma fünf sechs Euro."
+
+    def test_grouped_with_decimal_tail_file_size(self):
+        result = _norm("Datei: 1.234,5 MB.")
+        assert "1." not in result
+        assert "eintausendzweihundertvierunddreißig Komma fünf Megabyte" in result
+
+    def test_multi_group_million_euro(self):
+        assert _norm("Der Jackpot: 1.000.000 €.") == "Der Jackpot: eine Million Euro."
+
+    def test_plain_decimal_percent_unaffected(self):
+        assert _norm("3,5 % Zinsen.") == "drei Komma fünf Prozent Zinsen."
+
+    def test_negative_temperature(self):
+        assert _norm("Es sind -3,5°C draußen.") == "Es sind minus drei Komma fünf Grad Celsius draußen."
+
+    def test_ipv4_unaffected_by_grouping_change(self):
+        # IPv4 is normalized by its own earlier pass — must still win
+        # over the general grouped-number token.
+        result = _norm("Die IP ist 192.168.1.1.")
+        assert result == "Die IP ist eins neun zwei Punkt eins sechs acht Punkt eins Punkt eins."
+
+    def test_date_unaffected_by_grouping_change(self):
+        result = _norm("Der Termin ist am 24.09.2026.")
+        assert "vierundzwanzigste September zweitausendsechsundzwanzig" in result
 
 
 class TestTimeNormalization:

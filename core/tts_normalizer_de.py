@@ -87,6 +87,27 @@ class GermanTTSNormalizer:
         31: "einunddreißigste",
     }
 
+    # A "German-formatted number" token, in priority order:
+    #   1. Thousands-grouped integer, optional German decimal comma tail
+    #      ("10.000", "1.234.567", "1.234,56") — "." groups thousands,
+    #      "," is the decimal separator (the reverse of English).
+    #   2. Plain German decimal comma ("3,5") — no grouping dots.
+    #   3. English-style single decimal dot ("3.5", version numbers etc.)
+    #      as a fallback — NOT confused with case 1 because it requires
+    #      an exact 3-digit group per "." repetition, which "3.5" fails.
+    #   4. Plain integer ("42").
+    # Used by every unit-bearing normalizer (currency, percent,
+    # temperature, file size) AND the general bare-number pass, so a
+    # multi-group amount like "1.234,56 €" is captured as ONE token
+    # instead of a narrower regex only matching its last "234,56" part
+    # and leaving a stray "1." in the spoken output.
+    _NUMBER_TOKEN = (
+        r"\d{1,3}(?:\.\d{3})+(?:,\d+)?"
+        r"|\d+,\d+"
+        r"|\d+\.\d+"
+        r"|\d+"
+    )
+
     def __init__(self):
         self.normalizations: Dict[str, Callable] = {
             "markdown": self.normalize_markdown,
@@ -98,14 +119,11 @@ class GermanTTSNormalizer:
             "currency": self.normalize_currency,
             "percent": self.normalize_percent,
             "urls": self.normalize_urls,
-            # Must run before "decimals": German groups thousands with "."
-            # (10.000 = zehntausend) while English-style decimals use ".".
-            # Without this, normalize_decimals treats the grouping dot as a
-            # decimal point and reads "10.000" as "zehn Komma null null null".
-            "thousands": self.normalize_thousands,
-            "decimals": self.normalize_decimals,
-            "technical": self.normalize_technical_terms,
+            # General bare numbers (no unit) — runs after the unit-bearing
+            # normalizers above so they get first claim on their numbers;
+            # order relative to "technical" doesn't matter (letters only).
             "numbers": self.normalize_numbers,
+            "technical": self.normalize_technical_terms,
         }
 
     def normalize(self, text: str) -> str:
@@ -207,6 +225,23 @@ class GermanTTSNormalizer:
         )
 
         return f"{whole_words} Komma {frac_words}"
+
+    def _german_number_to_words(self, raw: str) -> str:
+        """Convert a _NUMBER_TOKEN match to German words.
+
+        Handles the thousands-grouped case (optionally with a decimal
+        comma tail) itself; delegates the plain-decimal and plain-integer
+        cases to decimal_to_words, which already treats "," and a
+        fallback "." interchangeably as the decimal separator.
+        """
+        if re.match(r"^-?\d{1,3}(?:\.\d{3})+", raw):
+            if "," in raw:
+                int_part, frac_part = raw.split(",", 1)
+                whole_words = self.number_to_words(int(int_part.replace(".", "")))
+                frac_words = " ".join(self.ONES[int(d)] for d in frac_part)
+                return f"{whole_words} Komma {frac_words}"
+            return self.number_to_words(int(raw.replace(".", "")))
+        return self.decimal_to_words(raw)
 
     # ---------------------------------------------------------
     # Formatierungen
@@ -321,7 +356,7 @@ class GermanTTSNormalizer:
     def normalize_temperatures(self, text: str) -> str:
 
         def repl(match):
-            value = self.decimal_to_words(match.group(1))
+            value = self._german_number_to_words(match.group(1))
             unit = match.group(2).upper()
 
             name = (
@@ -333,7 +368,7 @@ class GermanTTSNormalizer:
             return f"{value} Grad {name}"
 
         return re.sub(
-            r"(-?\d+(?:[.,]\d+)?)\s*°?\s*([CFcf])\b",
+            rf"(-?(?:{self._NUMBER_TOKEN}))\s*°?\s*([CFcf])\b",
             repl,
             text,
         )
@@ -348,12 +383,12 @@ class GermanTTSNormalizer:
         }
 
         def repl(match):
-            value = self.decimal_to_words(match.group(1))
+            value = self._german_number_to_words(match.group(1))
             unit = units[match.group(2).upper()]
             return f"{value} {unit}"
 
         return re.sub(
-            r"\b(\d+(?:[.,]\d+)?)\s*(KB|MB|GB|TB|PB)\b",
+            rf"\b({self._NUMBER_TOKEN})\s*(KB|MB|GB|TB|PB)\b",
             repl,
             text,
             flags=re.IGNORECASE,
@@ -363,36 +398,36 @@ class GermanTTSNormalizer:
 
         def euro_prefix(match):
             return (
-                self.decimal_to_words(match.group(1))
+                self._german_number_to_words(match.group(1))
                 + " Euro"
             )
 
         def euro_suffix(match):
             return (
-                self.decimal_to_words(match.group(1))
+                self._german_number_to_words(match.group(1))
                 + " Euro"
             )
 
         def dollar(match):
             return (
-                self.decimal_to_words(match.group(1))
+                self._german_number_to_words(match.group(1))
                 + " Dollar"
             )
 
         text = re.sub(
-            r"€\s*(\d+(?:[.,]\d+)?)",
+            rf"€\s*({self._NUMBER_TOKEN})",
             euro_prefix,
             text,
         )
 
         text = re.sub(
-            r"(\d+(?:[.,]\d+)?)\s*€",
+            rf"({self._NUMBER_TOKEN})\s*€",
             euro_suffix,
             text,
         )
 
         text = re.sub(
-            r"\$\s*(\d+(?:[.,]\d+)?)",
+            rf"\$\s*({self._NUMBER_TOKEN})",
             dollar,
             text,
         )
@@ -403,12 +438,12 @@ class GermanTTSNormalizer:
 
         def repl(match):
             return (
-                self.decimal_to_words(match.group(1))
+                self._german_number_to_words(match.group(1))
                 + " Prozent"
             )
 
         return re.sub(
-            r"\b(\d+(?:[.,]\d+)?)\s*%",
+            rf"\b({self._NUMBER_TOKEN})\s*%",
             repl,
             text,
         )
@@ -420,31 +455,16 @@ class GermanTTSNormalizer:
             text,
         )
 
-    def normalize_thousands(self, text: str) -> str:
-        """German thousands grouping: 10.000 -> zehntausend, 1.234.567 -> ...
-
-        German uses "." to group thousands and "," as the decimal separator
-        (the reverse of English). Matches only proper 3-digit groupings so
-        it never eats a genuine decimal like "3.5" (which has fewer than
-        3 digits after the dot).
-        """
+    def normalize_numbers(self, text: str) -> str:
+        """Bare German numbers with no accompanying unit — thousands
+        grouping, decimal comma, English-style decimal-dot fallback, and
+        plain integers, all via _NUMBER_TOKEN (see its docstring)."""
 
         def repl(match):
-            return self.number_to_words(int(match.group(0).replace(".", "")))
+            return self._german_number_to_words(match.group(0))
 
         return re.sub(
-            r"(?<![\w.,])\d{1,3}(?:\.\d{3})+(?![\d,])",
-            repl,
-            text,
-        )
-
-    def normalize_decimals(self, text: str) -> str:
-
-        def repl(match):
-            return self.decimal_to_words(match.group(0))
-
-        return re.sub(
-            r"(?<![\w.])\-?\d+[.,]\d+(?![\w.])",
+            rf"(?<![\w.,])-?(?:{self._NUMBER_TOKEN})(?![\w.,])",
             repl,
             text,
         )
@@ -479,19 +499,6 @@ class GermanTTSNormalizer:
             )
 
         return text
-
-    def normalize_numbers(self, text: str) -> str:
-
-        def repl(match):
-            return self.number_to_words(
-                int(match.group(0))
-            )
-
-        return re.sub(
-            r"(?<![\w.,])\-?\d{1,9}(?![\w.,])",
-            repl,
-            text,
-        )
 
     def register_normalization(
         self,
