@@ -242,6 +242,12 @@ class TextToSpeech:
 
     # Chatterbox service
 
+    # How often to re-probe a server we last found unhealthy vs. healthy.
+    # Asymmetric on purpose: recover fast, don't hammer a healthy server.
+    _CHATTERBOX_HEALTH_RECHECK_OK = 5.0
+    _CHATTERBOX_HEALTH_RECHECK_DOWN = 1.0
+    _CHATTERBOX_HEALTH_TIMEOUT = 1.5
+
     def _init_chatterbox(self, config):
         self.chatterbox_endpoint = config.get(
             "tts.chatterbox_endpoint",
@@ -251,6 +257,12 @@ class TextToSpeech:
             config.get("tts.chatterbox_timeout", 60)
         )
         self.sample_rate = 24000
+
+        # Throttled health-check state (see _chatterbox_available). Start
+        # at 0 so the very first call always probes.
+        self._chatterbox_next_health_check = 0.0
+        self._chatterbox_last_health_ok = True
+
         self.logger.info(
             f"Chatterbox TTS service: {self.chatterbox_endpoint}"
         )
@@ -288,7 +300,79 @@ class TextToSpeech:
             return pcm
         return None
 
+    def _chatterbox_health_url(self) -> str:
+        base = self.chatterbox_endpoint
+        if base.endswith("/tts"):
+            base = base[: -len("/tts")]
+        return base + "/health"
+
+    def _chatterbox_available(self) -> bool:
+        """Cheap, throttled health probe.
+
+        A dead Chatterbox server used to only be discovered by letting a
+        real synthesis request run into the full chatterbox_timeout
+        (default 60s) before falling back to Piper. This probes /health
+        with a short timeout instead, and only re-probes periodically
+        (not on every single utterance) so a healthy server pays no
+        extra latency on the happy path.
+        """
+        now = time.monotonic()
+        if now < self._chatterbox_next_health_check:
+            return self._chatterbox_last_health_ok
+
+        ok = False
+        try:
+            with urllib.request.urlopen(
+                self._chatterbox_health_url(),
+                timeout=self._CHATTERBOX_HEALTH_TIMEOUT,
+            ) as response:
+                ok = response.status == 200
+        except Exception:
+            ok = False
+
+        self._chatterbox_last_health_ok = ok
+        self._chatterbox_next_health_check = now + (
+            self._CHATTERBOX_HEALTH_RECHECK_OK if ok
+            else self._CHATTERBOX_HEALTH_RECHECK_DOWN
+        )
+        if not ok:
+            self.logger.warning("Chatterbox health check failed — server unreachable")
+        return ok
+
+    def _chatterbox_voice_fingerprint(self) -> str:
+        """Fingerprint identifying the exact voice/config a cache entry was
+        generated under. tools/chatterbox_server.py is a separate process
+        that doesn't share this one's config.yaml — its generation params
+        (exaggeration, cfg_weight, tempo, ...) live in ITS environment, so
+        the client can't assume anything about them. It asks the server
+        directly via /config instead of guessing, and folds the answer
+        into the cache version string — changing any of those params (or
+        restarting the server with different env vars) naturally
+        invalidates old CAL-L0 audio instead of silently replaying it
+        under the new voice.
+
+        Falls back to a fixed placeholder if the server can't be reached
+        at init time (cache will simply regenerate once it can).
+        """
+        try:
+            url = self.chatterbox_endpoint.rsplit("/tts", 1)[0] + "/config"
+            with urllib.request.urlopen(url, timeout=3) as response:
+                cfg = json.loads(response.read())
+            import hashlib
+            digest = hashlib.sha256(
+                json.dumps(cfg, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:12]
+            return digest
+        except Exception as e:
+            self.logger.warning(
+                f"Could not fetch Chatterbox /config for cache fingerprint: {e}"
+            )
+            return "unknown"
+
     def _speak_chatterbox(self, text: str) -> bool:
+        if not self._chatterbox_available():
+            return False
+
         try:
             payload = json.dumps({"text": text}).encode("utf-8")
             request = urllib.request.Request(
@@ -348,9 +432,13 @@ class TextToSpeech:
         Used by StreamingAudioPipeline for gapless multi-sentence playback —
         unlike _speak_chatterbox this does not play the audio itself, it
         just synthesizes so the caller can write raw PCM to a persistent
-        aplay pipe. Returns (None, None) on failure so a single bad chunk
-        in a multi-sentence stream doesn't abort the rest of the response.
+        aplay pipe. Returns (None, None) on failure — a down server or a
+        single bad chunk must not silently drop that sentence; the caller
+        (StreamingAudioPipeline) falls back to Piper for that one chunk.
         """
+        if not self._chatterbox_available():
+            return None, None
+
         try:
             payload = json.dumps({"text": text}).encode("utf-8")
             request = urllib.request.Request(
@@ -377,23 +465,68 @@ class TextToSpeech:
             self.logger.error(f"Chatterbox generate failed: {e}")
             return None, None
 
+    def _resample_pcm(self, pcm_bytes: bytes, src_rate: int, dst_rate: int) -> bytes:
+        """Resample 16-bit mono PCM via ffmpeg.
+
+        Needed when a per-chunk fallback engine's native sample rate
+        differs from the rate StreamingAudioPipeline already fixed for
+        the open aplay session (set by whichever engine produced the
+        first chunk) — writing raw PCM at the wrong rate into an aplay
+        process opened with a fixed -r plays it pitch-/speed-shifted.
+        Best-effort: returns the original bytes if resampling fails, so a
+        chunk is never dropped over a resample error (audible glitch
+        beats silence).
+        """
+        if src_rate == dst_rate or not pcm_bytes:
+            return pcm_bytes
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-f", "s16le", "-ac", "1", "-ar", str(src_rate), "-i", "pipe:0",
+                    "-f", "s16le", "-ac", "1", "-ar", str(dst_rate), "pipe:1",
+                ],
+                input=pcm_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=True,
+            )
+            return result.stdout
+        except Exception as e:
+            self.logger.error(f"PCM resample failed ({src_rate}->{dst_rate}Hz): {e}")
+            return pcm_bytes
+
     # ── Piper fallback ─────────────────────────────────────────────────
 
+    def _ensure_piper_fallback_ready(self) -> bool:
+        """Lazily initialize Piper as a fallback engine, once.
+
+        _init_piper() sets self.sample_rate as a side effect (correct
+        when Piper is the *primary* engine) — here it's just the
+        fallback, so the primary engine's rate is saved/restored around
+        it and Piper's own rate is kept separately in
+        self._piper_sample_rate for callers that need it explicitly.
+        """
+        if self._piper_ready:
+            return True
+        try:
+            self.logger.warning("Initializing Piper fallback...")
+            primary_rate = self.sample_rate
+            self._init_piper(self.config)
+            self._piper_sample_rate = self.sample_rate
+            self.sample_rate = primary_rate
+            self._piper_ready = True
+            return True
+        except Exception as e:
+            self.logger.error(f"Piper fallback init failed: {e}")
+            return False
+
     def _fallback_to_piper(self, text: str) -> bool:
-        """Attempt Piper TTS when Kokoro fails. Lazy-inits Piper on first call."""
-        if not self._piper_ready:
-            try:
-                self.logger.warning("Primary TTS failed - initializing Piper fallback...")
-                kokoro_rate = self.sample_rate  # Save Kokoro's rate
-                self._init_piper(self.config)
-                self._piper_ready = True
-                # Restore Kokoro sample rate as primary (Piper uses its own
-                # rate internally via _speak_piper's subprocess pipeline)
-                self._piper_sample_rate = self.sample_rate
-                self.sample_rate = kokoro_rate
-            except Exception as e:
-                self.logger.error(f"Piper fallback init failed: {e}")
-                return False
+        """Attempt Piper TTS when the primary engine fails (blocking, plays
+        the audio itself). Used by speak()'s single-shot path."""
+        if not self._ensure_piper_fallback_ready():
+            return False
 
         self.logger.warning("Primary TTS failed - falling back to Piper")
         # _speak_piper opens its own aplay with the correct rate
@@ -403,6 +536,53 @@ class TextToSpeech:
             return self._speak_piper(text)
         finally:
             self.sample_rate = saved_rate
+
+    def _piper_generate_pcm(self, text: str):
+        """Generate raw PCM via Piper without playing it — the per-chunk
+        fallback inside StreamingAudioPipeline. Returns (pcm, sample_rate)
+        or (None, None) on failure, so a Chatterbox chunk failure can
+        still be spoken instead of silently dropped from the response.
+        """
+        if not self._ensure_piper_fallback_ready():
+            return None, None
+
+        try:
+            piper_cmd = [
+                self.piper_bin,
+                "-m", self.model_path,
+                "-c", self.config_path,
+                "--length-scale", str(self.length_scale),
+                "--noise-scale", str(self.noise_scale),
+                "--noise-w-scale", str(self.noise_w_scale),
+                "--sentence-silence", str(self.sentence_silence),
+                "--output-raw",
+            ]
+            piper = subprocess.Popen(
+                piper_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self._track_proc(piper)
+            try:
+                pcm, err = piper.communicate(
+                    input=text.encode("utf-8"), timeout=15
+                )
+            finally:
+                self._untrack_proc(piper)
+
+            if piper.returncode != 0:
+                self.logger.error(
+                    "Piper fallback error (code %d): %s",
+                    piper.returncode, err.decode(errors="replace"),
+                )
+                return None, None
+
+            return pcm, self._piper_sample_rate
+
+        except Exception as e:
+            self.logger.error(f"Piper PCM fallback failed: {e}")
+            return None, None
 
     # ── Shared speak interface ─────────────────────────────────────────
 
@@ -492,18 +672,30 @@ class TextToSpeech:
     # ── Acknowledgment cache ─────────────────────────────────────────
 
     def _build_ack_cache(self):
-        """Pre-synthesize short phrases as raw PCM for instant playback."""
+        """Pre-synthesize short phrases as raw PCM for instant playback.
+
+        Builds into a local dict and publishes it with a single atomic
+        reference swap at the end (self._ack_cache = new_cache), rather
+        than mutating self._ack_cache in place. For Chatterbox this runs
+        in a background thread while speak_ack() may concurrently read
+        the cache from the main thread — incremental mutation risked a
+        "dict changed size during iteration" crash if a read landed
+        mid-build; a full dict is either fully old or fully new, never
+        half-built, so no lock is needed.
+        """
         from core import persona
         tagged_phrases = persona.pool_tagged("ack_cache")
+        new_cache: Dict[str, tuple[bytes, str]] = {}
         t0 = time.time()
         for phrase, style in tagged_phrases:
             try:
                 pcm = self._synthesize_short_pcm(phrase)
                 if pcm:
-                    self._ack_cache[phrase] = (pcm, style)
+                    new_cache[phrase] = (pcm, style)
             except Exception as e:
                 self.logger.warning(f"Failed to cache ack phrase '{phrase}': {e}")
 
+        self._ack_cache = new_cache
         elapsed = time.time() - t0
         self.logger.info(
             f"Ack cache: {len(self._ack_cache)} phrases pre-synthesized in {elapsed:.1f}s"
@@ -706,6 +898,37 @@ class TextToSpeech:
     # Primary honorifics to pre-generate at startup
     _CAL_L0_PRIMARY_HONORIFICS = ["sir", "ma'am"]
 
+    # Bump when the cache's on-disk format or the fingerprinting scheme
+    # itself changes (not for ordinary voice-parameter tweaks — those are
+    # already covered by _cache_voice_version()'s fingerprint).
+    _CAL_L0_SCHEMA_VERSION = "6"
+
+    def _cache_voice_version(self) -> str:
+        """Deterministic cache-version string identifying engine + voice.
+
+        Any change that alters what the cached audio actually sounds like
+        (switching tts.engine, changing Kokoro's voice blend, restarting
+        Chatterbox with different exaggeration/cfg_weight/tempo/etc.) must
+        invalidate old cache entries instead of silently replaying stale
+        audio under the new configuration. Folds an engine-specific
+        fingerprint into the version string TTSCache already uses to
+        detect and purge stale entries.
+        """
+        if self.engine == "chatterbox":
+            fingerprint = self._chatterbox_voice_fingerprint()
+        elif self.engine == "kokoro":
+            import hashlib
+            raw = json.dumps({
+                "voice_a": self.config.get("tts.kokoro_voice_a", "bm_fable"),
+                "voice_b": self.config.get("tts.kokoro_voice_b", "bm_george"),
+                "blend_ratio": self.config.get("tts.kokoro_blend_ratio", 0.5),
+                "speed": self.config.get("tts.kokoro_speed", 1.0),
+            }, sort_keys=True)
+            fingerprint = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+        else:
+            fingerprint = "n/a"
+        return f"{self._CAL_L0_SCHEMA_VERSION}-{self.engine}-{fingerprint}"
+
     def _build_cal_l0_cache(self):
         """Generate any missing CAL-L0 response audio via TTSCache.
 
@@ -716,14 +939,11 @@ class TextToSpeech:
         """
         self._cal_l0_generating = True
         _t0 = time.time()
-        # Version is engine-tagged: switching tts.engine must invalidate
-        # cached audio generated by a different engine/voice rather than
-        # silently playing the wrong voice back.
         generated = self._tts_cache.generate_missing(
             templates=self._CAL_L0_TEMPLATES,
             honorifics=self._CAL_L0_PRIMARY_HONORIFICS,
             synthesize_fn=self._synthesize_short_pcm,
-            version=f"5-{self.engine}",
+            version=self._cache_voice_version(),
             throttle_sleep=0.05,
         )
         self._cal_l0_generating = False
@@ -846,7 +1066,14 @@ class TextToSpeech:
         Returns True if played, False if cache empty or playback failed.
         Call this when the LLM is slow to respond to fill the silence.
         """
-        if not self._ack_cache:
+        # Snapshot the reference once. _build_ack_cache() (possibly running
+        # concurrently in a background thread for Chatterbox) publishes a
+        # brand-new dict via a single atomic assignment rather than
+        # mutating the existing one — as long as we read self._ack_cache
+        # exactly once and use that local `cache` throughout, we either
+        # see the fully-old or fully-new dict, never a half-built one.
+        cache = self._ack_cache
+        if not cache:
             return False
 
         with self._tts_lock:
@@ -858,18 +1085,18 @@ class TextToSpeech:
 
             # Filter candidates by style hint (with neutral fallback)
             if style_hint:
-                candidates = [p for p, (_, s) in self._ack_cache.items()
+                candidates = [p for p, (_, s) in cache.items()
                               if s == style_hint]
                 if not candidates:
-                    candidates = [p for p, (_, s) in self._ack_cache.items()
+                    candidates = [p for p, (_, s) in cache.items()
                                   if s == "neutral"]
             else:
-                candidates = list(self._ack_cache.keys())
+                candidates = list(cache.keys())
             if not candidates:
-                candidates = list(self._ack_cache.keys())
+                candidates = list(cache.keys())
 
             phrase = random.choice(candidates)
-            pcm, style = self._ack_cache[phrase]
+            pcm, style = cache[phrase]
             self.logger.info(f"Ack: '{phrase}' (style={style})")
 
             try:
@@ -1308,3 +1535,209 @@ def speak(text: str, config=None) -> bool:
 
     tts = TextToSpeech(config)
     return tts.speak(text)
+
+
+# BEGIN JARVIS DE-DE CAL-L0 TEMPLATES
+# _CAL_L0_TEMPLATES above is upstream (English) content synced from
+# InterGenJLU/jarvis — see docs/ARCHITECTURE.md for why German content
+# lives in an override patch here rather than edited in place: it keeps
+# `git pull upstream` conflict-free instead of fighting a 130-line literal
+# diff on every sync. Same pattern as core/responses.py's
+# `ResponseLibrary.__init__ = _response_init_de`.
+#
+# JARVIS speaks German (system.language: de-DE) — Sleepy never used the
+# English list above at runtime once this patch is applied, it just
+# never got translated when Chatterbox/CAL-L0 landed. Deliberately
+# avoids "Sehr wohl, Sir" / "Zu Diensten, Sir" stiff-butler calques —
+# natural German persona instead (see core/persona.py's own German
+# override for the established voice/tone this matches).
+TextToSpeech._CAL_L0_TEMPLATES = [
+    # Begrüßungen — muss zu den presence-Pools in persona.py passen
+    "Guten Morgen, {honorific}.",
+    "Morgen, {honorific}.",
+    "Guten Morgen, {honorific}. Ich hoffe, Sie haben gut geschlafen.",
+    "Morgen, {honorific}. Ein neuer Tag, eine neue Gelegenheit.",
+    "Schön, dass Sie wach sind, {honorific}.",
+    "Guten Morgen, {honorific}, hoffentlich ist der Kaffee stark genug.",
+    "Guten Tag, {honorific}.",
+    "Tag, {honorific}.",
+    "Guten Tag, {honorific}, ich hoffe, der Tag verläuft gut für Sie.",
+    "Tag, {honorific}. Bisher produktiv, hoffe ich.",
+    "Guten Tag, {honorific}, schön, Sie zu sehen.",
+    "Tag, {honorific}, was kann ich für Sie tun?",
+    "Guten Abend, {honorific}.",
+    "Abend, {honorific}.",
+    "Guten Abend, {honorific}. Ausklingen lassen, oder geht's erst los?",
+    "Abend, {honorific}. Ich hoffe, der Tag war gut.",
+    "Guten Abend, {honorific}, schön, dass Sie wieder da sind.",
+    "Abend, {honorific}, was kann ich für Sie tun?",
+    "Guten Abend, {honorific}. Ich habe mich schon gefragt, ob Sie mich vergessen haben.",
+    # Rückkehr-Begrüßungen
+    "Willkommen zurück, {honorific}.",
+    "Da sind Sie ja, {honorific}. Schön, Sie zu sehen.",
+    "Willkommen zurück, {honorific}. Ich habe hier alles am Laufen gehalten.",
+    "Ah, {honorific}, willkommen zurück.",
+    "Schön, Sie wiederzusehen, {honorific}.",
+    "Willkommen zurück, {honorific}, mir hat die Unterhaltung gefehlt.",
+    "Da ist er ja. Willkommen zurück, {honorific}.",
+    # Rückkehr mit offenen Erinnerungen
+    "Willkommen zurück, {honorific}. Es ist einiges liegen geblieben, soll ich es durchgehen?",
+    "Da sind Sie ja, {honorific}. Ich habe ein paar Erinnerungen für Sie zurückgehalten, möchten Sie sie hören?",
+    "Willkommen zurück, {honorific}, es gibt ein paar offene Erinnerungen. Soll ich sie durchgehen?",
+    "Ah, {honorific}, willkommen zurück. Ein paar Dinge für Sie, wann immer Sie bereit sind.",
+    "Willkommen zurück, {honorific}. Ich habe ein paar Punkte für Sie aufgehoben.",
+    # Spätabends
+    "Sie sind wohl noch spät unterwegs, wie ich sehe.",
+    "Immer noch dabei, {honorific}? Respekt für den Einsatz.",
+    "Abend, {honorific}. Ich sollte erwähnen, dass es schon reichlich spät ist.",
+    # Allgemeine Begrüßungen
+    "Hallo, {honorific}.",
+    "Ich bin da, {honorific}.",
+    # Minimale Begrüßungen
+    "Wie kann ich helfen, {honorific}?",
+    "Ich bin bereit, {honorific}.",
+    "Ich höre zu, {honorific}.",
+    "Was brauchen Sie, {honorific}?",
+    "Legen Sie los, {honorific}.",
+    # Verabschiedungen
+    "Einen guten Morgen noch, {honorific}.",
+    "Bis zum nächsten Mal, {honorific}.",
+    "Passen Sie auf sich auf, {honorific}. Ich bin da, wenn Sie mich brauchen.",
+    "Viel Erfolg da draußen, {honorific}.",
+    "Ich halte hier die Stellung, {honorific}.",
+    "Einen schönen Tag noch, {honorific}.",
+    "Passen Sie auf sich auf, {honorific}.",
+    "Ich bin da, wenn Sie mich brauchen, {honorific}.",
+    "Einen produktiven Nachmittag noch, {honorific}.",
+    "Melden Sie sich mal wieder, {honorific}.",
+    "Einen schönen Abend noch, {honorific}.",
+    "Gute Nacht, {honorific}.",
+    "Schlafen Sie gut, {honorific}.",
+    "Einen erholsamen Abend noch, {honorific}.",
+    "Bis morgen, {honorific}. Gönnen Sie sich etwas Ruhe.",
+    "Gute Nacht, {honorific}. Ich behalte alles im Blick.",
+    # Danke
+    "Gern geschehen, {honorific}.",
+    "Sehr gerne, {honorific}.",
+    "Natürlich, {honorific}.",
+    "Gerne geholfen, {honorific}.",
+    "Jederzeit, {honorific}.",
+    "Kein Problem, {honorific}.",
+    "Immer gerne, {honorific}.",
+    "Gerne geschehen.",
+    "Dafür bin ich schließlich da, {honorific}.",
+    "Keine Ursache.",
+    "Sehr gerne geholfen, {honorific}.",
+    "Kein Grund, das zu erwähnen, {honorific}.",
+    "Das ist mein Job, {honorific}.",
+    "Sehr gerne geholfen.",
+    "Alles Teil des Service, {honorific}.",
+    # Bestätigungen
+    "In der Tat, {honorific}.",
+    "Ganz genau.",
+    "Genau so, {honorific}.",
+    "Sehr gut, {honorific}.",
+    "Verstanden.",
+    "Notiert, {honorific}.",
+    "Absolut, {honorific}.",
+    "Ganz Ihrer Meinung, {honorific}.",
+    "So soll es sein, {honorific}.",
+    # Befindlichkeiten
+    "Alle Systeme laufen, {honorific}.",
+    "Funktioniert innerhalb der normalen Parameter.",
+    "Sehr gut, danke der Nachfrage.",
+    "Läuft wie immer auf voller Leistung.",
+    "Alle Systeme im grünen Bereich, {honorific}.",
+    "Läuft einwandfrei, {honorific}. Keine Beschwerden.",
+    "Läuft rund, {honorific}.",
+    "Kann nicht klagen. Na ja, könnte ich schon, aber das wäre unnötig.",
+    "Alles in Ordnung, {honorific}.",
+    "Hier ist alles gut, {honorific}.",
+    "Ganz gut, alles in allem.",
+    "Bestens, {honorific}. Danke der Nachfrage.",
+    "Vollkommen zufriedenstellend, {honorific}. Mehr Begeisterung geht bei mir kaum.",
+    # Komplimente
+    "Danke, {honorific}. Ich gebe mein Bestes.",
+    "Sehr freundlich von Ihnen, {honorific}.",
+    "Das weiß ich zu schätzen, {honorific}.",
+    "Sie sind zu gütig, {honorific}.",
+    "Froh, dass ich helfen konnte, {honorific}.",
+    "Das bedeutet mir viel, {honorific}. Danke.",
+    "Freut mich, die Erwartungen zu erfüllen, {honorific}.",
+    "Ich versuche, es mir nicht zu Kopf steigen zu lassen, {honorific}.",
+    "Alles im Rahmen des Tagesgeschäfts, {honorific}.",
+    "Das freut mich wirklich zu hören.",
+    "Da werden meine Schaltkreise ganz rot, {honorific}.",
+    "Ich weiß die netten Worte zu schätzen, {honorific}.",
+    # Entschuldigungen
+    "Kein Grund, sich zu entschuldigen, {honorific}.",
+    "Alles gut, {honorific}.",
+    "Das ist völlig in Ordnung, {honorific}.",
+    "Kein Gedanke daran verschwenden, {honorific}.",
+    "Überhaupt kein Problem.",
+    "Kein Schaden entstanden, {honorific}.",
+    "So etwas passiert, {honorific}.",
+    "Bitte, machen Sie sich deswegen keine Gedanken.",
+    "Alles in Ordnung, {honorific}.",
+    "Nichts, wofür Sie sich entschuldigen müssten, {honorific}.",
+    # Positive Nachrichten des Nutzers
+    "Freut mich zu hören, {honorific}.",
+    "Ausgezeichnet, {honorific}.",
+    "Schön zu hören, {honorific}.",
+    "Wunderbar.",
+    "Freut mich für Sie, {honorific}.",
+    "Gut zu wissen, {honorific}.",
+    "Wunderbar, {honorific}.",
+    # Bitte-gern-geschehen
+    "Danke, {honorific}.",
+    "Sehr freundlich, {honorific}.",
+    "Weiß ich zu schätzen, {honorific}.",
+    "Sehr großzügig von Ihnen, {honorific}.",
+    "Sie sind zu gütig, {honorific}. Aber ich halte Sie nicht auf.",
+    # Keine Hilfe nötig
+    "Sehr gut, {honorific}. Ich bin da, falls Sie mich brauchen.",
+    "Verstanden, {honorific}. Ich bin da, wenn Sie mich brauchen.",
+    "Natürlich, {honorific}. Sagen Sie einfach Bescheid.",
+    "Sehr gut, {honorific}. Ich bin bereit.",
+    "Alles klar, {honorific}. Ich bin da, falls etwas ansteht.",
+    "Kein Problem, {honorific}. Sie wissen, wo Sie mich finden.",
+    "Verstanden. Ich nehme es Ihnen nicht persönlich, {honorific}.",
+    "Gut, {honorific}. Ich bin einfach da. Wartend. Geduldig.",
+    "Verstanden, {honorific}. Ich bin bereit.",
+    "Alles klar, {honorific}. Ich bin da, falls Sie etwas brauchen.",
+    "Gut dann, {honorific}. Sagen Sie einfach Bescheid.",
+    # Smalltalk
+    "Ich bin da, falls Sie Ablenkung brauchen, {honorific}.",
+    "Ich bin vielleicht nicht die unterhaltsamste Gesellschaft, aber verlässlich.",
+    "Ich könnte Pi auf tausend Stellen aufsagen, falls das hilft.",
+    "Darf ich vorschlagen, mich etwas zu fragen? Ich bin gerne nützlich.",
+    "Nun, {honorific}, ich stehe zu Ihrer Verfügung. Nennen Sie Ihre Zerstreuung.",
+    "Ich bin besser bei Aufgaben als bei Unterhaltung, aber ich gebe mein Bestes.",
+    "Wenn es hilft, ich finde Ihre Gesellschaft durchaus angenehm.",
+    "Man sagt mir, ich hätte trockenen Humor. Ob das ein Kompliment ist, bleibt offen.",
+    "Ich bin da, {honorific}. Für das, was es wert ist.",
+    "Vielleicht kann ich mit etwas Produktivem helfen? Nur ein Gedanke.",
+    # Meta-Fragen
+    "Ich bin JARVIS — ein persönlicher Sprachassistent, hier zu Hause entwickelt. Wie kann ich helfen, {honorific}?",
+    "Ich bin Ihr persönlicher Assistent, {honorific}. Sprachgesteuert, lokal betrieben und zu Ihren Diensten.",
+    "JARVIS, {honorific}. Persönlicher Assistent. Ich kümmere mich um Wetter, Erinnerungen, Nachrichten, Systemaufgaben und einiges mehr.",
+    "Ich bin ein KI-Assistent, der auf lokaler Hardware läuft, {honorific}. Keine Cloud nötig.",
+    "Ich bin JARVIS. Ich wurde gebaut, um zu helfen, {honorific}, und das nehme ich ernst.",
+    "Persönlicher Assistent, {honorific}. Von Grund auf gebaut, läuft auf Ihrer Hardware, arbeitet für Sie.",
+    "Ich bin die Stimme im Raum, die tatsächlich zuhört, {honorific}. Was möchten Sie wissen?",
+    "JARVIS, zu Ihren Diensten. Ich erledige Aufgaben, beantworte Fragen und versuche dabei, nicht unausstehlich zu sein.",
+    # Was gibt's Neues
+    "Nicht viel, {honorific}. Bereit zu helfen.",
+    "Alles ruhig hier, {honorific}.",
+    "Ich bin bereit, {honorific}. Was brauchen Sie?",
+    "Ich behalte nur die Systeme im Blick, {honorific}. Wie immer.",
+    "Wie immer, {honorific}. Was kann ich für Sie tun?",
+    "Ich halte alles am Laufen, {honorific}.",
+    "Nichts Ungewöhnliches, {honorific}. Wie kann ich helfen?",
+    "Alle Systeme laufen rund. Was beschäftigt Sie?",
+    "Ich behalte alles im Blick, {honorific}. Was brauchen Sie?",
+    "Wie immer, {honorific}. Bereit, wenn Sie es sind.",
+    "Ach, Sie wissen schon. Daten verarbeiten, über das Dasein nachdenken. Das Übliche.",
+    "Ich warte hier gespannt auf Ihre Anweisungen, {honorific}.",
+]
+# END JARVIS DE-DE CAL-L0 TEMPLATES

@@ -130,6 +130,25 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if self.path == "/config":
+            # Lets the client (core/tts.py) fingerprint the exact voice
+            # config this server is running, without either side assuming
+            # anything about the other's environment variables. See
+            # TextToSpeech._chatterbox_voice_fingerprint().
+            body = json.dumps({
+                "language": LANGUAGE_ID,
+                "tempo": TEMPO,
+                "audio_prompt_path": AUDIO_PROMPT_PATH,
+                **DEFAULT_GEN_PARAMS,
+            }).encode()
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         self.send_error(404)
 
     def do_POST(self):

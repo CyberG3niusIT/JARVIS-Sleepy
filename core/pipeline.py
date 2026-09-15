@@ -14,6 +14,7 @@ Components:
 
 import queue
 import re
+import subprocess
 import threading
 import time
 import logging
@@ -308,11 +309,121 @@ class EventTTSProxy:
 # StreamingAudioPipeline — gapless multi-sentence TTS
 # ---------------------------------------------------------------------------
 
+class _ChatterboxAudioWriter:
+    """Dedicated consumer thread owning the persistent aplay process.
+
+    StreamingAudioPipeline's Chatterbox branch used to generate PCM for
+    a sentence and then write() it to aplay's stdin itself, in the same
+    thread that's about to go generate the next sentence. A single
+    aplay.stdin.write() can block on pipe backpressure until aplay has
+    drained enough of the pipe — meaning "generate sentence N+1 while
+    N plays" wasn't actually guaranteed, just usually true if generation
+    happened to outrun the write. Splitting writing into its own thread
+    makes the overlap structural: this thread only ever blocks on
+    aplay's pipe, the producer thread only ever blocks on Chatterbox's
+    HTTP call, and they run genuinely concurrently.
+
+    Kokoro doesn't need this: its generator already yields many small
+    sub-chunks per sentence, which are cheap to write and interleave with
+    generation for free — see StreamingAudioPipeline._run()'s kokoro
+    branch, left untouched.
+    """
+
+    def __init__(self, tts, logger):
+        self.tts = tts
+        self.logger = logger
+        self._queue: queue.Queue = queue.Queue()
+        self.aplay = None
+        self.total_samples = 0
+        self.error = None
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="chatterbox-audio-writer"
+        )
+
+    def start(self):
+        self._thread.start()
+
+    def submit(self, pcm: bytes, sample_rate: int = None):
+        """Queue a PCM chunk for playback, in order.
+
+        sample_rate is the rate this specific chunk was generated at —
+        it can differ chunk-to-chunk (e.g. a Piper fallback chunk mixed
+        into an otherwise-Chatterbox stream); the writer resamples to
+        whatever rate the aplay session was opened at.
+        """
+        self._queue.put((pcm, sample_rate))
+
+    def _run(self):
+        tts = self.tts
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None:  # sentinel from finish_and_wait()
+                    break
+                pcm, sr = item
+                if not pcm:
+                    continue
+
+                if self.aplay is None:
+                    if sr:
+                        tts.sample_rate = sr
+                    self.aplay = tts._open_aplay()
+                    if self.aplay is None:
+                        self.error = "Failed to open audio device"
+                        break
+                    tts._track_proc(self.aplay)
+                elif sr and sr != tts.sample_rate:
+                    pcm = tts._resample_pcm(pcm, sr, tts.sample_rate)
+
+                self.aplay.stdin.write(pcm)
+                self.total_samples += len(pcm) // 2  # 16-bit samples
+
+        except BrokenPipeError:
+            self.error = self.error or "aplay broken pipe"
+        except Exception as e:
+            self.error = self.error or str(e)
+        finally:
+            if self.aplay is not None:
+                try:
+                    self.aplay.stdin.close()
+                except Exception:
+                    pass
+
+    def finish_and_wait(self, timeout: float):
+        """Signal end-of-stream, wait for the writer thread to close
+        stdin, then wait for aplay to actually finish playing everything
+        already written. Returns (ok, total_samples, error)."""
+        self._queue.put(None)
+        self._thread.join(timeout=max(30, timeout))
+
+        if self.aplay is None:
+            return self.error is None, 0, self.error
+
+        try:
+            rc = self.aplay.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.logger.error("aplay timed out — killing")
+            self.aplay.kill()
+            self.aplay.wait()
+            self.tts._untrack_proc(self.aplay)
+            return False, self.total_samples, self.error or "aplay timed out"
+
+        self.tts._untrack_proc(self.aplay)
+        if rc != 0:
+            try:
+                err = self.aplay.stderr.read().decode(errors="replace").strip()
+            except Exception:
+                err = ""
+            return False, self.total_samples, self.error or f"aplay exited {rc}: {err}"
+
+        return True, self.total_samples, self.error
+
+
 class StreamingAudioPipeline:
     """Background audio pipeline for gapless multi-sentence TTS.
 
-    Accepts sentence text via put(), generates audio via Kokoro,
-    and streams PCM to a single persistent aplay process.
+    Accepts sentence text via put(), generates audio via Kokoro or
+    Chatterbox, and streams PCM to a single persistent aplay process.
     Eliminates inter-sentence gaps by overlapping generation with playback.
     """
 
@@ -353,26 +464,27 @@ class StreamingAudioPipeline:
         import numpy as np
 
         tts = self.tts
-        aplay = None
-        total_samples = 0
         t0 = time.time()
         first_chunk_logged = False
 
-        try:
-            with tts._tts_lock:
-                while True:
-                    text = self._text_queue.get()
-                    if text is None:
-                        break
+        if tts.engine == "kokoro":
+            aplay = None
+            total_samples = 0
 
-                    # Normalize
-                    if tts.normalization_enabled and tts.normalizer:
-                        text = tts.normalizer.normalize(text)
+            try:
+                with tts._tts_lock:
+                    while True:
+                        text = self._text_queue.get()
+                        if text is None:
+                            break
 
-                    if not text or not text.strip():
-                        continue
+                        # Normalize
+                        if tts.normalization_enabled and tts.normalizer:
+                            text = tts.normalizer.normalize(text)
 
-                    if tts.engine == "kokoro":
+                        if not text or not text.strip():
+                            continue
+
                         # Stream Kokoro sub-chunks directly to aplay
                         for gs, ps, audio in tts._kokoro_pipeline(
                             text, voice=tts._kokoro_voice,
@@ -402,96 +514,147 @@ class StreamingAudioPipeline:
                                     f"Kokoro first chunk in "
                                     f"{time.time() - t0:.3f}s"
                                 )
-                    else:
-                        # Chatterbox: one HTTP round-trip per sentence, then
-                        # write raw PCM to the same persistent aplay pipe.
-                        # Overlap comes from this thread generating sentence
-                        # N+1 while aplay is still draining sentence N from
-                        # its pipe buffer in realtime — no per-sentence
-                        # aplay teardown/reopen, so no inter-sentence gap.
-                        pcm, sr = tts._chatterbox_generate_pcm(text)
+
+                        if self._error:
+                            break
+
+                    # All sentences done — close aplay
+                    if aplay is not None:
+                        aplay.stdin.close()
+                        duration = total_samples / tts.sample_rate
+                        gen_time = time.time() - t0
+
+                        try:
+                            aplay_return = aplay.wait(
+                                timeout=max(15, duration + 5)
+                            )
+                        except subprocess.TimeoutExpired:
+                            self.logger.error("aplay timed out — killing")
+                            aplay.kill()
+                            aplay.wait()
+                            return
+
+                        if aplay_return != 0:
+                            aplay_err = aplay.stderr.read().decode().strip()
+                            self.logger.error(
+                                f"aplay error (code {aplay_return}): "
+                                f"{aplay_err}"
+                            )
+                        else:
+                            self.logger.info(
+                                f"kokoro streamed {duration:.1f}s audio in "
+                                f"{gen_time:.3f}s across "
+                                f"{self._total_chunks} chunks "
+                                f"(RTF: {duration/gen_time:.1f}x)"
+                            )
+
+            except BrokenPipeError:
+                if aplay:
+                    aplay_err = aplay.stderr.read().decode().strip()
+                    self.logger.error(f"aplay broken pipe: {aplay_err}")
+                    aplay.wait()
+                self._error = "aplay broken pipe"
+
+            except Exception as e:
+                self.logger.error(f"Streaming audio pipeline error: {e}")
+                import traceback
+                traceback.print_exc()
+                self._error = str(e)
+                if aplay and aplay.poll() is None:
+                    try:
+                        aplay.stdin.close()
+                    except Exception:
+                        pass
+                    aplay.kill()
+                    aplay.wait()
+
+            finally:
+                if aplay is not None:
+                    tts._untrack_proc(aplay)
+                self._done.set()
+            return
+
+        # ---- Chatterbox: producer (this thread) / consumer (writer) ----
+        # See _ChatterboxAudioWriter's docstring for why this is a
+        # separate thread rather than direct writes like the Kokoro path.
+        writer = _ChatterboxAudioWriter(tts, self.logger)
+        writer.start()
+
+        try:
+            with tts._tts_lock:
+                while True:
+                    text = self._text_queue.get()
+                    if text is None:
+                        break
+
+                    if tts.normalization_enabled and tts.normalizer:
+                        text = tts.normalizer.normalize(text)
+
+                    if not text or not text.strip():
+                        continue
+
+                    pcm, sr = tts._chatterbox_generate_pcm(text)
+                    if pcm is None:
+                        # Never silently drop a sentence: fall back to
+                        # Piper for just this chunk, then keep streaming —
+                        # later Chatterbox chunks in this same response
+                        # get a fresh shot (health-throttled, see
+                        # TextToSpeech._chatterbox_available()).
+                        self.logger.warning(
+                            "Chatterbox chunk failed, falling back to "
+                            "Piper for this sentence: %r", text[:60],
+                        )
+                        pcm, sr = tts._piper_generate_pcm(text)
                         if pcm is None:
-                            self.logger.warning(
-                                "Chatterbox: skipping unspeakable chunk: %r",
-                                text[:60],
+                            self.logger.error(
+                                "Piper fallback also failed — sentence "
+                                "lost: %r", text[:60],
                             )
                             continue
 
-                        if aplay is None:
-                            if sr:
-                                tts.sample_rate = sr
-                            aplay = tts._open_aplay()
-                            if aplay is None:
-                                self._error = "Failed to open audio device"
-                                break
-                            tts._track_proc(aplay)
+                    if not first_chunk_logged:
+                        first_chunk_logged = True
+                        self.logger.info(
+                            f"{tts.engine} first chunk in "
+                            f"{time.time() - t0:.3f}s"
+                        )
 
-                        aplay.stdin.write(pcm)
-                        total_samples += len(pcm) // 2  # 16-bit samples
+                    writer.submit(pcm, sr)
 
-                        if not first_chunk_logged:
-                            first_chunk_logged = True
-                            self.logger.info(
-                                f"Chatterbox first chunk in "
-                                f"{time.time() - t0:.3f}s"
-                            )
-
-                    if self._error:
+                    if writer.error:
+                        # Writer already dead (e.g. aplay killed by an
+                        # interrupt) — stop generating doomed chunks.
                         break
 
-                # All sentences done — close aplay
-                if aplay is not None:
-                    aplay.stdin.close()
-                    duration = total_samples / tts.sample_rate
-                    gen_time = time.time() - t0
-
-                    try:
-                        aplay_return = aplay.wait(
-                            timeout=max(15, duration + 5)
-                        )
-                    except subprocess.TimeoutExpired:
-                        self.logger.error("aplay timed out — killing")
-                        aplay.kill()
-                        aplay.wait()
-                        return
-
-                    if aplay_return != 0:
-                        aplay_err = aplay.stderr.read().decode().strip()
-                        self.logger.error(
-                            f"aplay error (code {aplay_return}): "
-                            f"{aplay_err}"
-                        )
-                    else:
-                        self.logger.info(
-                            f"{tts.engine} streamed {duration:.1f}s audio in "
-                            f"{gen_time:.3f}s across "
-                            f"{self._total_chunks} chunks "
-                            f"(RTF: {duration/gen_time:.1f}x)"
-                        )
-
-        except BrokenPipeError:
-            if aplay:
-                aplay_err = aplay.stderr.read().decode().strip()
-                self.logger.error(f"aplay broken pipe: {aplay_err}")
-                aplay.wait()
-            self._error = "aplay broken pipe"
+            # Audio duration isn't known until the writer reports back
+            # (unlike the Kokoro branch, which accumulates total_samples
+            # itself before its final aplay.wait). Use a generous fixed
+            # ceiling — real playback finishes in realtime long before it;
+            # this is only a safety net against a truly stuck aplay.
+            ok, total_samples, werr = writer.finish_and_wait(timeout=90.0)
+            if werr:
+                self._error = werr
+            elif ok:
+                duration = total_samples / tts.sample_rate if tts.sample_rate else 0
+                gen_time = time.time() - t0
+                self.logger.info(
+                    f"chatterbox streamed {duration:.1f}s audio in "
+                    f"{gen_time:.3f}s across {self._total_chunks} chunks "
+                    f"(RTF: {duration/gen_time:.1f}x)" if gen_time > 0 else
+                    f"chatterbox streamed {duration:.1f}s audio"
+                )
 
         except Exception as e:
             self.logger.error(f"Streaming audio pipeline error: {e}")
             import traceback
             traceback.print_exc()
             self._error = str(e)
-            if aplay and aplay.poll() is None:
-                try:
-                    aplay.stdin.close()
-                except Exception:
-                    pass
-                aplay.kill()
-                aplay.wait()
+            try:
+                writer.finish_and_wait(timeout=5)
+            except Exception:
+                pass
 
         finally:
-            if aplay is not None:
-                tts._untrack_proc(aplay)
             self._done.set()
 
 
