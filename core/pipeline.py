@@ -372,20 +372,54 @@ class StreamingAudioPipeline:
                     if not text or not text.strip():
                         continue
 
-                    # Stream Kokoro sub-chunks directly to aplay
-                    for gs, ps, audio in tts._kokoro_pipeline(
-                        text, voice=tts._kokoro_voice,
-                        speed=tts._kokoro_speed
-                    ):
-                        audio_np = np.asarray(audio)
-                        pcm = (audio_np * 32767).astype(
-                            np.int16
-                        ).tobytes()
+                    if tts.engine == "kokoro":
+                        # Stream Kokoro sub-chunks directly to aplay
+                        for gs, ps, audio in tts._kokoro_pipeline(
+                            text, voice=tts._kokoro_voice,
+                            speed=tts._kokoro_speed
+                        ):
+                            audio_np = np.asarray(audio)
+                            pcm = (audio_np * 32767).astype(
+                                np.int16
+                            ).tobytes()
 
-                        # Lazy-spawn aplay on first audio data
-                        # (not first sentence — gives PipeWire
-                        # Kokoro-generation time to release device)
+                            # Lazy-spawn aplay on first audio data
+                            # (not first sentence — gives PipeWire
+                            # Kokoro-generation time to release device)
+                            if aplay is None:
+                                aplay = tts._open_aplay()
+                                if aplay is None:
+                                    self._error = "Failed to open audio device"
+                                    break
+                                tts._track_proc(aplay)
+
+                            aplay.stdin.write(pcm)
+                            total_samples += len(audio_np)
+
+                            if not first_chunk_logged:
+                                first_chunk_logged = True
+                                self.logger.info(
+                                    f"Kokoro first chunk in "
+                                    f"{time.time() - t0:.3f}s"
+                                )
+                    else:
+                        # Chatterbox: one HTTP round-trip per sentence, then
+                        # write raw PCM to the same persistent aplay pipe.
+                        # Overlap comes from this thread generating sentence
+                        # N+1 while aplay is still draining sentence N from
+                        # its pipe buffer in realtime — no per-sentence
+                        # aplay teardown/reopen, so no inter-sentence gap.
+                        pcm, sr = tts._chatterbox_generate_pcm(text)
+                        if pcm is None:
+                            self.logger.warning(
+                                "Chatterbox: skipping unspeakable chunk: %r",
+                                text[:60],
+                            )
+                            continue
+
                         if aplay is None:
+                            if sr:
+                                tts.sample_rate = sr
                             aplay = tts._open_aplay()
                             if aplay is None:
                                 self._error = "Failed to open audio device"
@@ -393,12 +427,12 @@ class StreamingAudioPipeline:
                             tts._track_proc(aplay)
 
                         aplay.stdin.write(pcm)
-                        total_samples += len(audio_np)
+                        total_samples += len(pcm) // 2  # 16-bit samples
 
                         if not first_chunk_logged:
                             first_chunk_logged = True
                             self.logger.info(
-                                f"Kokoro first chunk in "
+                                f"Chatterbox first chunk in "
                                 f"{time.time() - t0:.3f}s"
                             )
 
@@ -429,7 +463,7 @@ class StreamingAudioPipeline:
                         )
                     else:
                         self.logger.info(
-                            f"Kokoro streamed {duration:.1f}s audio in "
+                            f"{tts.engine} streamed {duration:.1f}s audio in "
                             f"{gen_time:.3f}s across "
                             f"{self._total_chunks} chunks "
                             f"(RTF: {duration/gen_time:.1f}x)"
@@ -1213,8 +1247,10 @@ class Coordinator:
         ack_timer.daemon = True
         ack_timer.start()
 
-        # Gapless audio pipeline (Kokoro only; Piper falls back to blocking)
-        use_pipeline = (self.tts.engine == "kokoro")
+        # Gapless audio pipeline (Kokoro, Chatterbox — overlaps generation
+        # with playback on a persistent aplay pipe). Piper has no streaming
+        # API and falls back to per-sentence blocking speak_and_wait.
+        use_pipeline = self.tts.engine in ("kokoro", "chatterbox")
         audio_pipeline = None
 
         # Choose tool-aware or plain streaming

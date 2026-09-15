@@ -307,9 +307,15 @@ class PeopleManager:
         self._pronunciation_cache[name.lower()] = (pattern, pronunciation)
 
     def _register_tts_normalizer(self):
-        """Register the name substitution function with the TTS normalizer."""
+        """Register the name substitution function with the TTS normalizer.
+
+        Must register with tts_normalizer_de — that's the normalizer
+        core/tts.py actually uses for German speech. Registering with the
+        (unused) English tts_normalizer here silently discarded every
+        pronunciation override.
+        """
         try:
-            from core.tts_normalizer import get_normalizer
+            from core.tts_normalizer_de import get_normalizer
             normalizer = get_normalizer()
             normalizer.register_normalization("people_names", self._name_substitution)
             self.logger.debug("Registered people_names TTS normalizer")

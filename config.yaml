@@ -62,9 +62,17 @@ stt:
     max_new_tokens: 128
   # END QWEN3 ASR
 tts:
-  engine: chatterbox
+  engine: chatterbox                # active engine — see docs/ARCHITECTURE.md
   chatterbox_endpoint: http://127.0.0.1:8765/tts
   chatterbox_timeout: 60
+  # tools/chatterbox_server.py is a separate GPU process and does NOT read
+  # this file — its generation params (exaggeration, cfg_weight,
+  # temperature, repetition_penalty, min_p, top_p, tempo) are tuned via
+  # CHATTERBOX_* environment variables when launching that process (see
+  # its module docstring), and can be overridden per-request in the JSON
+  # body — the hook a future vocal-behavior layer would use.
+  normalization_enabled: true
+  # ── Inactive unless tts.engine is set to "kokoro" or "piper" ──────────
   # Kokoro settings
   kokoro_voice_a: bm_fable
   kokoro_voice_b: bm_george
@@ -74,7 +82,7 @@ tts:
   # Only add words Kokoro mispronounces. Test via WAV before committing.
   # Example: { "nginx": "ˈɛndʒɪnˌɛks" }
   kokoro_pronunciations: {}
-  # Piper settings (fallback)
+  # Piper settings (fallback engine when Chatterbox/Kokoro synthesis fails)
   model_path: /home/alex/jarvis-data/models/piper/jarvis-de-high/model.onnx
   config_path: /home/alex/jarvis-data/models/piper/jarvis-de-high/config.json
   piper_bin: /home/alex/jarvis-venv/bin/piper
@@ -82,7 +90,6 @@ tts:
   noise_scale: 0.667
   noise_w_scale: 0.8
   sentence_silence: 0.2
-  normalization_enabled: true
 wake_word:
   keyword: aura
   access_key_env: PORCUPINE_ACCESS_KEY

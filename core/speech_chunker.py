@@ -23,11 +23,18 @@ class SpeechChunker:
     _SENTENCE_END = re.compile(r'[.!?]\s')
 
     # Common abbreviations whose trailing period is NOT a sentence boundary.
-    # Lowercase, without the trailing dot.
+    # Lowercase, without the trailing dot. Includes German abbreviations
+    # (JARVIS speaks German — "z.B." or "usw." mid-sentence used to trigger
+    # a false chunk split, chopping prosody right where the priority is
+    # clean, natural speech).
     _ABBREVIATIONS = frozenset({
         'dr', 'mr', 'mrs', 'ms', 'jr', 'sr', 'st', 'vs', 'etc', 'prof',
         'gen', 'gov', 'sgt', 'cpl', 'pvt', 'lt', 'col', 'capt', 'cmdr',
         'adm', 'rev', 'approx', 'dept', 'est', 'inc', 'corp', 'ave',
+        # German
+        'z.b', 'bzw', 'usw', 'ca', 'evtl', 'bspw', 'ggf', 'inkl', 'exkl',
+        'u.a', 'd.h', 'u.u', 'u.ä', 'nr', 'str', 'geb', 'gest', 'zzgl',
+        'tel', 'jh', 'i.d.r', 'o.ä', 'u.v.m',
     })
 
     def __init__(self):

@@ -98,6 +98,11 @@ class GermanTTSNormalizer:
             "currency": self.normalize_currency,
             "percent": self.normalize_percent,
             "urls": self.normalize_urls,
+            # Must run before "decimals": German groups thousands with "."
+            # (10.000 = zehntausend) while English-style decimals use ".".
+            # Without this, normalize_decimals treats the grouping dot as a
+            # decimal point and reads "10.000" as "zehn Komma null null null".
+            "thousands": self.normalize_thousands,
             "decimals": self.normalize_decimals,
             "technical": self.normalize_technical_terms,
             "numbers": self.normalize_numbers,
@@ -282,8 +287,11 @@ class GermanTTSNormalizer:
 
             return result
 
+        # Swallow an already-present trailing "Uhr" so "14:30 Uhr" doesn't
+        # become "vierzehn Uhr dreißig Uhr" — the replacement already adds
+        # its own "Uhr".
         return re.sub(
-            r"\b([01]?\d|2[0-3]):([0-5]\d)\b",
+            r"\b([01]?\d|2[0-3]):([0-5]\d)\b(?:\s*Uhr\b)?",
             repl,
             text,
         )
@@ -409,6 +417,24 @@ class GermanTTSNormalizer:
         return re.sub(
             r"https?://(?:www\.)?([a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)+)",
             lambda m: m.group(1).replace(".", " Punkt "),
+            text,
+        )
+
+    def normalize_thousands(self, text: str) -> str:
+        """German thousands grouping: 10.000 -> zehntausend, 1.234.567 -> ...
+
+        German uses "." to group thousands and "," as the decimal separator
+        (the reverse of English). Matches only proper 3-digit groupings so
+        it never eats a genuine decimal like "3.5" (which has fewer than
+        3 digits after the dot).
+        """
+
+        def repl(match):
+            return self.number_to_words(int(match.group(0).replace(".", "")))
+
+        return re.sub(
+            r"(?<![\w.,])\d{1,3}(?:\.\d{3})+(?![\d,])",
+            repl,
             text,
         )
 
