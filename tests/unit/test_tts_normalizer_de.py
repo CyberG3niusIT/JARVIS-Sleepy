@@ -86,6 +86,76 @@ class TestUnitBearingNumbersWithGrouping:
         assert "vierundzwanzigste September zweitausendsechsundzwanzig" in result
 
 
+class TestNumberAtSentenceEnd:
+    """Critical bug found during the section-4 edge-case audit: a bare
+    number immediately followed by its own sentence-ending period (the
+    single most common way a number appears in a spoken response —
+    "Die Antwort ist 42.") was never normalized at all. The trailing
+    lookahead excluded '.'/',' generically to avoid grabbing a fragment
+    of a bigger number, but that protection is already provided by
+    _NUMBER_TOKEN's alternation and the leading lookbehind; excluding a
+    bare trailing period on top of that just made every sentence-final
+    number silently pass through unspoken."""
+
+    def test_plain_integer_before_period(self):
+        assert _norm("Das kostet 42.") == "Das kostet zweiundvierzig."
+
+    def test_grouped_thousands_before_period(self):
+        assert _norm("Das sind 10.000.") == "Das sind zehntausend."
+
+    def test_decimal_comma_before_period(self):
+        assert _norm("Es sind 3,5.") == "Es sind drei Komma fünf."
+
+    def test_large_number_before_period(self):
+        result = _norm("Die Zahl ist 12345678.")
+        assert "zwölf Millionen" in result
+
+    def test_letter_suffix_still_protected(self):
+        # A number directly glued to a letter must stay untouched — this
+        # protection must survive the trailing-lookahead fix.
+        assert _norm("Ein 3D Drucker.") == "Ein 3D Drucker."
+
+    def test_standalone_multidot_version_left_alone(self):
+        # Not part of the original bug report, but adjacent risk: a
+        # 2-dot version number must not be partially mangled into
+        # "drei Komma fünf.2" — better to leave it untouched entirely.
+        assert _norm("Firmware 3.5.2 ist neu.") == "Firmware 3.5.2 ist neu."
+
+    def test_version_glued_to_letter_untouched(self):
+        assert _norm("v3.5.2 ist neu.") == "v3.5.2 ist neu."
+
+
+class TestPortsAndPhoneNumbers:
+    """Ports and phone numbers must be read digit-by-digit, not as one
+    giant cardinal number — 'port 8080' as 'achttausendachtzig' is a
+    real, distinct mis-normalization from the thousands-grouping bug."""
+
+    def test_port_digit_by_digit(self):
+        assert _norm("port 8080") == "port acht null acht null"
+
+    def test_port_with_colon(self):
+        assert _norm("Port: 443") == "port vier vier drei"
+
+    def test_international_phone_number(self):
+        result = _norm("Rufen Sie +49 176 12345678 an.")
+        assert "plus vier neun eins sieben sechs" in result
+        assert "achttausend" not in result  # not read as a cardinal number
+
+    def test_domestic_phone_number_leading_zero(self):
+        result = _norm("Die Nummer ist 0176 12345678.")
+        assert result.startswith("Die Nummer ist null eins sieben sechs")
+
+    def test_ordinary_large_quantity_not_treated_as_phone(self):
+        # No leading '+' or '0' — must stay a normal cardinal number.
+        assert _norm("Die Stadt hat 100000 Einwohner.") == "Die Stadt hat einhunderttausend Einwohner."
+
+    def test_short_leading_zero_number_not_treated_as_phone(self):
+        # Below the 7-digit floor — too short to plausibly be a phone
+        # number, must fall through to ordinary number handling.
+        result = _norm("Die Postleitzahl ist 01234.")
+        assert "null eins zwei drei vier" not in result
+
+
 class TestTimeNormalization:
     def test_no_duplicate_uhr(self):
         result = _norm("Es ist 14:30 Uhr.")

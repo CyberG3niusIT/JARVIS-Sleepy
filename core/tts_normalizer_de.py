@@ -114,6 +114,8 @@ class GermanTTSNormalizer:
             "dates": self.normalize_dates,
             "times": self.normalize_times,
             "ipv4": self.normalize_ipv4,
+            "phone_numbers": self.normalize_phone_numbers,
+            "ports": self.normalize_ports,
             "temperatures": self.normalize_temperatures,
             "file_sizes": self.normalize_file_sizes,
             "currency": self.normalize_currency,
@@ -353,6 +355,62 @@ class GermanTTSNormalizer:
             text,
         )
 
+    def _digits_to_words(self, digits: str) -> str:
+        return " ".join(self.ONES[int(d)] for d in digits)
+
+    def normalize_phone_numbers(self, text: str) -> str:
+        """Phone numbers, read digit-by-digit — not as one giant
+        cardinal number ("achttausendachtzig"-style misreading of a
+        13-digit number is worse than unhelpful, it's wrong).
+
+        Deliberately narrow trigger so this never grabs an ordinary
+        large quantity: only a leading "+" (international dialing
+        prefix) or a leading "0" with enough following digits (German
+        domestic numbers always start with 0 and quantities essentially
+        never do) counts as a phone number.
+        """
+
+        def repl_international(match):
+            digits = re.sub(r"\D", "", match.group(0))
+            return "plus " + self._digits_to_words(digits)
+
+        text = re.sub(
+            r"(?<![\w.,])\+\d[\d\s]{5,}\d(?!\w)",
+            repl_international,
+            text,
+        )
+
+        def repl_domestic(match):
+            raw = match.group(0)
+            digits = re.sub(r"\D", "", raw)
+            if len(digits) < 7:
+                return raw
+            return self._digits_to_words(digits)
+
+        text = re.sub(
+            r"(?<![\w.,])0[\d\s]{6,}\d(?!\w)",
+            repl_domestic,
+            text,
+        )
+
+        return text
+
+    def normalize_ports(self, text: str) -> str:
+        """'port 8080' -> 'port acht null acht null', not a cardinal
+        number ('achttausendachtzig') — matches how port numbers are
+        actually read aloud, and must run before the general number
+        pass so it gets first claim on the digits."""
+
+        def repl(match):
+            return f"port {self._digits_to_words(match.group(1))}"
+
+        return re.sub(
+            r"\bport[:\s]+(\d{2,5})\b",
+            repl,
+            text,
+            flags=re.IGNORECASE,
+        )
+
     def normalize_temperatures(self, text: str) -> str:
 
         def repl(match):
@@ -456,15 +514,28 @@ class GermanTTSNormalizer:
         )
 
     def normalize_numbers(self, text: str) -> str:
-        """Bare German numbers with no accompanying unit — thousands
+        r"""Bare German numbers with no accompanying unit — thousands
         grouping, decimal comma, English-style decimal-dot fallback, and
-        plain integers, all via _NUMBER_TOKEN (see its docstring)."""
+        plain integers, all via _NUMBER_TOKEN (see its docstring).
+
+        Trailing lookahead is `(?!\\w)(?!\.\d)`, NOT `(?![\\w.,])`: a
+        number at the end of a sentence is immediately followed by its
+        period — excluding "." here used to make the regex never match
+        at all in that position (a "." or "," genuinely part of a
+        bigger number is already consumed whole by _NUMBER_TOKEN's
+        alternation itself, so there's nothing left for a bare trailing
+        "."/"," to protect against). Still bans a following letter/digit
+        so "3D" or "42x" isn't partially mangled, and specifically bans
+        "<dot><digit>" so a standalone multi-dot version number like
+        "3.5.2" is left alone entirely instead of becoming "drei Komma
+        fünf.2" (matching only its first two segments).
+        """
 
         def repl(match):
             return self._german_number_to_words(match.group(0))
 
         return re.sub(
-            rf"(?<![\w.,])-?(?:{self._NUMBER_TOKEN})(?![\w.,])",
+            rf"(?<![\w.,])-?(?:{self._NUMBER_TOKEN})(?!\w)(?!\.\d)",
             repl,
             text,
         )
