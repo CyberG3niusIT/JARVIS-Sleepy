@@ -19,9 +19,9 @@ audio:
   startup_retry_base_delay: 2.0      # Initial retry delay (doubles each attempt)
 vad:
   aggressiveness: 2
-  speech_frames_threshold: 15
-  silence_frames_threshold: 30
-  buffer_duration: 3.0
+  speech_frames_threshold: 10
+  silence_frames_threshold: 25
+  buffer_duration: 1.0
 llm:
   local:
     model_path: /home/alex/jarvis-data/models/llm/Qwen3.5-35B-A3B-abliterated-Q3_K_M.gguf
@@ -55,7 +55,7 @@ stt:
   # BEGIN QWEN3 ASR
   qwen3:
     model_dir: /home/alex/jarvis-data/models/qwen3-asr/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25
-    hotwords: "Jarvis,Hey Jarvis"
+    hotwords: "Jarvis"
     num_threads: 6
     provider: cpu
     max_total_len: 512
@@ -88,8 +88,8 @@ wake_word:
 conversation:
   follow_up_window:
     enabled: true
-    default_duration: 4.0
-    extended_duration: 7.0
+    default_duration: 8.0
+    extended_duration: 12.0
     play_tone: true
     tone_path: ~/jarvis/assets/conv_open.wav
     close_tone_path: ~/jarvis/assets/conv_close.wav

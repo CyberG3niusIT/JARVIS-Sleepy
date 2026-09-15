@@ -90,6 +90,12 @@ class TextToSpeech:
         # Track whether speak() was called (for caller detection)
         self._spoke = False
 
+        # Ack state exists for every TTS backend. Kokoro fills this cache later;
+        # Piper intentionally leaves it empty. This prevents speak_ack() from
+        # crashing when Piper is the active German voice engine.
+        self._ack_cache: Dict[str, tuple[bytes, str]] = {}
+        self._ack_played = False
+
         # Audio output device (resolved by name at startup)
         self.audio_device = resolve_output_device(
             config.get("audio.output_device", "default")

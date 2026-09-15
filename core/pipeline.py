@@ -824,6 +824,25 @@ class Coordinator:
                 return
 
             corrected_text = text.replace(matched_word, self.wake_word)
+
+            # Normalize common wake-word forms.
+            # Qwen hotword bias can occasionally duplicate the wake phrase,
+            # e.g. "jarvis hey jarvis öffne ...".
+            corrected_text = re.sub(
+                r"\bjarvis(?:\s+(?:hey\s+)?jarvis)+\b",
+                "jarvis",
+                corrected_text,
+                flags=re.IGNORECASE,
+            )
+
+            # "Hey Jarvis ..." is an invocation, not a command containing "hey".
+            corrected_text = re.sub(
+                r"^\s*(?:hey|hi|hallo)\s+jarvis\b",
+                "jarvis",
+                corrected_text,
+                flags=re.IGNORECASE,
+            )
+
             self.logger.info(f"Corrected: '{text}' → '{corrected_text}'")
             self.event_queue.put(Event(
                 EventType.COMMAND_DETECTED,
