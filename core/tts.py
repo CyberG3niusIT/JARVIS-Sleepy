@@ -7,6 +7,7 @@ Configured via tts.engine in config.yaml.
 
 import subprocess
 import json
+import urllib.request
 import os
 import time
 import random
@@ -29,6 +30,9 @@ def resolve_output_device(configured: str) -> str:
     """
     if not configured or configured == "default":
         return "default"
+
+    if configured in ("pulse", "pipewire"):
+        return configured
 
     # Already an ALSA device string — use directly
     if configured.startswith(("plughw:", "hw:")):
@@ -112,6 +116,8 @@ class TextToSpeech:
 
         if self.engine == "kokoro":
             self._init_kokoro(config)
+        elif self.engine == "chatterbox":
+            self._init_chatterbox(config)
         else:
             self._init_piper(config)
             self._piper_ready = True
@@ -231,13 +237,82 @@ class TextToSpeech:
             self.logger.warning(f"Could not read sample rate from config: {e}")
         return 22050
 
+    # Chatterbox service
+
+    def _init_chatterbox(self, config):
+        self.chatterbox_endpoint = config.get(
+            "tts.chatterbox_endpoint",
+            "http://127.0.0.1:8765/tts"
+        )
+        self.chatterbox_timeout = float(
+            config.get("tts.chatterbox_timeout", 60)
+        )
+        self.sample_rate = 24000
+        self.logger.info(
+            f"Chatterbox TTS service: {self.chatterbox_endpoint}"
+        )
+
+    def _speak_chatterbox(self, text: str) -> bool:
+        try:
+            payload = json.dumps({"text": text}).encode("utf-8")
+            request = urllib.request.Request(
+                self.chatterbox_endpoint,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+
+            t0 = time.time()
+            with urllib.request.urlopen(
+                request,
+                timeout=self.chatterbox_timeout
+            ) as response:
+                wav = response.read()
+
+            if not wav.startswith(b"RIFF"):
+                self.logger.error("Chatterbox returned invalid WAV data")
+                return False
+
+            aplay = subprocess.Popen(
+                ["aplay", "-q", "-D", self.audio_device],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            self._track_proc(aplay)
+
+            try:
+                _, err = aplay.communicate(
+                    input=wav,
+                    timeout=self.chatterbox_timeout
+                )
+            finally:
+                self._untrack_proc(aplay)
+
+            if aplay.returncode != 0:
+                self.logger.error(
+                    "Chatterbox playback failed: %s",
+                    err.decode(errors="replace")
+                )
+                return False
+
+            self.logger.info(
+                "Chatterbox TTS completed in %.2fs",
+                time.time() - t0
+            )
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Chatterbox TTS failed: {e}")
+            return False
+
     # ── Piper fallback ─────────────────────────────────────────────────
 
     def _fallback_to_piper(self, text: str) -> bool:
         """Attempt Piper TTS when Kokoro fails. Lazy-inits Piper on first call."""
         if not self._piper_ready:
             try:
-                self.logger.warning("Kokoro failed — initializing Piper fallback...")
+                self.logger.warning("Primary TTS failed - initializing Piper fallback...")
                 kokoro_rate = self.sample_rate  # Save Kokoro's rate
                 self._init_piper(self.config)
                 self._piper_ready = True
@@ -249,7 +324,7 @@ class TextToSpeech:
                 self.logger.error(f"Piper fallback init failed: {e}")
                 return False
 
-        self.logger.warning("Kokoro failed — falling back to Piper")
+        self.logger.warning("Primary TTS failed - falling back to Piper")
         # _speak_piper opens its own aplay with the correct rate
         saved_rate = self.sample_rate
         self.sample_rate = getattr(self, '_piper_sample_rate', 22050)
@@ -316,7 +391,12 @@ class TextToSpeech:
 
             try:
                 # Normalize text for human-readable speech
-                if normalize and self.normalization_enabled and self.normalizer:
+                if (
+                    normalize
+                    and self.normalization_enabled
+                    and self.normalizer
+                    and self.engine != "chatterbox"
+                ):
                     original_text = text
                     text = self.normalizer.normalize(text)
                     if text != original_text:
@@ -324,6 +404,11 @@ class TextToSpeech:
 
                 if self.engine == "kokoro":
                     result = self._speak_kokoro(text)
+                    if not result:
+                        return self._fallback_to_piper(text)
+                    return result
+                elif self.engine == "chatterbox":
+                    result = self._speak_chatterbox(text)
                     if not result:
                         return self._fallback_to_piper(text)
                     return result

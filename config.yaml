@@ -1,5 +1,5 @@
 system:
-  wake_word: jarvis
+  wake_word: aura
   language: de-DE
   storage_path: /home/alex/jarvis-data
 location:
@@ -12,7 +12,7 @@ audio:
   mic_device: pulse
   sample_rate: 16000
   channels: 1
-  output_device: default              # WSLg PulseAudio default output
+  output_device: pulse              # WSLg PulseAudio
   use_rnnoise: false
   device_monitor_interval: 5.0      # Seconds between hot-plug checks
   startup_retry_count: 5             # Max mic retries at boot
@@ -55,14 +55,16 @@ stt:
   # BEGIN QWEN3 ASR
   qwen3:
     model_dir: /home/alex/jarvis-data/models/qwen3-asr/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25
-    hotwords: "Jarvis"
+    hotwords: "Aura"
     num_threads: 6
     provider: cpu
     max_total_len: 512
     max_new_tokens: 128
   # END QWEN3 ASR
 tts:
-  engine: piper
+  engine: chatterbox
+  chatterbox_endpoint: http://127.0.0.1:8765/tts
+  chatterbox_timeout: 60
   # Kokoro settings
   kokoro_voice_a: bm_fable
   kokoro_voice_b: bm_george
@@ -82,7 +84,7 @@ tts:
   sentence_silence: 0.2
   normalization_enabled: true
 wake_word:
-  keyword: jarvis
+  keyword: aura
   access_key_env: PORCUPINE_ACCESS_KEY
   sensitivity: 0.5
 conversation:
@@ -97,7 +99,7 @@ conversation:
   max_context_chars: 12000
 user_profiles:
   enabled: true
-  voice_recognition: true
+  voice_recognition: false
   similarity_threshold: 0.30
   auto_enroll: true
   greet_by_name: true
