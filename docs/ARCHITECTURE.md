@@ -7,9 +7,23 @@ way, and what's known to be broken or half-done*. Keep it current: when you
 make an architectural decision or find a real bug, write it here, not just
 in a commit message.
 
-Last major update: 2026-09-15 (Claude active-refactor session #2, branch
-`claude/jarvis-architecture`, on top of `1558e8b`; safepoint `3a58c9e` / tag
+Last major update: 2026-09-15 (Claude active-refactor session #3, branch
+`claude/jarvis-architecture`, on top of `79d7b78`; safepoint `3a58c9e` / tag
 `sleepy-pre-claude-20260915`).
+
+**Persona note (clarified explicitly by the user this session, don't
+"fix" this again):** German-first does NOT mean removing "Sir"/"Ma'am".
+JARVIS's persona is deliberately a German-speaking British-butler-adjacent
+character — "Guten Morgen, Sir.", "Alles klar, Sir.", "Natürlich, Sir." are
+all correct and desired. German-first means: sentence structure, error
+messages, reminders, memory output, and tool confirmations are German;
+individual persona-defining address terms in English ("Sir", "Ma'am",
+"JARVIS") are not a violation of that. What IS still wrong: a whole
+English *sentence* ("Good morning, Sir." / "Standing by, Sir." / "I didn't
+catch that.") — that's the actual bug class this and the previous session
+fixed. Vary the phrasing (don't say "Sehr wohl" as the *only* acknowledgment
+— see `core/persona.py`'s German pools for the intended range of tone) but
+don't strip the honorific.
 
 **IMPORTANT — upstream sync pattern**: this fork tracks
 `upstream = InterGenJLU/jarvis` and periodically merges "Sync: ..." commits
@@ -147,6 +161,37 @@ Tested with fakes (no GPU/network) in `tests/unit/test_streaming_audio_pipeline.
 ordering guarantees, mid-stream fallback, both-engines-fail handling,
 sample-rate mismatch resampling, and interrupt/kill_active not hanging.
 
+### 3.1b Bounded PCM queue (this session)
+
+`_ChatterboxAudioWriter`'s internal PCM queue (producer → writer handoff,
+distinct from `StreamingAudioPipeline._text_queue`, which holds cheap
+sentence *text* and stays unbounded — not worth bounding) used to be a
+plain unbounded `queue.Queue()`: a fast producer (many short sentences)
+generating faster than `aplay` drains them in realtime could pile up
+unlimited PCM in RAM.
+
+Now `maxsize=4` (a few sentences of read-ahead — enough to keep the
+pipeline full without unbounded growth). `submit()` and the internal
+sentinel-delivery in `finish_and_wait()` both go through a shared `_put()`
+that retries `queue.put(item, timeout=0.5)` in a loop rather than blocking
+indefinitely, re-checking a `threading.Event` (`_stopped`, set by the
+writer thread on exit — error or normal drain) each time it times out.
+This makes bounding safe against the two ways an unbounded-wait-on-full-
+queue could otherwise deadlock: a producer stuck handing off audio to a
+writer that already died (submit() returns `False`, the producer's loop
+in `StreamingAudioPipeline._run()` checks this and stops generating), and
+`finish_and_wait()` itself trying to deliver the `None` sentinel into a
+full queue with a dead consumer on the other end. Real backpressure (a
+full queue blocks `submit()`, so the producer genuinely slows to match
+playback rate) without the deadlock risk a naive bounded queue would add.
+
+Tested in `tests/unit/test_streaming_audio_pipeline.py::TestBoundedQueueBackpressure`:
+a slow/stuck consumer actually blocks the producer (bounded, not
+unbounded), no data loss or reordering under backpressure, a "crashed"
+consumer (aplay fails to open) is detected by `submit()` within the
+0.5s poll interval instead of hanging, and `finish_and_wait()` doesn't
+deadlock on a full queue once the writer is force-stopped.
+
 ### 3.2 Client-side flow (`core/tts.py`, `core/pipeline.py`)
 
 `TextToSpeech.speak()` is the single entry point: CAL-L0 cache lookup →
@@ -214,18 +259,55 @@ Two independent normalizer modules exist — **only one is live**:
   removed since deleting a whole module needs a deliberate call, not a
   drive-by.
 
-Normalizer pass order matters (`GermanTTSNormalizer.__init__`,
-`self.normalizations` dict, insertion-ordered): markdown → dates → times →
-ipv4 → temperatures → file_sizes → currency → percent → urls → **thousands**
-→ decimals → technical → numbers. `thousands` must run before `decimals`:
-German groups thousands with `.` (`10.000` = *zehntausend*) while the
-decimal separator is `,` — conflating them used to read "10.000" as *zehn
-Komma null null null* (fixed this session).
+Normalizer pass order (`GermanTTSNormalizer.__init__`, `self.normalizations`
+dict, insertion-ordered): markdown → dates → times → ipv4 → **phone_numbers**
+→ **ports** → temperatures → file_sizes → currency → percent → urls →
+numbers (thousands-grouping + decimals + plain integers, unified) →
+technical. Two sessions of fixes here, all with regression tests in
+`tests/unit/test_tts_normalizer_de.py`:
+
+- **Thousands vs. decimal** (previous session): German groups thousands
+  with `.` (`10.000` = *zehntausend*) while `,` is the decimal separator —
+  conflating them used to read "10.000" as *zehn Komma null null null*.
+  All unit-bearing normalizers (currency/percent/temperature/file-size)
+  and the general bare-number pass share one `_NUMBER_TOKEN` regex +
+  `_german_number_to_words()` so a multi-group amount like `"1.234,56 €"`
+  is captured as one token (a per-normalizer regex used to only match the
+  last 3-digit group and leave a stray `"1."` in the output).
+- **Numbers at the end of a sentence were never normalized at all**
+  (this session, high-severity — sentence-final numbers are extremely
+  common: "Die Antwort ist 42."). The general number regex's trailing
+  lookahead was `(?![\w.,])`, meant to stop a match from swallowing part
+  of a bigger adjacent number — but since `_NUMBER_TOKEN`'s alternation
+  and the *leading* lookbehind already fully handle that, the trailing
+  exclusion of a bare "." or "," just meant a number directly followed by
+  its own sentence period (the overwhelmingly common case) never matched
+  at all. Changed to `(?!\w)(?!\.\d)` — still blocks a following letter/
+  digit (so "3D" isn't mangled) and still blocks a following "`.`+digit"
+  (so a standalone multi-dot version number like "3.5.2" is left alone
+  entirely rather than becoming "drei Komma fünf.2") — but a bare
+  trailing "." or "," (sentence end, list comma) now matches correctly.
+- **Ports and phone numbers read as giant cardinal numbers** (this
+  session): `"port 8080"` was becoming *"achttausendachtzig"* instead of
+  *"acht null acht null"* — correct for a quantity, wrong for an
+  identifier. Added `normalize_ports` (`port[:\s]+digits` → digit-by-digit,
+  must run before the general number pass) and `normalize_phone_numbers`
+  (digit-by-digit for a leading `+` international prefix or a leading `0`
+  domestic number with ≥7 digits — narrow trigger deliberately, so an
+  ordinary large quantity like "100000 Einwohner" is never mistaken for a
+  phone number).
+- Not touched (documented, not a regression): URLs with a path/query
+  (`normalize_urls` only speaks the domain, "/path?x=1" stays literal),
+  RFC-style numbers (read as one cardinal, arguably fine), email
+  addresses (no normalization at all — TTS engine's native G2P handles
+  "@"/"." as best it can). None of these came up as a concrete
+  requirement; flagging so a future session doesn't assume they're
+  already handled.
 
 `core/speech_chunker.py`'s abbreviation list (periods that don't end a
 sentence) was English-only; German LLM output routinely contains `z.B.`,
 `usw.`, `bzw.` etc., which used to trigger a false mid-sentence split and
-chop prosody. German abbreviations added this session.
+chop prosody. German abbreviations added in the previous session.
 
 ### 3.4 Known TTS issues not yet fixed
 
@@ -238,13 +320,26 @@ chop prosody. German abbreviations added this session.
   need a cancellable/async HTTP request or a hard time budget on
   contextual-ack generation — the health-check throttle added this
   session doesn't help here since the server *is* up, just slow).
-- ~~Single shared timeout...~~ **Fixed this session**: `_chatterbox_available()`
-  probes `/health` with a short (1.5s) timeout, throttled (5s re-check
-  interval when healthy, 1s when down), before every request — a down
-  server now fails over to Piper in ~1.5s instead of up to 60s. The
-  60s `chatterbox_timeout` still applies to the actual generation
-  request once the health check passes (correctly — genuine GPU
-  generation of a long response can legitimately take a while).
+- ~~Single shared timeout...~~ **Fixed** (previous + this session):
+  `_chatterbox_available()` probes `/health` with a short (1.5s) timeout,
+  throttled (5s re-check when healthy, 1s when down), before every
+  request. A **circuit breaker** on top (this session):
+  `_chatterbox_record_failure()`/`_record_success()` track consecutive
+  real `/tts` request failures (not health-check misses); after 3 in a
+  row the circuit opens for 15s and `_chatterbox_available()` returns
+  False immediately without even the health probe. A server that's up
+  per `/health` but erroring on every generation (not just fully down)
+  now also gets a fast, bounded backoff instead of a full request-and-
+  timeout per utterance. The 60s `chatterbox_timeout` still applies to
+  actual generation once a request is attempted (correctly — genuine
+  GPU generation of a long response can legitimately take a while) —
+  separated from a new, short `chatterbox_connect_timeout` (default 2s):
+  `core/tts.py` switched from `urllib.request` to a persistent
+  `requests.Session()` (already a project dependency, no new one added)
+  specifically so connect and read timeouts can differ
+  (`timeout=(connect, read)`), and so the underlying TCP connection is
+  reused across sentences (keep-alive pooling) instead of a fresh
+  handshake per utterance.
 - `core/tts_cache.py` opens a new SQLite connection per `put()` call
   during bulk generation (~300 phrases at first boot) — works, just more
   I/O than necessary. Not thread-locked around `_memory` dict access;
@@ -291,6 +386,12 @@ chop prosody. German abbreviations added this session.
 | Chatterbox chunk failures fall back to Piper per-chunk inside the stream, not just at the top-level `speak()` call | Silently dropping a sentence mid-response is worse than a voice/quality blip; matches the explicit "never lose a sentence" requirement. |
 | Health-check is throttled (5s healthy / 1s down), not per-request | A per-request health check would double request latency on the happy path; throttling keeps the fast-fail benefit without that cost. |
 | German content added to upstream-synced files (`core/tts.py`, `core/persona.py`) as an appended override patch, never edited in place | Matches the pre-existing convention in `core/responses.py`; keeps `git merge upstream/main` conflict-free instead of fighting a large literal diff on every sync. See top of this doc and §5a. |
+| Chatterbox PCM queue bounded (`maxsize=4`), with a poll-and-check-stopped loop instead of a plain blocking `put()` | Real backpressure needs a bound; a naive bound risks deadlocking `submit()`/`finish_and_wait()` against a dead consumer, so both go through the same stoppable `_put()`. |
+| `core/tts.py` switched from `urllib.request` to a persistent `requests.Session()` | `requests` was already a project dependency (no new one added); gives connection-pooling/keep-alive across sentences and native separate connect/read timeouts, neither of which `urllib.request` supports cleanly. |
+| Chatterbox circuit breaker tracks real `/tts` failures separately from health-check misses | A server that's up per `/health` but erroring on every generation needs its own backoff — the health throttle alone wouldn't catch that case. |
+| General-number regex's trailing lookahead changed from `(?![\w.,])` to `(?!\w)(?!\.\d)` | The old version silently skipped every sentence-final number (the single most common way a number appears in speech) because a bare trailing period was (unnecessarily) treated the same as a period that's part of a bigger number — the alternation and leading lookbehind already handle that case. |
+| `is_candidate()` gates on confidence only, not `source == "explicit"` | An inferred fact must be promotable purely through repeated evidence (reinforcement raising its confidence) without ever requiring the user to state it explicitly — matches the requested "promotion via repeated confirmed pattern" path. |
+| Memory contradiction/dedup detection kept on the existing subject-key matching, NOT extended with text-similarity | Measured on realistic pairs, text similarity scores a real contradiction ("editor is VS Code" vs "editor is Cursor") as *more* similar (0.88) than a paraphrase of the same fact ("Alex bevorzugt DHL" vs "...nutzt am liebsten DHL", 0.50) — backwards from what's needed. Comparing the extracted subject key (already separate from the value) doesn't have this problem. See §5c. |
 
 ## 5a. German-first audit (2026-09-15)
 
@@ -434,11 +535,74 @@ German-first gap, and it's an architecture-level fix (new extraction
 patterns, probably a stored-language-neutral fact representation with
 phrasing generated at read-time in the target language), not a quick win.
 
-Not audited in depth this session (time-boxed): deduplication of
-near-identical facts, update-vs-append semantics when a fact changes
-("VS Code" → "Cursor"), and conflict resolution — `delete_fact()` /
-`_pending_forget` exist, but whether new extraction auto-detects "this
-contradicts an existing fact" wasn't traced through.
+Dedup/contradiction resolution (traced through this session, see §5c):
+`store_fact()` already had a working subject-based supersede mechanism
+before this session — `_find_similar_fact()` matches on exact or
+substring-fuzzy `subject`, and an exact-content match used to just no-op
+(`return None`) while a same-subject-different-content match already
+correctly superseded the old fact via `superseded_by`. This session added
+candidate/confirmed tiers and reinforcement on top of it (§5c) without
+touching that mechanism, and specifically did NOT add text-similarity-based
+contradiction detection — see §5c for why that's actively the wrong tool.
+
+## 5c. Memory candidate/confirmed tiers (implemented this session)
+
+Additive on top of the existing fact store — no schema replacement, one
+new column (`evidence_count`, migrated via `ALTER TABLE ... ADD COLUMN`
+wrapped in `try/except sqlite3.OperationalError` since SQLite has no
+`ADD COLUMN IF NOT EXISTS`).
+
+- **`MemoryManager.is_candidate(fact)`**: `confidence < 0.80`
+  (`CANDIDATE_CONFIDENCE_THRESHOLD`). Deliberately confidence-only, not
+  gated on `source == "explicit"` — an inferred fact should be promotable
+  purely through repeated evidence ("mehrfach bestätigtem Muster"),
+  without ever requiring the user to state it outright. Explicit facts
+  (confidence 0.90) start confirmed; inferred (0.70) and per-turn (0.75)
+  start as candidates.
+- **`_reinforce_fact()`**: when `store_fact()`'s existing dedup check
+  finds an *exact* content match (previously a silent no-op), it now
+  bumps confidence by `+0.05` (capped at `MAX_FACT_CONFIDENCE = 0.99`)
+  and increments `evidence_count`, instead of discarding the repeated
+  observation. Enough reinforcement naturally crosses the candidate
+  threshold — that's the entire "promotion" mechanism; there's no
+  separate promotion algorithm/state machine to keep in sync with it.
+- **Subject normalization**: `store_fact()` now lowercases/strips
+  `subject` before both the lookup and the insert. The exact-match branch
+  of `_find_similar_fact()` does a case/whitespace-sensitive SQL
+  comparison (`WHERE subject = ?`) — "Editor" and "editor " used to
+  silently miss each other and fall through to the weaker substring-fuzzy
+  path (or miss a supersede entirely). Old rows keep whatever casing they
+  already have; this only fixes matching going forward.
+- **Rejected approach, documented so it isn't re-attempted**: using text
+  similarity (tried `difflib.SequenceMatcher`) to distinguish "same fact
+  reworded" from "contradicting fact about the same topic" doesn't work —
+  measured on realistic pairs: `"favorite editor is VS Code"` vs.
+  `"favorite editor is Cursor"` (a **contradiction**) scores 0.88
+  (high/"similar"), while `"Alex bevorzugt DHL"` vs. `"Alex nutzt am
+  liebsten DHL"` (the **same fact**, paraphrased) scores only 0.50
+  (low/"different"). Character-overlap similarity conflates topic
+  closeness with content agreement — exactly backwards from what's
+  needed. The existing subject-key approach (compare the *extracted
+  subject*, e.g. `"editor"`, not the whole sentence) sidesteps this
+  correctly, because same-subject-different-content is precisely what
+  "contradiction" means once subject and value are separated. A
+  semantic-embedding-based version of contradiction detection might work
+  better than text-similarity, but couldn't be tuned/verified in this
+  sandbox (no GPU/embedding model available) — noted as open work, not
+  implemented speculatively.
+
+**Not done, and why**: a separate `fact_candidates` table, explicit
+`WORKING/SHORT_TERM/LONG_TERM` tier columns, and an autonomy-budget
+governor (max candidates/promotions per session) from the original
+memory-tier proposal were not built. The existing `facts` table's
+`confidence` + new `evidence_count` already model the working/candidate/
+confirmed distinction adequately for what's actually exercised today
+(single fact store, no separate working-memory table exists or is
+needed — `core/context_window.py` already serves the "current
+conversation" working-memory role); adding parallel tier tables now would
+be new architecture without a demonstrated need, which the task
+explicitly asked to avoid. Revisit if/when actual usage shows the single-
+table model isn't enough.
 
 ## 6. Conventions
 
@@ -459,25 +623,41 @@ contradicts an existing fact" wasn't traced through.
 
 ## 7. Open work / recommended next steps
 
-Roughly in priority order — see §3.4 for the detailed TTS-specific list and
-§5a/§5b for German-first / memory specifics.
+Roughly in priority order — see §3.4 for the detailed TTS-specific list,
+§5a-c for German-first / memory specifics.
 
-1. Live GPU run of the new Chatterbox streaming path (`_ChatterboxAudioWriter`
-   producer/consumer) — this session's environment had no CUDA, so it's
-   verified with fakes/mocks (`tests/unit/test_streaming_audio_pipeline.py`)
-   but not yet observed against the real server. Do this before relying on
-   the latency win in production.
+**Resolved this session (previously listed here, no longer open):**
+honorific-default question — user confirmed explicitly: "Sir"/"Ma'am" stays,
+it's an intentional persona element, not a German-first violation (see the
+persona note near the top of this doc). Chatterbox connection reuse/circuit
+breaker/connect-timeout — done (§3.4). Streaming queue backpressure — done
+(§3.1b). Sentence-final numbers not normalized — fixed (§3.3, was a real
+correctness bug). Ports/phone numbers read as cardinal numbers — fixed
+(§3.3). Memory candidate/confirmed tiers + reinforcement — done (§5c).
+
+1. Live GPU run of the Chatterbox streaming path (`_ChatterboxAudioWriter`
+   producer/consumer, bounded queue, circuit breaker) — this environment
+   has no CUDA, so all of it is verified with fakes/mocks
+   (`tests/unit/test_streaming_audio_pipeline.py`,
+   `tests/unit/test_chatterbox_client.py`) but not yet observed against
+   the real server. Do this before relying on the latency win in
+   production.
 2. Cancellable/bounded contextual-ack synthesis so a slow Chatterbox ack
-   can't delay the real response's first audio chunk (§3.4).
-3. Decide the honorific-default question (§5a) — "sir"/"ma'am" is a
-   persona/brand call, not something to change unilaterally.
-4. Finish `skills/system/file_editor/skill.py` (~50 strings) and audit
+   can't delay the real response's first audio chunk (§3.4) — still open.
+3. Finish `skills/system/file_editor/skill.py` (~50 strings) and audit
    `skills/system/developer_tools/skill.py` beyond the confirmation flow;
    determine whether `skills/personal/conversation/skill.py` is active or
    dead code before deciding whether to translate it too.
-5. Redesign fact storage/extraction to not be English-sentence-shaped
+4. Redesign fact storage/extraction to not be English-sentence-shaped
    (§5b) — needed before memory-transparency responses can be fully
-   German without mixed-language sentences.
+   German without mixed-language sentences. This blocks natural German
+   output for `handle_transparency()` and the multi-fact forget listing
+   specifically (see §5a for what's already safely translated around it).
+5. Embedding-based contradiction detection for memory facts, evaluated
+   properly against a real embedding model (§5c documents why the
+   text-similarity approach that was tried doesn't work — don't repeat
+   that attempt; a semantic-similarity version might work but needs
+   real tuning this sandbox couldn't do).
 6. Vocal-behavior layer: now that `chatterbox_server.py` accepts
    per-request `exaggeration`/`cfg_weight`/etc. overrides, design the
    policy that decides when to use them (e.g. per persona mood, per
@@ -491,19 +671,33 @@ Roughly in priority order — see §3.4 for the detailed TTS-specific list and
    split that the (correct) abbreviation guard now prevents; it's a stale
    test expectation, not a pipeline bug. Update the expectation rather
    than "fixing" the chunker.
-10. Real latency instrumentation: `core/pipeline.py` and `core/tts.py`
-    already emit some structured `event_logger` timing events (e.g.
-    Kokoro/Chatterbox synthesis RTF), but there's no single, complete
-    wake→first-audio latency trace across STT/LLM-TTFT/chunking/TTS-TTFA
-    stages, and no live measurements exist for this session (no
-    mic/GPU/STT model available in this sandbox to run the real voice
-    loop). Adding full-path `time.monotonic()` checkpoints + a p50/p95
-    rollup, then actually running it on the real WSL2 box, is real
-    future work — not done here to avoid reporting fabricated numbers.
-11. STT hot-path (persistent model residency, adaptive endpointing),
-    LLM TTFT (prompt/context size, prewarm), and fast-paths for
-    deterministic local commands (open app, set volume, etc. without the
-    35B model) were all explicitly requested but require either live
+10. **Real latency instrumentation — still not done, and still the single
+    biggest gap against the stated "feels instantaneous" goal.**
+    `core/pipeline.py`/`core/tts.py` emit some structured `event_logger`
+    timing events (e.g. synthesis RTF) but there's no single wake→
+    first-audio trace across VAD-endpointing/STT/intent/memory-retrieval/
+    LLM-TTFT/chunking/TTS-TTFA stages, and — because this sandbox has no
+    mic, GPU, STT model, or llama.cpp/Chatterbox server running — **no
+    live measurement of any kind exists for any of this project's TTS,
+    STT, LLM, or end-to-end latency claims.** Every "streamed faster",
+    "fails over in ~1.5s", etc. statement in this doc is an architectural
+    claim verified by code/mocks, not a measured one. Adding full-path
+    `time.monotonic()` checkpoints + a p50/p95 rollup, then actually
+    running it on the real Sleepy hardware, is required before any
+    latency number in this project can be trusted.
+11. STT hot-path (persistent model residency, adaptive endpointing), LLM
+    TTFT (prompt/context size, prewarm, KV-cache reuse), and fast-paths
+    for deterministic local commands (open app, set volume, etc. without
+    the 35B model) were all explicitly requested but require either live
     hardware measurement or a larger design/implementation effort beyond
-    this session's scope — not started. See task history for the full
-    list of what was asked; none of it should be assumed done.
+    what a code-only sandbox session can responsibly do — not started.
+    Don't assume any of it is done; nothing in this bullet has been
+    touched across any session so far.
+12. Memory: no autonomy budget (max candidates/promotions per session),
+    no explicit consolidation job (session-end/idle-triggered review of
+    short-term → long-term), no decay (candidates with low confidence
+    that age out un-reinforced) — §5c's reinforcement mechanism only
+    covers "the exact same fact observed again," it doesn't yet decay
+    stale unreinforced candidates over time. All explicitly requested;
+    not built this session — the additive tier/reinforcement work in §5c
+    was judged the highest-value, lowest-risk slice to ship now.
