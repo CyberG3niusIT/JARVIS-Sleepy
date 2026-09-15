@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional, Dict
 
 from core.logger import get_logger
-from core.tts_normalizer import get_normalizer
+from core.tts_normalizer_de import get_normalizer
 
 logger = get_logger(__name__)
 
@@ -395,7 +395,6 @@ class TextToSpeech:
                     normalize
                     and self.normalization_enabled
                     and self.normalizer
-                    and self.engine != "chatterbox"
                 ):
                     original_text = text
                     text = self.normalizer.normalize(text)

@@ -10,7 +10,7 @@ from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 HOST = "127.0.0.1"
 PORT = 8765
-RATE = 0.91
+RATE = 0.89
 
 print("Lade Chatterbox V3...", flush=True)
 

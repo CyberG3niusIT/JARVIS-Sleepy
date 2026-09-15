@@ -1143,3 +1143,28 @@ Beantworte die eigentliche Frage noch nicht.
 Keine zweite Aussage und keine unnötigen Floskeln.
 """
 # END JARVIS DE-DE PERSONA
+
+
+# BEGIN JARVIS DE-DE DIRECT RESPONSES
+
+def rundown_defer() -> str:
+    return (
+        f"Sehr wohl, {_de_h()}. "
+        "Sagen Sie einfach 'Tagesübersicht', wenn Sie bereit sind."
+    )
+
+
+def research_page_fail() -> str:
+    return (
+        f"Entschuldigung, {_de_h()}, "
+        "ich konnte diese Seite nicht abrufen."
+    )
+
+
+def rundown_mention() -> str:
+    return (
+        f"Guten Morgen, {_de_h()}. "
+        "Ihre Tagesübersicht ist bereit."
+    )
+
+# END JARVIS DE-DE DIRECT RESPONSES
