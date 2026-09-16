@@ -7,9 +7,14 @@ way, and what's known to be broken or half-done*. Keep it current: when you
 make an architectural decision or find a real bug, write it here, not just
 in a commit message.
 
-Last major update: 2026-09-15 (Claude active-refactor session #3, branch
-`claude/jarvis-architecture`, on top of `79d7b78`; safepoint `3a58c9e` / tag
-`sleepy-pre-claude-20260915`).
+Last major update: 2026-09-16 (Claude active-refactor session #4, branch
+`claude/jarvis-architecture`, on top of `e918d80`; safepoint `3a58c9e` / tag
+`sleepy-pre-claude-20260915`). Session #4 scope: backend-only (no UI —
+`web/hud.*` and the `jarvis-ui` branch are explicitly out of scope and
+untouched), goal is Sleepy-ready: memory system completion, three
+specialized reviews (Memory/Concurrency/German-runtime), real latency
+instrumentation, TTS startup contention fix, and a startup preflight
+script. See §5c/§5d, §3.5, §8, §9.
 
 **Persona note (clarified explicitly by the user this session, don't
 "fix" this again):** German-first does NOT mean removing "Sir"/"Ma'am".
@@ -348,6 +353,31 @@ chop prosody. German abbreviations added in the previous session.
 - `resolve_output_device()`'s `/proc/asound/cards` regex assumes simple
   card-description formatting; unverified against unusual card names.
 
+### 3.5 Startup warmup contention (session #4)
+
+`_init_chatterbox()` used to start the ack cache (~9 phrases) and CAL-L0
+cache (~300 phrases) in **two parallel** background threads, both hitting
+the single-threaded Chatterbox server at once. Worst case: a live
+`speak()` request during the first minute or two after boot could end up
+queued (at the OS TCP-accept level) behind whichever warmup requests the
+server already accepted — up to the tail of a multi-minute CAL-L0 batch.
+
+Fixed: one thread (`_run_chatterbox_warmup`) runs ack-cache-then-CAL-L0
+sequentially (ack first — it's small and matters more for perceived
+responsiveness). Both now use `_synthesize_short_pcm_throttled()`, which
+acquires `TextToSpeech._tts_lock` for just the current phrase's HTTP call
+(the same lock `speak()` takes) — so a live request contends for the lock
+fairly against warmup instead of racing it unlocked at the HTTP level, and
+is delayed by at most one in-flight warmup phrase (~1-3s), not the whole
+batch. (A dedicated Concurrency reviewer this session found the ack cache
+had been missed — it still used the unthrottled path — fixed alongside;
+see §5e.)
+
+Tested in `tests/unit/test_tts_startup_contention.py`: warmup order,
+throttled-lock acquire/release per phrase, a live caller can interleave
+between warmup phrases (not just after the whole batch), and both engines
+route through the correct (throttled/unthrottled) path.
+
 ## 4. Known duplicate / divergent code paths
 
 - **Console vs. voice streaming**: `jarvis_console.py`'s
@@ -457,26 +487,12 @@ What was NOT yet German, found and fixed this session:
 - `skills/system/developer_tools/skill.py` likely has more beyond what
   was touched (35 total `self.honorific}` occurrences found, only the
   confirmation flow + one "what to display" line fixed).
-- `skills/personal/conversation/skill.py` — a near-duplicate of
-  `core/persona.py`'s pools, all English, purpose/active-status
-  unconfirmed (not referenced from a skill manifest with an obvious
-  enabled flag in this pass — worth checking whether it's dead code or
-  a genuinely separate active path before translating).
-- The **honorific default itself is `"sir"`** (`core/honorific.py`,
-  `_current_honorific = "sir"`, and `"sir"`/`"ma'am"` hardcoded at ~15
-  call sites across `reminder_manager.py`, `presence_detector.py`,
-  `conversation_router.py`, `pipeline.py`, both entry points). With
-  `user_profiles.voice_recognition: false` in config, this fallback is
-  what actually gets used in every interaction today, and it's woven
-  into essentially every spoken template. Whether "Sir"/"ma'am" as an
-  intentional charming Anglicism is *wanted* (part of the persona brief:
-  "ruhig, kompetent, trocken, leicht humorvoll") or should become a
-  German/neutral default is a **persona/brand decision for the user**,
-  not something to change unilaterally — flagged, not changed.
 - Regex-based fact extraction (`core/memory_manager.py`) stores facts as
   English third-person sentences ("the user loves the band Tool") — see
   §5b. Fixing this properly means redesigning extraction + storage
-  format, not a string-level translation.
+  format, not a string-level translation. §5d's `render_fact_de()` works
+  around this for facts that have a structured `value`, but older/
+  one-group-extracted facts still fall back to the raw English sentence.
 - `intent_examples` (semantic-matching training phrases, e.g. in
   `skills/personal/reminders/skill.py`) are still English-phrased. Left
   as-is per the task's own framing: input-recognition phrasing isn't the
@@ -484,10 +500,50 @@ What was NOT yet German, found and fixed this session:
   input fine regardless of what language the matching examples are
   written in).
 
+**RESOLVED this session — persona/honorific question**: the user
+explicitly confirmed "Sir"/"Ma'am" is a *deliberate, wanted* persona
+element, not a German-first violation. German-first means sentence
+structure/error messages/reminders/memory output/confirmations are
+German; the address term itself staying English is fine and should not
+be "fixed." See the persona note near the top of this document — don't
+re-relitigate this.
+
 New regression test: `tests/unit/test_german_first_active_path.py` — fails
 if any of the specific previously-confirmed banned English phrases
 reappear in the CAL-L0 templates, persona pools, or `ResponseLibrary`
 (guards against a future upstream sync silently reintroducing them).
+
+### German-first backlog (from the session #4 audit, see §5e)
+
+A dedicated Explore-agent audit (backend only — UI explicitly excluded)
+found roughly **330-340 remaining active English strings**, none of them
+fixed this session beyond the two small high-signal ones below (translating
+all of it responsibly needs its own dedicated session — this list exists
+so that session doesn't have to re-scan the repo from scratch):
+
+| File | Est. count | Status |
+|---|---|---|
+| `skills/personal/conversation/skill.py` | ~90 | **Confirmed ACTIVE** (metadata.yaml `enabled: true`) — near-duplicate of `core/persona.py`'s already-German pools; highest priority, and the fastest to translate since equivalent German phrasing already exists in `core/persona.py` to adapt from |
+| `skills/system/file_editor/skill.py` | ~45 | Rest beyond the confirmation flow already fixed in session #3 (create/edit/delete/print/document-generation messages); one confirmation-adjacent line still English too: `"That confirmation has expired..."` at the line found by the audit |
+| `skills/system/app_launcher/skill.py` | ~35 | Only `launch_app` is translated (monkeypatch override, `"BEGIN JARVIS DE-DE APP RESPONSES"` marker exists — follow that pattern); close/fullscreen/minimize/maximize, volume, workspaces, focus/switch, list_windows, clipboard all still English |
+| `skills/system/weather/skill.py` | ~30 | Fully English |
+| `skills/system/web_navigation/skill.py` | ~25 | Fully English |
+| `skills/system/system_info/skill.py` | ~25 | Fully English |
+| `skills/system/filesystem/skill.py` | ~24 | Fully English |
+| `skills/system/developer_tools/skill.py` + `core/health_check.py` | ~17 | Confirmation flow already German (session #3); `format_voice_brief()` translated this session (§ above); `format_voice_summary()` in the same file is dead code (unreferenced) — don't translate it, delete-or-ignore |
+| `core/tools/enroll_face.py` + `core/presence_detector.py` | ~16 | Voice-guided face-enrollment flow, fully English |
+| `skills/personal/social_introductions/skill.py` | ~9 | Fully English |
+| `skills/personal/news/skill.py` + `core/news_manager.py` | ~9 | Fully English |
+| `skills/system/time_info/skill.py` | ~6 | Fully English |
+| `core/task_planner.py` | 0 | The one active string found (line ~1044) translated this session |
+
+Classification per the audit: everything above is category A (active
+German runtime path, should be translated). `core/google_calendar.py`,
+`core/caldav_calendar.py`, `core/weather_poller.py`, `core/desktop_manager.py`,
+`core/conversation_router.py`, `core/self_awareness.py`, `core/watchdog.py`,
+`core/tool_executor.py`, `core/tool_registry.py` were checked and have
+**no** active category-A findings (tool_registry's English strings feed
+LLM synthesis, not direct TTS — category C).
 
 ## 5b. Memory architecture map (read-only audit, 2026-09-15)
 
@@ -604,6 +660,183 @@ be new architecture without a demonstrated need, which the task
 explicitly asked to avoid. Revisit if/when actual usage shows the single-
 table model isn't enough.
 
+## 5d. Memory: value-based reinforcement, risk gate, German output, bug fixes (session #4)
+
+Continues §5c. Two more schema-additive columns: `value` (nullable TEXT)
+alongside the already-added `evidence_count`.
+
+**The "Kernproblem" this session was explicitly asked to solve**: distinguish
+a paraphrase of the same fact ("Alex nutzt häufig VS Code" / "Alex arbeitet
+meistens mit VS Code") from a real change to the same attribute ("VS Code"
+→ "Cursor"), without falling into the text-similarity trap §5c already
+found (a genuine contradiction scores as *more* textually similar than a
+paraphrase). Solution: extraction now also produces a structured `value`
+(the two-group `EXPLICIT_PATTERNS` already captured this as a local
+variable, just wasn't stored; `BATCH_EXTRACTION_PROMPT`/
+`PER_TURN_EXTRACTION_PROMPT` now ask the LLM for it too, with an explicit
+instruction to use the *same* subject wording every time for the same
+attribute — consistency of the key is what makes matching work at all).
+`store_fact()` compares `value` when both sides have one: same value →
+`_reinforce_fact()`; different value → supersede. No `value` on either
+side (older data, or a one-group free-form extraction) → falls back to
+the pre-existing exact-content comparison, unchanged.
+
+**Sensitive-topic risk gate** (§7 "Leine" in the task): `_is_sensitive()`
+— category `"health"` or a DE/EN keyword hit (illness, religion, political,
+sexuality, debt, criminal record, pregnancy, ...) — caps a *non-explicit*
+fact's confidence at `_SENSITIVE_CAP_CONFIDENCE = 0.75` (below the
+candidate threshold), enforced both at insert time and every time
+`_reinforce_fact()` would otherwise raise it further. An **explicit**
+user statement is exempt — the risk gate is specifically about the system
+promoting its own inference to "confirmed truth" on a sensitive topic
+without the user ever having said it, not about refusing to store what
+the user directly tells JARVIS. Best-effort keyword heuristic, not a real
+classifier — deliberately conservative (false positive = an innocuous
+fact stays a permanent candidate; false negative = a sensitive inference
+could get promoted — the former is the much cheaper mistake).
+
+**German rendering**: `render_fact_de()` renders `subject: value` (short,
+often language-neutral technical terms — "editor: VS Code") instead of
+interpolating the full stored English sentence into German wrapper text.
+`handle_forget()`, `handle_transparency()`, `list_facts_by_category()` now
+use it and are fully German. `handle_transparency()` additionally
+separates confirmed facts from candidates in its own response (§10 in the
+task: "muss unterscheiden zwischen bestätigt, beobachtet, vermutet") —
+if only candidates exist, it says so explicitly rather than presenting an
+inference with the confidence of a stated fact. New `is_why_query()`/
+`handle_why()` ("Warum glaubst du, dass ich X?") explains provenance:
+explicit → "das haben Sie mir selbst gesagt"; reinforced inference →
+names the `evidence_count`; single observation → says so plainly. Wired
+into `conversation_router.py`'s `_handle_memory_ops` alongside the
+existing forget/transparency routes.
+
+**German recall/forget/transparency/fact-request patterns** added
+alongside the existing English ones (English kept, German is now the
+first-tried path) — `RECALL_PATTERNS`, `FACT_REQUEST_PATTERNS`,
+`FORGET_PATTERNS`, `TRANSPARENCY_PATTERNS`. The German forget patterns use
+a `(?!\s+nicht)` negative lookahead — "vergiss nicht, dass X" means the
+*opposite* (remember X) and must not match a forget pattern.
+
+**Candidate vs. confirmed labeling in LLM prompt injection** (§15/§16 in
+the task): `get_full_user_context()`/`_build_user_context_block()` now
+puts unconfirmed observations in a separately-labeled
+"UNCONFIRMED OBSERVATIONS" section instead of mixing them into
+"WHAT YOU KNOW ABOUT THE USER" — the LLM is instructed to only ever
+present that section as a guess. `get_proactive_context()`'s single
+injected fact is now labeled "BESTÄTIGTER FAKT" or "UNBESTÄTIGTE VERMUTUNG"
+depending on `is_candidate()`.
+
+**Bugs found by the dedicated Memory Reviewer subagent this session and
+fixed** (see §5e for the full review — this lists only what got fixed):
+
+1. **CRITICAL — "don't forget that X" was deleting instead of remembering.**
+   `FORGET_PATTERNS`' English `r"forget (?:that|the) (.+)"` used unanchored
+   `re.search`, so it matched the substring inside `"don't forget that I
+   love pizza"` too — `is_forget_request()` returned `True` before
+   `is_fact_request()` was even checked in `_handle_memory_ops`'s ordering,
+   so a request to *remember* something got routed to *delete* it instead.
+   Fixed with the same `(?<!don't )(?<!do not )` negative-lookbehind
+   pattern already used for the German patterns' `(?!\s+nicht)` exclusion.
+2. **CRITICAL — subject-only matching could supersede unrelated facts.**
+   `_find_similar_fact()` matched purely on `subject` text, with no
+   category constraint — two independent facts that happen to share a
+   generic subject (e.g. `"mutter"` — "Mutter heißt Petra" in one category,
+   an unrelated observation also tagged `subject="mutter"` in another)
+   could match each other, and the value-comparison logic above would then
+   silently supersede one. Fixed: `_find_similar_fact()` now takes an
+   optional `category` and constrains both its exact-match and
+   substring-fuzzy queries to it; `store_fact()` always passes the new
+   fact's category.
+3. **CRITICAL — TOCTOU race across concurrent extraction threads.**
+   `_find_similar_fact()` (read) and the subsequent reinforce/supersede/
+   insert (write) happened in separate `self._db_lock` acquisitions.
+   `extract_facts_realtime()` (main thread), batch extraction, and
+   per-turn extraction (each their own background thread) all call
+   `store_fact()` for the same user concurrently — two threads could both
+   see "no existing fact" and insert duplicates, or both reinforce from
+   the same stale snapshot and lose one of two observations. Fixed:
+   `self._db_lock` is now a `threading.RLock` (was `Lock`), and
+   `store_fact()` wraps its entire read-decide-write sequence in one
+   acquisition (`_store_fact_locked()` holds it for the whole method body;
+   the RLock is required because that method still calls
+   `_find_similar_fact()`/`update_fact()`, which each also take the lock).
+   Verified with a real 8-thread concurrent-write test
+   (`test_concurrent_identical_facts_produce_no_duplicate`) — all 8
+   observations correctly counted via `evidence_count`, no duplicate row.
+
+Not fixed this session (documented, see §5e for the reviewer's full
+writeup and reasoning): a same-subject-same-value-but-opposite-sentiment
+case ("ich liebe X" → later "ich hasse X", same extracted `value="X"`)
+would currently reinforce instead of registering as a real reversal —
+sentiment isn't part of the value comparison. Fixing this would need the
+extractor to also emit a polarity/sentiment field compared alongside
+`value`, which weakens the "value must be a short canonical answer"
+design the reinforcement logic relies on — flagged as a real gap, not
+attempted speculatively in the time available.
+
+## 5e. Session #4 specialized reviews (Memory, Concurrency, German runtime)
+
+Per the task's explicit ask, three subagents each reviewed a fixed scope
+of the *current* code (not a design proposal) and reported findings as a
+priority list. CRITICAL findings were fixed (see §5d and §3.5); this
+section records what was reviewed, at what confidence, and what's
+deliberately still open.
+
+**Memory reviewer** — read `core/memory_manager.py` in full plus
+`conversation_router.py`'s `_handle_memory_ops`. 3 CRITICAL (all fixed,
+§5d), 2 HIGH, 4 MEDIUM/LOW not fixed this session:
+- HIGH: `render_fact_de()` can still leak English `subject`/`value`
+  terms verbatim (extraction prompts give English examples like "editor",
+  "shipping carrier" — the LLM isn't told to keep those terms German).
+  Not fixed — would need prompt tuning + verification against a live
+  model, which this sandbox can't run.
+- HIGH: value comparison ignores sentiment reversal (see §5d, last
+  paragraph).
+- MEDIUM: `_SENSITIVE_KEYWORDS` uses substring matching without word
+  boundaries (`"kirche"`, `"glaube"`, `"partei"` can false-positive on
+  innocuous mentions) and is missing some real gaps (addiction, disability,
+  income/salary, separation/divorce). Not tightened this session — the
+  keyword list is already flagged in its own docstring as a best-effort
+  heuristic; retuning it needs real usage data, not a sandbox guess.
+- LOW: `handle_why()`'s topic-extraction stopword list is incomplete
+  ("mein/dein/hat/möchte" not stripped) — cosmetic, `search_facts_text`
+  still degrades gracefully on a noisier topic string.
+
+**Concurrency reviewer** — read the full `_ChatterboxAudioWriter`/
+`StreamingAudioPipeline`/`_process_speech_chunk` chain in `core/pipeline.py`
+plus the relevant parts of `core/tts.py`. 1 CRITICAL (fixed, §3.5), 2 HIGH
+(1 fixed, 1 documented), 2 MEDIUM (1 fixed, 1 documented):
+- HIGH, fixed (§3.5): `_build_ack_cache()` used the unthrottled synth path
+  for Chatterbox, so the ~9 ack phrases warmed up completely unprotected
+  against a concurrent live request, contrary to `_run_chatterbox_warmup`'s
+  documented intent.
+- HIGH, **not fixed** — documented instead: Kokoro's `StreamingAudioPipeline`
+  branch holds `_tts_lock` for the entire session including
+  `aplay.stdin.write()` backpressure; Chatterbox's branch releases it
+  before waiting on playback. This means `speak_ack()` can be starved for
+  the whole spoken duration of a response on Kokoro but not on Chatterbox.
+  Since Chatterbox is the active engine and Kokoro's streaming code is
+  otherwise untouched/working, changing Kokoro's lock scope for a
+  currently-inactive-engine inconsistency was judged higher risk than
+  value this session — flagged for whoever next touches Kokoro's
+  streaming path.
+- MEDIUM, fixed (§8): `LatencyTracker` is genuinely written from two
+  threads (the coordinator thread and `StreamingAudioPipeline`'s
+  `on_first_audio` callback thread) — now lock-protected instead of
+  relying on CPython's GIL making single dict writes safe by accident.
+- MEDIUM, not fixed: `finish_and_wait()`'s worst-case blocking time
+  (~30s thread-join timeout + ~90s aplay-wait timeout) is bounded but not
+  tight. Acceptable as a safety net against a truly stuck `aplay`, not
+  expected to be hit in normal operation — lowering it needs real timing
+  data from a live run to tune correctly, not a guess.
+
+**German runtime reviewer** (Explore agent, read-only, backend only —
+`web/*`, HUD, `jarvis-ui` explicitly excluded) — see §5a for the
+consolidated findings and the resulting backlog. Confirmed
+`skills/personal/conversation/skill.py` is **active** (`metadata.yaml:
+enabled: true`), not the dead code the previous session's docs implied —
+this session's docs/DEVELOPMENT.md note calling it "(DISABLED)" is stale.
+
 ## 6. Conventions
 
 - Config access: dotted-path `config.get("tts.chatterbox_endpoint", default)`
@@ -621,83 +854,165 @@ table model isn't enough.
   `python3 tests/unit/test_edge_cases.py --phase <id>`). Both live under
   `tests/unit/`.
 
-## 7. Open work / recommended next steps
+## 8. Latency instrumentation (`core/latency_tracker.py`, session #4)
 
-Roughly in priority order — see §3.4 for the detailed TTS-specific list,
-§5a-c for German-first / memory specifics.
+Real per-turn monotonic checkpoints — implemented, not just documented,
+per the explicit ask. One `LatencyTracker` instance per voice-command turn,
+held as `Coordinator._current_latency` (created in `_handle_command()`,
+cleared after the turn's summary is emitted). Checkpoints:
+`command_received` → `router_done` (routing **and** memory retrieval,
+which `ConversationRouter.route()` does internally and synchronously —
+not separately instrumented, see below) → `llm_start` → `llm_first_token`
+→ `first_speakable_chunk` (first `SpeechChunker` output) →
+`tts_first_pcm` (via `StreamingAudioPipeline`'s new `on_first_audio`
+callback, fired at the exact moment its "first chunk in Xs" log line
+already fires) → `response_done`.
 
-**Resolved this session (previously listed here, no longer open):**
-honorific-default question — user confirmed explicitly: "Sir"/"Ma'am" stays,
-it's an intentional persona element, not a German-first violation (see the
-persona note near the top of this doc). Chatterbox connection reuse/circuit
-breaker/connect-timeout — done (§3.4). Streaming queue backpressure — done
-(§3.1b). Sentence-final numbers not normalized — fixed (§3.3, was a real
-correctness bug). Ports/phone numbers read as cardinal numbers — fixed
-(§3.3). Memory candidate/confirmed tiers + reinforcement — done (§5c).
+Every turn logs one compact line at INFO
+(`[abc12345] JARVIS LATENCY — Routing+Memory: 12ms | LLM TTFT: 420ms | ...`)
+— never a transcript, never per-token spam — plus a structured
+`event_logger` emission (`category="performance", event="turn_latency"`)
+carrying raw per-stage offsets for a future p50/p95 rollup. Both are
+best-effort: `LatencyTracker.emit()` swallows any exception so
+instrumentation can never break a real voice turn, and `mark()` is
+idempotent (first call per stage wins) plus lock-protected (see §5e —
+it's genuinely written from two threads: the coordinator thread and
+`StreamingAudioPipeline`'s background thread via the `on_first_audio`
+callback).
 
-1. Live GPU run of the Chatterbox streaming path (`_ChatterboxAudioWriter`
-   producer/consumer, bounded queue, circuit breaker) — this environment
-   has no CUDA, so all of it is verified with fakes/mocks
-   (`tests/unit/test_streaming_audio_pipeline.py`,
-   `tests/unit/test_chatterbox_client.py`) but not yet observed against
-   the real server. Do this before relying on the latency win in
-   production.
-2. Cancellable/bounded contextual-ack synthesis so a slow Chatterbox ack
+**Scope, stated plainly**: this covers the portion of a turn within
+`core/pipeline.py`'s control. It does **not** cover VAD end-of-speech
+detection or STT (those run in `core/continuous_listener.py` /
+`core/stt_qwen3.py`, on a different thread, before a turn/turn-id even
+exists) — wiring that in would mean passing a turn-id from the listener
+thread into the coordinator, which wasn't done this session. It also
+doesn't separately measure memory retrieval from routing (both happen
+inside one `ConversationRouter.route()` call).
+
+**No real numbers exist yet.** This sandbox has no microphone, GPU, STT
+model, or LLM/Chatterbox server to run the actual voice loop against —
+every example in this section is illustrative of the *format*, not a
+measurement. The very first real data point should come from running
+JARVIS on Sleepy and reading the `JARVIS LATENCY` log lines it produces.
+
+## 9. Startup preflight (`scripts/preflight_check.py`, session #4)
+
+A single, small script — not a diagnostics framework — that answers "can
+JARVIS start cleanly right now, and if not, why": LLM main model
+(`:8080/health`) and small/fast model (`:8081/health`, config-driven),
+Chatterbox (`/health`, config-driven), Qwen3-ASR model directory, mic/
+speaker presence (`pactl list short sources|sinks`), memory DB + FAISS
+directory writability, WSL2 detection (`/proc/version`), storage path,
+free disk space, and required executables (`aplay`, `ffmpeg`, plus
+optional `whisper-cli`/`piper`/`llama-cli` paths from config.yaml). German,
+one line per check, exits 1 only on a genuinely CRITICAL failure (a down
+Chatterbox server is a WARN, not a FAIL — Piper is a real fallback).
+
+Actually run against this real environment during development (this
+machine *is* the real jarvis-data/config.yaml, just without the LLM/
+Chatterbox servers started in this session) — correctly detected the real
+mic/speakers, the real model paths, and the actually-running llama-server
+on `:8080`. Not a synthetic/mocked demonstration.
+
+Existing `jarvis.service`/`llama-server.service`/`flux-server.service`
+files in the repo root were checked per the task's instruction not to
+blindly duplicate service infrastructure — they're **stale upstream
+templates** (`/home/user/jarvis`, `/mnt/models/...`, unexpanded `$USER`,
+llama-server port matches `core/llm_router.py`'s hardcoded `:8080` but no
+Chatterbox service exists at all). Not rewritten this session — guessing
+at the real Sleepy paths/username for a systemd unit that can't be tested
+here felt riskier than useful; flagged in §10 as real Sleepy-side work
+instead.
+
+### Shutdown fix (found while checking startup/shutdown together)
+
+`jarvis_continuous.py`'s shutdown `finally` block (the primary voice
+runtime) never called `MemoryManager.save()` — the FAISS embedding index
+persist explicitly documented as "Call on shutdown" in that method's own
+docstring. `jarvis_web.py` already did this correctly; `jarvis_continuous.py`
+never did. SQLite facts themselves were never at risk (each `store_fact()`
+write commits immediately), but the FAISS semantic-search index's
+in-session additions were lost on every restart until the next periodic
+backfill. Fixed: added `self.memory_manager.save()` and
+`self.tts.kill_active()` (stops an in-flight `aplay` from being orphaned
+as a child process after the Python process exits) to the shutdown
+sequence. The signal handler's `sys.exit(0)` raises `SystemExit`, not
+`KeyboardInterrupt` — the surrounding `except KeyboardInterrupt` doesn't
+catch it, but the enclosing `finally:` still runs regardless of exception
+type, so this cleanup path was already reachable; it just didn't do
+enough.
+
+## 10. Open work / recommended next steps
+
+Roughly in priority order — see §3.4/§3.5 for TTS specifics, §5a-e for
+German-first/memory specifics, §8/§9 for instrumentation/preflight.
+
+**Resolved across sessions #3-4 (previously listed here, no longer open):**
+honorific-default question (Sir/Ma'am confirmed wanted) · Chatterbox
+connection reuse/circuit breaker/connect-timeout · streaming queue
+backpressure · sentence-final numbers not normalized (real bug, fixed) ·
+ports/phone numbers read as cardinal numbers · memory candidate/confirmed
+tiers + reinforcement · value-based reinforcement-vs-supersede (the
+"Kernproblem") · sensitive-topic risk gate · German memory rendering/
+commands/why-query · TTS startup warmup contention · 3 CRITICAL bugs from
+the memory/concurrency reviews (§5d/§5e) · real latency instrumentation
+(§8, implemented — was previously the single biggest documented gap) ·
+startup preflight script (§9).
+
+1. **German-first backlog — ~330-340 strings across ~12 files, see the
+   table in §5a.** The single largest remaining piece of work.
+   `skills/personal/conversation/skill.py` (~90, confirmed active) is the
+   best first target — it's a near-duplicate of `core/persona.py`'s
+   already-German pools, so equivalent phrasing already exists to adapt.
+2. Live GPU run of the Chatterbox streaming path (`_ChatterboxAudioWriter`
+   producer/consumer, bounded queue, circuit breaker, throttled warmup) —
+   this environment has no CUDA, so all of it is verified with fakes/
+   mocks but not yet observed against the real server. Do this before
+   relying on any of it in production.
+3. Cancellable/bounded contextual-ack synthesis so a slow Chatterbox ack
    can't delay the real response's first audio chunk (§3.4) — still open.
-3. Finish `skills/system/file_editor/skill.py` (~50 strings) and audit
-   `skills/system/developer_tools/skill.py` beyond the confirmation flow;
-   determine whether `skills/personal/conversation/skill.py` is active or
-   dead code before deciding whether to translate it too.
-4. Redesign fact storage/extraction to not be English-sentence-shaped
-   (§5b) — needed before memory-transparency responses can be fully
-   German without mixed-language sentences. This blocks natural German
-   output for `handle_transparency()` and the multi-fact forget listing
-   specifically (see §5a for what's already safely translated around it).
-5. Embedding-based contradiction detection for memory facts, evaluated
-   properly against a real embedding model (§5c documents why the
-   text-similarity approach that was tried doesn't work — don't repeat
-   that attempt; a semantic-similarity version might work but needs
-   real tuning this sandbox couldn't do).
-6. Vocal-behavior layer: now that `chatterbox_server.py` accepts
+4. Kokoro/Chatterbox `_tts_lock` scope inconsistency found by the
+   Concurrency reviewer (§5e) — Kokoro holds the lock through playback
+   backpressure, Chatterbox releases it earlier, so `speak_ack()`
+   starvation risk differs by engine. Not fixed (Kokoro is inactive,
+   judged lower priority than the Chatterbox-side fixes actually made).
+5. Redesign fact storage/extraction to not be English-sentence-shaped
+   (§5b) — `render_fact_de()` (§5d) works around this for facts with a
+   structured `value`, but older/one-group-extracted facts still fall
+   back to raw English content.
+6. Sentiment/polarity-aware value comparison for memory reinforcement
+   (§5d) — "ich liebe X" → "ich hasse X" currently reinforces instead of
+   registering as a reversal, since both extract the same `value="X"`.
+7. Embedding-based contradiction detection for memory facts (§5c/§5d
+   document why the text-similarity approach that was tried doesn't
+   work — don't repeat that attempt).
+8. Vocal-behavior layer: now that `chatterbox_server.py` accepts
    per-request `exaggeration`/`cfg_weight`/etc. overrides, design the
    policy that decides when to use them (e.g. per persona mood, per
    response category).
-7. Decide the fate of `core/tts_normalizer.py` (unused English normalizer) —
-   delete, or document as intentionally-kept groundwork for a future
-   English mode.
-8. Delete `legacy_backups_20260915/` once confirmed unneeded.
-9. `tests/unit/test_edge_cases.py` phase 7C-03 (`"Dr. Smith..."`) asserts
-   pre-abbreviation-guard chunking behavior — the test itself expects a
-   split that the (correct) abbreviation guard now prevents; it's a stale
-   test expectation, not a pipeline bug. Update the expectation rather
-   than "fixing" the chunker.
-10. **Real latency instrumentation — still not done, and still the single
-    biggest gap against the stated "feels instantaneous" goal.**
-    `core/pipeline.py`/`core/tts.py` emit some structured `event_logger`
-    timing events (e.g. synthesis RTF) but there's no single wake→
-    first-audio trace across VAD-endpointing/STT/intent/memory-retrieval/
-    LLM-TTFT/chunking/TTS-TTFA stages, and — because this sandbox has no
-    mic, GPU, STT model, or llama.cpp/Chatterbox server running — **no
-    live measurement of any kind exists for any of this project's TTS,
-    STT, LLM, or end-to-end latency claims.** Every "streamed faster",
-    "fails over in ~1.5s", etc. statement in this doc is an architectural
-    claim verified by code/mocks, not a measured one. Adding full-path
-    `time.monotonic()` checkpoints + a p50/p95 rollup, then actually
-    running it on the real Sleepy hardware, is required before any
-    latency number in this project can be trusted.
-11. STT hot-path (persistent model residency, adaptive endpointing), LLM
+9. Decide the fate of `core/tts_normalizer.py` (unused English normalizer)
+   and `core/health_check.py`'s `format_voice_summary()` (confirmed dead
+   code this session) — delete, or document as intentionally kept.
+10. Delete `legacy_backups_20260915/` once confirmed unneeded.
+11. `tests/unit/test_edge_cases.py` phase 7C-03 (`"Dr. Smith..."`) asserts
+    pre-abbreviation-guard chunking behavior — stale test expectation,
+    not a pipeline bug.
+12. Rewrite the stale `jarvis.service`/`llama-server.service`/
+    `flux-server.service` templates (§9) with real Sleepy paths/username
+    — needs to happen ON Sleepy, where the real paths/username are known
+    and the result can actually be tested; guessing them here would just
+    be a different flavor of wrong.
+13. STT hot-path (persistent model residency, adaptive endpointing), LLM
     TTFT (prompt/context size, prewarm, KV-cache reuse), and fast-paths
     for deterministic local commands (open app, set volume, etc. without
-    the 35B model) were all explicitly requested but require either live
-    hardware measurement or a larger design/implementation effort beyond
-    what a code-only sandbox session can responsibly do — not started.
-    Don't assume any of it is done; nothing in this bullet has been
-    touched across any session so far.
-12. Memory: no autonomy budget (max candidates/promotions per session),
+    the 35B model) — all explicitly requested, all require either live
+    hardware measurement or a larger implementation effort. **Now that
+    §8's instrumentation exists, the very next step on Sleepy should be:
+    run real turns, read the `JARVIS LATENCY` lines, and let the actual
+    bottleneck (not a guess) decide which of these to tackle first.**
+14. Memory: no autonomy budget (max candidates/promotions per session),
     no explicit consolidation job (session-end/idle-triggered review of
     short-term → long-term), no decay (candidates with low confidence
-    that age out un-reinforced) — §5c's reinforcement mechanism only
-    covers "the exact same fact observed again," it doesn't yet decay
-    stale unreinforced candidates over time. All explicitly requested;
-    not built this session — the additive tier/reinforcement work in §5c
-    was judged the highest-value, lowest-risk slice to ship now.
+    that age out un-reinforced). All explicitly requested; not built —
+    the additive tier/reinforcement/risk-gate work (§5c/§5d) was judged
+    the highest-value, lowest-risk slice to ship across these sessions.
