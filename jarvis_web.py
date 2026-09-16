@@ -197,6 +197,17 @@ class WebTTSProxy:
         # brackets real audio with a 'speaking' / 'idle' assistant_state
         # event for the /hud view, with no per-call-site plumbing needed.
         self.on_state_change = None
+        # Reference count of in-flight speak() jobs, not a queue — each
+        # call still gets its own thread (core/tts.py's TextToSpeech
+        # already serializes actual audio hardware access via its own
+        # internal lock; nothing here needs to duplicate that). This
+        # exists purely so overlapping speak() calls (a skill firing two
+        # lines back to back, a reminder landing mid-response) can't race
+        # the HUD into 'idle' while a later call is still speaking: state
+        # only flips to 'speaking' on the 0->1 transition and back to
+        # 'idle' on the 1->0 transition, never per-call.
+        self._active_speak_count = 0
+        self._speak_count_lock = threading.Lock()
 
     def speak(self, text, normalize=True):
         """Speak via TTS and optionally queue as announcement banner.
@@ -206,6 +217,19 @@ class WebTTSProxy:
         Proactive deliveries (reminders, alerts, rundowns) call speak()
         outside command processing, so they queue normally and appear
         as banners via the announcement pump.
+
+        This is the ONLY sanctioned way to trigger TTS in this file —
+        every call site that used to spawn threading.Thread(target=
+        tts_proxy.real_tts.speak, ...) directly now routes through here
+        instead, both so assistant_state gets broadcast correctly (see
+        _speak_and_notify) and so this _command_depth check is never
+        bypassed. All of today's call sites run nested inside
+        process_command()'s _command_depth increment, so this never
+        queues an unwanted announcement banner for them — but a new
+        call site added outside that nesting would start banner-queuing
+        text that's meant to be spoken only. There's no enforced
+        invariant here beyond that nesting, so keep it in mind before
+        calling speak() from somewhere new.
         """
         if self._command_depth == 0:
             with self._lock:
@@ -217,12 +241,18 @@ class WebTTSProxy:
         return True
 
     def _speak_and_notify(self, text, normalize=True):
-        if self.on_state_change:
+        with self._speak_count_lock:
+            self._active_speak_count += 1
+            became_active = self._active_speak_count == 1
+        if became_active and self.on_state_change:
             self.on_state_change('speaking')
         try:
             self.real_tts.speak(text, normalize)
         finally:
-            if self.on_state_change:
+            with self._speak_count_lock:
+                self._active_speak_count -= 1
+                became_idle = self._active_speak_count == 0
+            if became_idle and self.on_state_change:
                 self.on_state_change('idle')
 
     def get_pending_announcements(self) -> list[str]:
@@ -252,16 +282,23 @@ def _broadcast_assistant_state(app, state: str, **extra):
     Also stores it on app['assistant_state'] so a client that connects
     *between* state changes still gets the current state immediately
     (see websocket_handler) instead of staying blank until the next event.
+
+    Called from both the event-loop thread (_handle_chat_message, an
+    awaited coroutine) and plain background threads (WebTTSProxy's TTS
+    worker thread, via on_state_change). asyncio.get_event_loop() is only
+    valid to call from the thread that IS the running loop — calling it
+    from a worker thread either raises (no loop set there) or, worse, can
+    silently create/return the wrong loop. app['loop'] is the real
+    running loop, captured once in on_startup() (which does run on it),
+    so this needs no per-call loop lookup and works correctly from either
+    kind of caller.
     """
     payload = {'type': 'assistant_state', 'state': state, 'timestamp': time.time()}
     payload.update(extra)
     app['assistant_state'] = payload
     ws_conns = app.get('ws_connections')
-    if not ws_conns:
-        return
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
+    loop = app.get('loop')
+    if not ws_conns or loop is None:
         return
     text = json.dumps(payload)
     for ws_conn in list(ws_conns.keys()):
@@ -848,12 +885,7 @@ async def _start_structured_readback(ws, llm, conv_state, tts_proxy) -> tuple:
         await ws.send_json({"type": "stream_token", "token": preface + "\n\n"})
 
     # Speak preface
-    if tts_proxy.hybrid and tts_proxy.real_tts:
-        threading.Thread(
-            target=tts_proxy.real_tts.speak,
-            args=(preface,),
-            daemon=True,
-        ).start()
+    tts_proxy.speak(preface)
 
     # Deliver first chunk (and possibly more until a pause)
     full_text = preface + "\n\n"
@@ -883,12 +915,7 @@ async def _deliver_readback_chunks(ws, conv_state, tts_proxy) -> str:
             complete_msg = persona.readback_complete(session.source_title)
             if ws:
                 await ws.send_json({"type": "stream_token", "token": complete_msg + "\n"})
-            if tts_proxy.hybrid and tts_proxy.real_tts:
-                threading.Thread(
-                    target=tts_proxy.real_tts.speak,
-                    args=(complete_msg,),
-                    daemon=True,
-                ).start()
+            tts_proxy.speak(complete_msg)
             delivered_text += complete_msg
             # Clear session but record completion time for cooldown.
             # "next" within 30s gets "that's everything" instead of
@@ -903,12 +930,7 @@ async def _deliver_readback_chunks(ws, conv_state, tts_proxy) -> str:
             await ws.send_json({"type": "stream_token", "token": chunk.content + "\n\n"})
 
         # TTS this chunk (speak() normalizes by default)
-        if tts_proxy.hybrid and tts_proxy.real_tts:
-            threading.Thread(
-                target=tts_proxy.real_tts.speak,
-                args=(chunk.content,),
-                daemon=True,
-            ).start()
+        tts_proxy.speak(chunk.content)
 
         delivered_text += chunk.content + "\n\n"
 
@@ -917,12 +939,7 @@ async def _deliver_readback_chunks(ws, conv_state, tts_proxy) -> str:
             pause_msg = persona.readback_pause(after_type=chunk.section_type)
             if ws:
                 await ws.send_json({"type": "stream_token", "token": pause_msg + "\n"})
-            if tts_proxy.hybrid and tts_proxy.real_tts:
-                threading.Thread(
-                    target=tts_proxy.real_tts.speak,
-                    args=(pause_msg,),
-                    daemon=True,
-                ).start()
+            tts_proxy.speak(pause_msg)
             delivered_text += pause_msg
             break
 
@@ -946,12 +963,7 @@ async def _deliver_readback_section(ws, conv_state, tts_proxy, section_name: str
         await ws.send_json({"type": "stream_token", "token": section_text + "\n"})
         await ws.send_json({"type": "stream_end", "full_response": section_text})
 
-    if tts_proxy.hybrid and tts_proxy.real_tts:
-        threading.Thread(
-            target=tts_proxy.real_tts.speak,
-            args=(section_text,),
-            daemon=True,
-        ).start()
+    tts_proxy.speak(section_text)
 
     return (section_text, True)
 
@@ -1021,12 +1033,7 @@ async def _display_in_chat(ws, llm, conv_state, tts_proxy) -> tuple:
 
     # Brief spoken acknowledgment only
     ack = f"Here it is in the chat, {persona.get_honorific()}."
-    if tts_proxy.hybrid and tts_proxy.real_tts:
-        threading.Thread(
-            target=tts_proxy.real_tts.speak,
-            args=(ack,),
-            daemon=True,
-        ).start()
+    tts_proxy.speak(ack)
 
     return (formatted, True)
 
@@ -1318,12 +1325,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
                 await ws.send_json({"type": "stream_end", "full_response": response})
 
             # Speak the plan result if voice is enabled
-            if tts_proxy.hybrid and tts_proxy.real_tts:
-                threading.Thread(
-                    target=tts_proxy.real_tts.speak,
-                    args=(response,),
-                    daemon=True,
-                ).start()
+            tts_proxy.speak(response)
 
         # --- Readback session dispatch (P3.1 intents) ---
         elif result.intent == "readback_continue":
@@ -1349,31 +1351,16 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
                 await ws.send_json({"type": "stream_token", "token": _repeat_text})
                 await ws.send_json({"type": "stream_end", "full_response": _repeat_text})
             streamed = True
-            if tts_proxy.hybrid and tts_proxy.real_tts:
-                threading.Thread(
-                    target=tts_proxy.real_tts.speak,
-                    args=(_repeat_text,),
-                    daemon=True,
-                ).start()
+            tts_proxy.speak(_repeat_text)
 
         elif result.intent == "readback_recall":
             # Step or ingredient lookup — result.text has the answer
             result.text = _ensure_honorific_tail(result.text)
-            if tts_proxy.hybrid and tts_proxy.real_tts:
-                threading.Thread(
-                    target=tts_proxy.real_tts.speak,
-                    args=(result.text,),
-                    daemon=True,
-                ).start()
+            tts_proxy.speak(result.text)
 
         elif result.intent == "readback_stop":
             # Session already ended by router — speak summary
-            if tts_proxy.hybrid and tts_proxy.real_tts:
-                threading.Thread(
-                    target=tts_proxy.real_tts.speak,
-                    args=(result.text,),
-                    daemon=True,
-                ).start()
+            tts_proxy.speak(result.text)
 
         elif result.intent == "readback_request":
             # "Read that to me" — route cached content to structured readback
@@ -4746,6 +4733,23 @@ _CSP = (
     "base-uri 'self'"
 )
 
+# /hud only: allows Google Fonts (IBM Plex Mono/Sans) for the kiosk view's
+# typography. Kept separate from _CSP rather than broadening it globally —
+# no other page needs an external font host, so none of them should be
+# allowed to load one. See docs/UI_INTEGRATION.md for the tradeoff (this
+# is the HUD's one external/online dependency) and the self-hosted-font
+# alternative if the kiosk needs to run fully offline.
+_CSP_HUD = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "img-src 'self' data: blob:; "
+    "connect-src 'self' ws: wss:; "
+    "object-src 'none'; "
+    "base-uri 'self'"
+)
+
 
 async def index_handler(request):
     """Serve index.html for the root path."""
@@ -4763,7 +4767,7 @@ async def hud_handler(request):
     """
     resp = web.FileResponse(Path(__file__).parent / 'web' / 'hud.html')
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    resp.headers['Content-Security-Policy'] = _CSP
+    resp.headers['Content-Security-Policy'] = _CSP_HUD
     return resp
 
 
@@ -5025,6 +5029,12 @@ def create_app(config) -> web.Application:
 async def on_startup(app):
     """Initialize JARVIS components on server startup."""
     config = app['config']
+
+    # Captured on the event-loop thread (on_startup is awaited on it) so
+    # background threads can schedule coroutines onto it safely — see
+    # _broadcast_assistant_state()'s docstring for why this must not be
+    # asyncio.get_event_loop() called fresh from inside a worker thread.
+    app['loop'] = asyncio.get_running_loop()
 
     tts_proxy = WebTTSProxy()
     app['tts_proxy'] = tts_proxy
