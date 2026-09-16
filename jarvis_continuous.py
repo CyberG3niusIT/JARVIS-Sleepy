@@ -1041,6 +1041,21 @@ class JarvisContinuous:
                 self.logger.info("Shutdown requested")
             finally:
                 self.coordinator.shutdown()
+                # Stop any in-flight audio subprocess immediately rather
+                # than leaving it playing as an orphaned child process
+                # after this Python process has already exited.
+                if self.tts:
+                    self.tts.kill_active()
+                if self.memory_manager:
+                    # Persists the FAISS embedding index (MemoryManager.save()'s
+                    # own docstring: "Call on shutdown") — jarvis_web.py already
+                    # does this; jarvis_continuous.py (the primary voice
+                    # runtime) never did, so session-recent facts weren't
+                    # semantically searchable again until the next periodic
+                    # backfill. SQLite facts themselves were never at risk
+                    # (each write already commits immediately) — only the
+                    # FAISS index was the gap.
+                    self.memory_manager.save()
                 if self.context_window:
                     self.context_window.flush()
                 self.audio_queue.put(None)   # STT worker shutdown sentinel

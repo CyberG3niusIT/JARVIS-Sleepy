@@ -1041,7 +1041,7 @@ class TaskPlanner:
 
         # Nothing completed at all (failure, not cancellation)
         if not results:
-            return "I wasn't able to complete any of the steps for that request."
+            return "Ich konnte keinen der Schritte für diese Anfrage abschließen."
 
         # Single completed step — return its result directly
         if len(completed) == 1 and not failed and not skipped:

@@ -772,16 +772,22 @@ def format_voice_brief(health: dict) -> str:
 
     parts = []
     if red_count == 0 and yellow_count == 0:
-        parts.append(f"All systems nominal, {h}. Full report is on your screen.")
+        parts.append(f"Alle Systeme laufen normal, {h}. Der vollständige Bericht ist auf dem Bildschirm.")
     elif red_count > 0:
-        parts.append(f"I've found {red_count} critical issue{'s' if red_count != 1 else ''}"
-                     f" and {yellow_count} warning{'s' if yellow_count != 1 else ''}, {h}.")
+        parts.append(
+            f"Ich habe {red_count} kritische{'s' if red_count == 1 else ''} Problem"
+            f"{'' if red_count == 1 else 'e'} und {yellow_count} Warnung"
+            f"{'' if yellow_count == 1 else 'en'} gefunden, {h}."
+        )
         # Name the critical items
         red_names = [c['name'] for c in all_checks if c['status'] == 'red']
-        parts.append(f"Critical: {', '.join(red_names)}. Details are on your screen.")
+        parts.append(f"Kritisch: {', '.join(red_names)}. Details sind auf dem Bildschirm.")
     else:
-        parts.append(f"Systems are green with {yellow_count} minor warning{'s' if yellow_count != 1 else ''}, {h}."
-                     " Report is on your screen.")
+        parts.append(
+            f"Die Systeme sind im grünen Bereich, mit {yellow_count} kleinerer"
+            f"{'n' if yellow_count != 1 else ''} Warnung{'en' if yellow_count != 1 else ''}, {h}."
+            " Der Bericht ist auf dem Bildschirm."
+        )
 
     return " ".join(parts)
 
