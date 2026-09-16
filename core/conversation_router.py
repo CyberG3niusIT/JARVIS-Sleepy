@@ -1266,6 +1266,16 @@ class ConversationRouter:
                 open_window=15.0,
             )
 
+        if mm.is_why_query(command):
+            text = mm.handle_why(command, user_id)
+            logger.info("Handled by memory provenance query")
+            return RouteResult(
+                text=text, intent="memory_why",
+                source="memory", handled=True,
+                match_info={"layer": "P3.5-memory", "skill_name": "memory"},
+                open_window=15.0,
+            )
+
         if mm.is_fact_request(command):
             # Ensure the fact is persisted. on_message() already ran extract_facts_realtime()
             # but EXPLICIT_PATTERNS only cover "remember that X" — not "remember I X" or

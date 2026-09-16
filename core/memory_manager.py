@@ -91,6 +91,41 @@ class MemoryManager:
     MAX_FACT_CONFIDENCE = 0.99
     EVIDENCE_CONFIDENCE_STEP = 0.05
 
+    # ------------------------------------------------------------------
+    # Sensitive-topic risk gate ("Leine"/"Maulkorb"): a non-explicit
+    # (inferred/per_turn) fact touching one of these topics is capped
+    # below CANDIDATE_CONFIDENCE_THRESHOLD forever — no amount of
+    # reinforcement promotes it to "confirmed." Only the user stating it
+    # explicitly (source="explicit") can make it a confirmed fact. This
+    # is a best-effort keyword heuristic, not a real classifier —
+    # deliberately conservative, since a false positive here just keeps
+    # an innocuous fact as a permanent candidate (low cost), while a
+    # false negative could let a sensitive inference get silently
+    # promoted to confirmed truth (much higher cost).
+    # ------------------------------------------------------------------
+    _SENSITIVE_CATEGORIES = frozenset({"health"})
+    _SENSITIVE_KEYWORDS = frozenset({
+        # German
+        "krankheit", "diagnose", "depression", "angststörung", "psychisch",
+        "therapie", "medikament", "religion", "gläubig", "glaube", "kirche",
+        "politisch", "partei", "wahlkampf", "sexualität", "orientierung",
+        "schulden", "insolvenz", "pleite", "straftat", "verurteilt",
+        "verhaftet", "vorstrafe", "affäre", "schwanger",
+        # English (extraction/legacy content is still English sentences)
+        "illness", "diagnosed", "depression", "anxiety", "mental health",
+        "therapy", "medication", "religion", "religious", "political",
+        "sexuality", "orientation", "debt", "bankrupt", "bankruptcy",
+        "arrested", "convicted", "criminal record", "affair", "pregnant",
+    })
+    _SENSITIVE_CAP_CONFIDENCE = 0.75  # stays below CANDIDATE_CONFIDENCE_THRESHOLD
+
+    def _is_sensitive(self, category: str, content: str) -> bool:
+        """Best-effort check for whether a fact touches a risk-gated topic."""
+        if category in self._SENSITIVE_CATEGORIES:
+            return True
+        text = content.lower()
+        return any(kw in text for kw in self._SENSITIVE_KEYWORDS)
+
     EXPLICIT_PATTERNS = [
         # Preferences (positive)
         (re.compile(r"\b(?:i|I) (?:really )?(?:prefer|like|love|enjoy|always use|always go with)\s+(.+)", re.IGNORECASE), "preference"),
@@ -142,7 +177,12 @@ class MemoryManager:
         self.proactive_threshold = config.get("conversational_memory.proactive_confidence_threshold", 0.45)
 
         # Thread safety
-        self._db_lock = threading.Lock()
+        # RLock, not Lock: store_fact() wraps its whole read-decide-write
+        # sequence in one acquisition (fixes a TOCTOU race — see its
+        # docstring) but calls _find_similar_fact()/update_fact(), which
+        # each also acquire this same lock internally. A plain Lock would
+        # self-deadlock on that nested acquisition.
+        self._db_lock = threading.RLock()
         self._message_count_since_batch = 0
         self._surfaced_this_window = set()  # fact_ids surfaced in current conversation window
         self._pending_forget = None  # Phase 6: pending forget confirmation
@@ -196,13 +236,18 @@ class MemoryManager:
                     )
                 """)
 
-                # Migration: evidence_count wasn't in the original schema.
-                # Idempotent — SQLite has no "ADD COLUMN IF NOT EXISTS".
+                # Migrations: evidence_count and value weren't in the
+                # original schema. Idempotent — SQLite has no
+                # "ADD COLUMN IF NOT EXISTS".
                 try:
                     conn.execute(
                         "ALTER TABLE facts ADD COLUMN evidence_count "
                         "INTEGER NOT NULL DEFAULT 1"
                     )
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+                try:
+                    conn.execute("ALTER TABLE facts ADD COLUMN value TEXT")
                 except sqlite3.OperationalError:
                     pass  # column already exists
 
@@ -561,12 +606,23 @@ class MemoryManager:
         r"(?:that|the) .+? from (?:yesterday|last (?:week|time|session))",
         r"(?:pull up|bring up|show me) (?:that|the|those) .+? (?:from|we)",
         r"what (?:were|was) (?:that|those) (?:results?|recipe|article|search)",
+        # German — this is the primary active language (see docs/ARCHITECTURE.md
+        # §5a); English patterns kept above as a fallback.
+        r"erinnerst du dich (?:noch )?an",
+        r"was (?:hatten wir|haben wir) über .+? (?:besprochen|geredet|gesprochen)",
+        r"was (?:weißt|wusstest) du (?:noch |eigentlich )?über",
+        r"haben wir (?:schon )?(?:mal )?(?:über|von) .+? (?:gesprochen|geredet|geplaudert)",
+        r"was habe ich (?:dir )?(?:mal |schon )?über .+? (?:gesagt|erzählt)",
+        r"wann haben wir (?:zuletzt |das letzte mal )?über .+? gesprochen",
     ]
 
     FACT_REQUEST_PATTERNS = [
         r"^(?:remember|don't forget|keep in mind)\s+that\s+",
         r"^(?:remember|don't forget|keep in mind)\s+my\s+",
         r"^(?:remember|don't forget|keep in mind)\s+i\s+",
+        # German
+        r"^(?:merke dir|denk daran|vergiss nicht)\s*,?\s*(?:dass\s+)?",
+        r"^(?:merke dir|denk daran|vergiss nicht)\s+mein(?:e|en|em)?\s+",
     ]
 
     # Phrases that look like "remember X" but aren't fact storage requests
@@ -650,6 +706,13 @@ class MemoryManager:
             r"^when did (?:we|I) (?:last )?(?:discuss|talk about)\s+",
             r"^last time I (?:asked|mentioned|said|talked) about\s+",
             r"^what do you (?:know|remember) about\s+",
+            # German — primary active language; English kept above as fallback.
+            r"^erinnerst du dich (?:noch )?an\s+",
+            r"^was (?:hatten wir|haben wir) über\s+",
+            r"^was (?:weißt|wusstest) du (?:noch |eigentlich )?über\s+",
+            r"^haben wir (?:schon )?(?:mal )?(?:über|von)\s+",
+            r"^was habe ich (?:dir )?(?:mal |schon )?über\s+",
+            r"^wann haben wir (?:zuletzt |das letzte mal )?über\s+",
         ]
         for pattern in strip_patterns:
             result = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
@@ -660,6 +723,10 @@ class MemoryManager:
         # Strip trailing question mark and common suffixes
         text = re.sub(r"\?$", "", text).strip()
         text = re.sub(r"\s+(?:again|exactly|specifically)$", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(
+            r"\s+(?:besprochen|geredet|gesprochen|gesagt|erzählt|erwähnt)$",
+            "", text, flags=re.IGNORECASE,
+        ).strip()
 
         # If stripping failed and we still have the full query, use it as-is
         # (FAISS semantic search handles noisy queries well)
@@ -670,13 +737,25 @@ class MemoryManager:
     # ------------------------------------------------------------------
 
     FORGET_PATTERNS = [
-        r"(?:forget|delete|remove|erase) (?:what (?:i|you) (?:said|know) about|everything about|the fact about)\s+(.+)",
-        r"forget (?:that|the) (.+)",
+        # Negative lookbehind (?<!don't )(?<!do not ) throughout: "don't
+        # forget that X" / "do not forget the Y" is a FACT_REQUEST (the
+        # opposite meaning — remember it), not a forget request. Mirrors
+        # the German patterns' (?!\s+nicht) exclusion below.
+        r"(?<!don't )(?<!do not )(?:forget|delete|remove|erase) (?:what (?:i|you) (?:said|know) about|everything about|the fact about)\s+(.+)",
+        r"(?<!don't )(?<!do not )forget (?:that|the) (.+)",
         r"(?:don't|do not) remember (.+?) (?:anymore|any more|any longer)",
         # Broad / contextual forget — "forget all of that", "forget everything",
         # "delete it all", "erase all that".  Capture group is intentionally
         # non-empty so _extract_forget_topic can detect the vague reference.
         r"(?:forget|delete|remove|erase) (all(?: of)? (?:that|this|it|them)|it all|everything)",
+        # German — primary active language; English kept above as fallback.
+        # Negative lookahead (?!\s+nicht) throughout: "vergiss nicht, dass..."
+        # means the opposite (a FACT_REQUEST, not a forget) and must not
+        # match here.
+        r"(?:vergiss|lösch(?:e)?|entferne)(?!\s+nicht)\s+(?:die erinnerung an|alles über|was (?:ich|du) über)\s+(.+)",
+        r"(?:vergiss|lösch(?:e)?|entferne)(?!\s+nicht)\s+(?:das über|die tatsache über)\s+(.+)",
+        r"das (?:mit|über) (.+?) (?:kannst du|sollst du) (?:wieder )?vergessen",
+        r"(?:vergiss|lösch(?:e)?|entferne)(?!\s+nicht)\s+(alles(?: davon)?|das alles|es alles)",
     ]
 
     # Vague topics that signal "forget whatever we just discussed"
@@ -684,6 +763,8 @@ class MemoryManager:
         "all of that", "all of this", "all of it", "all of them",
         "all that", "all this", "all it", "all them",
         "it all", "everything",
+        # German
+        "alles", "alles davon", "das alles", "es alles",
     })
 
     TRANSPARENCY_PATTERNS = [
@@ -692,7 +773,84 @@ class MemoryManager:
         r"show me (?:my|what you) (?:know|remember|stored)",
         r"what have you learned about me",
         r"tell me (?:everything |all (?:that )?)?you (?:know|remember) about me",
+        # German — primary active language; English kept above as fallback.
+        r"was weißt du (?:eigentlich |denn )?über mich",
+        r"was (?:für )?(?:fakten|erinnerungen|informationen) hast du (?:über mich|gespeichert)",
+        r"was hast du (?:so )?über mich (?:gelernt|gespeichert|herausgefunden)",
+        r"zeig mir,? was du (?:über mich )?(?:weißt|gespeichert hast)",
+        r"welche vermutungen hast du (?:so )?über mich",
+        r"erzähl mir,? was du über mich weißt",
     ]
+
+    WHY_PATTERNS = [
+        # German — primary active language.
+        r"warum (?:glaubst|denkst|meinst) du,? (?:dass\s+)?(.+)",
+        r"woher weißt du,? (?:dass\s+)?(.+)",
+        r"wie kommst du darauf,? (?:dass\s+)?(.+)",
+        # English fallback
+        r"why do you (?:think|believe) (?:that\s+)?(.+)",
+        r"how do you know (?:that\s+)?(.+)",
+    ]
+
+    def is_why_query(self, text: str) -> bool:
+        """Detect a provenance question ("why do you believe X?")."""
+        return any(re.search(p, text.lower()) for p in self.WHY_PATTERNS)
+
+    def handle_why(self, query: str, user_id: str = "primary_user") -> str:
+        """Explain provenance/confidence for the best-matching fact about
+        a topic — the "Warum glaube ich das?" transparency requirement
+        (§8/§41). Distinguishes an explicit user statement from a
+        system observation, and names how many times an inference was
+        reinforced rather than presenting it with false authority."""
+        from core.honorific import get_honorific
+        h = get_honorific()
+
+        _TOPIC_STOPWORDS = frozenset({
+            "ich", "du", "er", "sie", "wir", "es", "das", "dass",
+            "mag", "mögen", "benutze", "benutzt", "nutze", "nutzt",
+            "habe", "bin", "verwende", "verwendet", "i", "you", "it",
+        })
+
+        topic = None
+        for pattern in self.WHY_PATTERNS:
+            m = re.search(pattern, query.lower())
+            if m and m.groups():
+                raw_topic = m.group(1).strip().rstrip(".,!?;:")
+                # Strip pronouns/verbs so "ich VS Code mag" -> "VS Code" —
+                # search_facts_text() is a plain substring match, not
+                # semantic, so a clean topic matters here without an
+                # embedding model to fall back on.
+                words = [w for w in raw_topic.split()
+                         if w.strip(".,!?;:").lower() not in _TOPIC_STOPWORDS]
+                topic = " ".join(words) if words else raw_topic
+                break
+        if not topic:
+            return f"Wozu genau, {h}? Nennen Sie mir bitte noch einmal das Thema."
+
+        matches = self.search_facts_text(topic, user_id)
+        if not matches and self.embedding_model:
+            matches = [
+                f for f in self._search_facts_semantic(topic, user_id, top_k=3)
+                if f.get("score", 0) >= 0.45
+            ]
+        if not matches:
+            return f"Dazu habe ich keine gespeicherte Grundlage, {h}."
+
+        fact = matches[0]
+        phrase = self.render_fact_de(fact)
+        if fact.get("source") == "explicit":
+            return f"Das haben Sie mir selbst so gesagt, {h}: {phrase}."
+
+        evidence = fact.get("evidence_count") or 1
+        if evidence > 1:
+            return (
+                f"Das ist eine Vermutung, {h} — ich habe es {evidence} Mal "
+                f"beobachtet: {phrase}. Bestätigt haben Sie es mir nicht."
+            )
+        return (
+            f"Das ist nur eine einmalige Beobachtung, {h}, keine bestätigte "
+            f"Tatsache: {phrase}."
+        )
 
     def is_forget_request(self, text: str) -> bool:
         """Detect if user is requesting memory deletion."""
@@ -720,8 +878,8 @@ class MemoryManager:
                         matching_facts.append(fact)
             else:
                 # No recent recalls — ask for clarification instead of dumping everything
-                return (f"I'm not sure what you'd like me to forget, {get_honorific()}. "
-                        f"Could you be more specific about which memories to remove?")
+                return (f"Ich bin nicht sicher, was ich vergessen soll, {get_honorific()}. "
+                        f"Können Sie genauer sagen, welche Erinnerung gemeint ist?")
         else:
             matching_facts = self.search_facts_text(topic, user_id)
 
@@ -742,17 +900,20 @@ class MemoryManager:
 
         count = len(matching_facts)
         h = get_honorific()
-        # Show facts in second person ("You love X") since we're talking to the owner
-        phrases = [f"\"{self._fact_to_phrase(f, for_user_id=user_id)}\"" for f in matching_facts]
+        # render_fact_de() prefers the structured subject/value pair
+        # (short, mostly language-neutral terms) over the raw English
+        # content sentence — see its docstring for why a full sentence
+        # can't be reliably translated at render time.
+        phrases = [f"\"{self.render_fact_de(f)}\"" for f in matching_facts]
         if count == 1:
             return (
-                f"I found one stored fact about that: {phrases[0]}. "
-                f"Shall I remove it, {h}?"
+                f"Ich habe dazu einen gespeicherten Eintrag gefunden: {phrases[0]}. "
+                f"Soll ich ihn entfernen, {h}?"
             )
         listing = "; ".join(phrases)
         return (
-            f"I found {count} stored facts about that, {h}: {listing}. "
-            f"Shall I remove them all?"
+            f"Ich habe dazu {count} gespeicherte Einträge gefunden, {h}: {listing}. "
+            f"Soll ich sie alle entfernen?"
         )
 
     def confirm_forget(self) -> str:
@@ -782,7 +943,10 @@ class MemoryManager:
         return f"Verstanden, {get_honorific()}. Ich behalte diese Erinnerungen."
 
     def handle_transparency(self, query: str, user_id: str = "primary_user") -> str:
-        """Return a natural summary of stored facts with examples."""
+        """Return a natural German summary of stored facts with examples,
+        distinguishing confirmed facts from candidates/observations
+        (§10 "Leine" transparency requirement — a candidate must never
+        be presented with the same authority as a confirmed fact)."""
         from core.honorific import get_honorific
         h = get_honorific()
         all_facts = self.get_facts(user_id, limit=50)
@@ -795,41 +959,56 @@ class MemoryManager:
         if not facts:
             return f"Ich habe noch keine konkreten Fakten über Sie gespeichert, {h}."
 
+        confirmed = [f for f in facts if not self.is_candidate(f)]
+        candidates = [f for f in facts if self.is_candidate(f)]
         total = len(facts)
 
-        # Qualitative descriptor
         if total <= 2:
-            quantity = "a couple of things"
+            quantity = "ein paar Dinge"
         elif total <= 5:
-            quantity = "a few things"
+            quantity = "einiges"
         elif total <= 10:
-            quantity = "quite a bit"
+            quantity = "so einiges"
         else:
-            quantity = "quite a lot"
+            quantity = "eine ganze Menge"
 
-        # Pick up to 3 representative examples, phrased in second person
-        examples = []
-        for f in facts[:3]:
-            phrase = self._fact_to_phrase(f, for_user_id=user_id)
-            if phrase:
-                examples.append(phrase)
+        examples = [
+            phrase for f in confirmed[:3]
+            if (phrase := self.render_fact_de(f))
+        ]
 
         if not examples:
-            return f"I know {quantity} about you, {h}. Would you like me to go through it?"
+            # Only candidates/observations exist — say so explicitly
+            # rather than stating an unconfirmed inference as fact.
+            cand_examples = [
+                phrase for f in candidates[:2]
+                if (phrase := self.render_fact_de(f))
+            ]
+            if cand_examples:
+                listing = " und ".join(cand_examples)
+                return (
+                    f"Dazu habe ich nichts Bestätigtes gespeichert, {h}. Ich habe "
+                    f"aber beobachtet: {listing}. Soll ich mir das als Präferenz merken?"
+                )
+            return f"Ich weiß {quantity} über Sie, {h}. Möchten Sie, dass ich es durchgehe?"
 
-        # Join examples with natural connectors
         if len(examples) == 1:
-            example_str = f"for instance, {examples[0]}"
+            example_str = f"zum Beispiel {examples[0]}"
         elif len(examples) == 2:
-            example_str = f"for instance, {examples[0]} and {examples[1]}"
+            example_str = f"zum Beispiel {examples[0]} und {examples[1]}"
         else:
-            example_str = f"for instance, {examples[0]}, {examples[1]}, and {examples[2]}"
+            example_str = f"zum Beispiel {examples[0]}, {examples[1]} und {examples[2]}"
 
-        # Uppercase first letter without lowercasing the rest (unlike str.capitalize())
-        example_sentence = example_str[0].upper() + example_str[1:]
+        candidate_note = ""
+        if candidates:
+            candidate_note = (
+                f" Außerdem habe ich {len(candidates)} unbestätigte "
+                f"Vermutung(en), falls Sie die ebenfalls hören möchten."
+            )
+
         return (
-            f"I know {quantity} about you, {h}. {example_sentence}. "
-            f"Is there something in particular you'd like me to recall?"
+            f"Ich weiß {quantity} über Sie, {h}. {example_str}.{candidate_note} "
+            f"Gibt es etwas Bestimmtes, an das ich mich erinnern soll?"
         )
 
     @staticmethod
@@ -965,6 +1144,28 @@ class MemoryManager:
         # Speaking to someone else (or no target) — return as stored
         return content
 
+    def render_fact_de(self, fact: dict) -> str:
+        """Render a fact as a short phrase safe to drop into a German
+        sentence, for spoken transparency/forget/recall output.
+
+        Prefers the structured subject/value pair (§5c) — short,
+        often-language-neutral technical terms like "VS Code" or "DHL"
+        read fine embedded in an otherwise-German sentence — over the
+        full stored content sentence, which is still an English
+        third-person sentence produced by _first_to_third_person()'s
+        English grammar engine and can't be reliably translated at
+        render time. Facts extracted before this session (or via the
+        one-group free-form pattern, which has no clean key/value
+        split) have no `value` and fall back to the raw English content
+        — a known, documented limitation (see docs/ARCHITECTURE.md
+        §5b/§5c), not a silent failure.
+        """
+        value = fact.get("value")
+        subject = (fact.get("subject") or "").replace("_", " ").strip()
+        if value:
+            return f"{subject}: {value}" if subject else value
+        return fact.get("content", "")
+
     def list_facts_by_category(self, user_id: str, category: str = None) -> str:
         """Detailed listing for voice or console delivery."""
         from core.honorific import get_honorific
@@ -974,8 +1175,9 @@ class MemoryManager:
 
         lines = []
         for f in facts:
-            source_label = "you told me" if f["source"] == "explicit" else "I inferred"
-            lines.append(f"  - {f['content']} ({source_label}, {f['confidence']:.0%} confidence)")
+            source_label = "von Ihnen bestätigt" if f["source"] == "explicit" else "vermutet"
+            phrase = self.render_fact_de(f)
+            lines.append(f"  - {phrase} ({source_label}, {f['confidence']:.0%} Konfidenz)")
 
         return "\n".join(lines)
 
@@ -991,7 +1193,8 @@ class MemoryManager:
             if match and match.group(1):
                 return match.group(1).strip().rstrip(".,!?;:")
         # Fallback: strip common prefixes
-        for prefix in ["forget ", "delete ", "remove ", "erase "]:
+        for prefix in ["forget ", "delete ", "remove ", "erase ",
+                       "vergiss ", "lösche ", "lösch ", "entferne "]:
             if text.lower().startswith(prefix):
                 return text[len(prefix):].strip().rstrip(".,!?;:")
         return text
@@ -1036,6 +1239,7 @@ class MemoryManager:
                 elif len(groups) == 1:
                     fact_content = groups[0].strip()
                     subject = self._extract_subject(fact_content)
+                    value = None  # free-form sentence — no clean key/value split
                 else:
                     continue
 
@@ -1070,6 +1274,7 @@ class MemoryManager:
                     "category": category,
                     "subject": subject,
                     "content": fact_content,
+                    "value": value,
                     "source": "explicit",
                     "confidence": confidence,
                     "source_messages": json.dumps([timestamp]),
@@ -1123,7 +1328,8 @@ class MemoryManager:
             content = message.get("content", "").lower().strip()
             is_meta = (self.is_forget_request(content) or
                        self.is_recall_query(content) or
-                       self.is_transparency_request(content))
+                       self.is_transparency_request(content) or
+                       self.is_why_query(content))
             self.last_extracted = [] if is_meta else self.extract_facts_realtime(message)
             self._message_count_since_batch += 1
             if self._message_count_since_batch >= self.batch_interval:
@@ -1149,14 +1355,19 @@ class MemoryManager:
         "that define WHO {user_name} IS as a person.\n\n"
         "For each fact found, output a JSON line with:\n"
         '- "category": one of [preference, relationship, habit, opinion, location, work, health, general]\n'
-        '- "subject": brief topic (1-3 words)\n'
+        '- "subject": brief topic (1-3 words), e.g. "editor", "shipping carrier"\n'
+        '- "value": the short canonical answer for that subject, e.g. "VS Code", "DHL" — '
+        "omit or use null if the fact has no single clean value (e.g. a general habit)\n"
         '- "content": the fact in third person, ALWAYS using their name "{user_name}" (never "User")\n\n'
         "RULES:\n"
         "- Only extract DURABLE identity facts — things true next month (hobbies, relationships, preferences, where they live, what they do).\n"
         "- Use NEUTRAL phrasing. Say 'mentioned' or 'likes' — NOT 'prefers' or 'favorite' unless they explicitly said those words.\n"
         "- DO NOT extract: appointments, reminders, calendar events, scheduled calls, one-time plans, "
         "transient tasks, what they are doing right now, what is on screen, commands to the assistant.\n"
-        "- Each fact must be at least 10 characters with 3+ meaningful words.\n\n"
+        "- Each fact must be at least 10 characters with 3+ meaningful words.\n"
+        "- IMPORTANT: use the SAME \"subject\" wording for the same real-world attribute every time "
+        "(e.g. always \"editor\", never sometimes \"IDE\" or \"code editor\") so repeated or changed "
+        "facts about it can be matched up correctly.\n\n"
         "Messages:\n{messages}\n\n"
         "Output only JSON lines, one per fact. If no facts found, output nothing."
     )
@@ -1213,6 +1424,7 @@ class MemoryManager:
                         "user_id": user_id,
                         "category": fact_data.get("category", "general"),
                         "subject": fact_data.get("subject", "unknown"),
+                        "value": fact_data.get("value"),
                         "content": content,
                         "source": "inferred",
                         "confidence": 0.70,
@@ -1239,7 +1451,9 @@ class MemoryManager:
         "Extract any NEW personal facts that define WHO {user_name} IS from this exchange.\n\n"
         "For each fact, output a JSON line:\n"
         '- "category": one of [preference, relationship, habit, opinion, location, work, health, general]\n'
-        '- "subject": brief topic (1-3 words)\n'
+        '- "subject": brief topic (1-3 words), e.g. "editor", "shipping carrier"\n'
+        '- "value": the short canonical answer for that subject, e.g. "VS Code", "DHL" — '
+        "omit or use null if the fact has no single clean value\n"
         '- "content": the fact in third person, ALWAYS using their name "{user_name}" (never "User")\n\n'
         "RULES:\n"
         "- Only extract DURABLE identity facts — things true next month (hobbies, relationships, preferences, where they live, what they do).\n"
@@ -1247,6 +1461,8 @@ class MemoryManager:
         "- DO NOT extract: greetings, questions, commands, appointments, reminders, calendar events, "
         "scheduled calls, one-time plans, transient tasks, what is on screen.\n"
         "- Each fact must be at least 10 characters with 3+ meaningful words.\n"
+        "- IMPORTANT: use the SAME \"subject\" wording for the same real-world attribute every time "
+        "so repeated or changed facts about it can be matched up correctly.\n"
         "If no facts found, output nothing."
     )
 
@@ -1313,6 +1529,7 @@ class MemoryManager:
                         "user_id": user_id,
                         "category": fact_data.get("category", "general"),
                         "subject": fact_data.get("subject", "unknown"),
+                        "value": fact_data.get("value"),
                         "content": content,
                         "source": "per_turn",
                         "confidence": 0.75,
@@ -1336,7 +1553,24 @@ class MemoryManager:
 
     def store_fact(self, fact: dict) -> Optional[str]:
         """Store a new fact. Returns fact_id (existing, reinforced, or
-        new), or None only if there is truly nothing to do."""
+        new), or None only if there is truly nothing to do.
+
+        The whole read (_find_similar_fact) -> decide (reinforce/
+        supersede/insert) -> write sequence runs under one self._db_lock
+        acquisition (RLock — see its definition). extract_facts_realtime
+        (main thread), batch extraction, and per-turn extraction (each
+        their own background thread) can all call this concurrently for
+        the same user; without one atomic critical section here, two
+        threads could both see "no existing fact" and insert duplicate
+        rows, or both reinforce from the same stale snapshot and lose one
+        of two observations (TOCTOU race).
+        """
+        with self._db_lock:
+            return self._store_fact_locked(fact)
+
+    def _store_fact_locked(self, fact: dict) -> Optional[str]:
+        """store_fact()'s actual logic — must only be called while
+        holding self._db_lock (see store_fact())."""
         user_id = fact.get("user_id") or "primary_user"
         # Normalize subject casing/whitespace at the point of both write
         # and lookup — the exact-match branch of _find_similar_fact()
@@ -1346,15 +1580,41 @@ class MemoryManager:
         subject = (fact.get("subject") or "").strip().lower()
         content = fact.get("content", "")
 
-        # Check for duplicate/update
-        existing = self._find_similar_fact(user_id, subject, content)
+        # Check for duplicate/update — constrained to the same category
+        # (see _find_similar_fact's docstring: an unconstrained generic
+        # subject like "mutter" could otherwise match two unrelated facts).
+        category_for_match = fact.get("category", "general")
+        existing = self._find_similar_fact(user_id, subject, content, category=category_for_match)
         if existing:
-            if existing["content"].lower().strip() == content.lower().strip():
-                # Exact duplicate of an existing fact: reinforce rather
-                # than silently no-op. Repeated observation of the same
-                # candidate is exactly the evidence that should grow its
-                # confidence over time (see CANDIDATE_CONFIDENCE_THRESHOLD
-                # docstring above) instead of being thrown away.
+            new_value = (fact.get("value") or "").strip().lower()
+            existing_value = (existing.get("value") or "").strip().lower()
+
+            if new_value and existing_value:
+                # Structured comparison: same canonical value means this
+                # is the same underlying fact restated in different
+                # words ("Alex nutzt häufig VS Code" vs "Alex arbeitet
+                # meistens mit VS Code" — both value="VS Code") — a
+                # REINFORCEMENT. A different value for the same subject
+                # ("VS Code" -> "Cursor") is a real change — SUPERSEDE.
+                # This is deliberately not text-similarity: measured on
+                # realistic pairs, string similarity scores a genuine
+                # contradiction as MORE similar than a paraphrase of the
+                # same fact (see docs/ARCHITECTURE.md §5c) — comparing
+                # the extracted value instead of the whole sentence
+                # sidesteps that entirely.
+                is_same_fact = (new_value == existing_value)
+            else:
+                # No structured value on one or both sides (older data,
+                # or a one-group free-form extraction with no clean
+                # key/value split) — fall back to exact content
+                # comparison, the only reliable check free text allows.
+                is_same_fact = existing["content"].lower().strip() == content.lower().strip()
+
+            if is_same_fact:
+                # Reinforce rather than silently no-op or duplicate.
+                # Repeated observation of the same candidate is exactly
+                # the evidence that should grow its confidence over time
+                # (see CANDIDATE_CONFIDENCE_THRESHOLD docstring above).
                 self._reinforce_fact(existing)
                 return existing["fact_id"]
             # Supersede old fact
@@ -1365,23 +1625,33 @@ class MemoryManager:
             new_id = str(uuid.uuid4())
 
         now = time.time()
+        category = fact.get("category", "general")
+        source = fact.get("source", "explicit")
+        confidence = fact.get("confidence", 0.90)
+        if source != "explicit" and self._is_sensitive(category, content):
+            # Risk gate (§7 "Leine"): a non-explicit inference about a
+            # sensitive topic never starts above the cap, no matter what
+            # confidence the extractor assigned it.
+            confidence = min(confidence, self._SENSITIVE_CAP_CONFIDENCE)
+
         with self._db_lock:
             conn = sqlite3.connect(str(self.db_path))
             try:
                 conn.execute("""
                     INSERT INTO facts
-                        (fact_id, user_id, category, subject, content, source,
+                        (fact_id, user_id, category, subject, content, value, source,
                          confidence, source_messages, created_at, last_referenced,
                          times_referenced, superseded_by, deleted)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0)
                 """, (
                     new_id,
                     user_id,
-                    fact.get("category", "general"),
+                    category,
                     subject,
                     content,
-                    fact.get("source", "explicit"),
-                    fact.get("confidence", 0.90),
+                    fact.get("value"),
+                    source,
+                    confidence,
                     fact.get("source_messages"),
                     now,
                     now,
@@ -1409,9 +1679,19 @@ class MemoryManager:
     def _reinforce_fact(self, existing: dict) -> None:
         """Repeated evidence for an already-stored fact: bump its
         confidence (capped) and evidence_count instead of inserting a
-        duplicate row or silently discarding the observation."""
+        duplicate row or silently discarding the observation.
+
+        A non-explicit sensitive-topic fact is capped at
+        _SENSITIVE_CAP_CONFIDENCE regardless of how much reinforcement
+        it gets — the risk gate applies for the fact's whole lifetime,
+        not just at creation (see _is_sensitive()).
+        """
+        cap = self.MAX_FACT_CONFIDENCE
+        if (existing.get("source") != "explicit"
+                and self._is_sensitive(existing.get("category", ""), existing.get("content", ""))):
+            cap = self._SENSITIVE_CAP_CONFIDENCE
         new_confidence = min(
-            self.MAX_FACT_CONFIDENCE,
+            cap,
             existing.get("confidence", 0.70) + self.EVIDENCE_CONFIDENCE_STEP,
         )
         new_evidence_count = (existing.get("evidence_count") or 1) + 1
@@ -1484,7 +1764,7 @@ class MemoryManager:
         if not kwargs:
             return False
 
-        allowed_fields = {"category", "subject", "content", "confidence",
+        allowed_fields = {"category", "subject", "content", "value", "confidence",
                           "last_referenced", "times_referenced", "superseded_by",
                           "deleted", "evidence_count"}
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
@@ -1598,10 +1878,23 @@ class MemoryManager:
                 f"Use this pre-computed value — do NOT calculate it yourself."
             )
 
+        # Candidate vs. confirmed (§16 "Leine"): the LLM must never state
+        # an unconfirmed inference with the same authority as a fact the
+        # user actually said. is_candidate() is confidence-based (see its
+        # docstring) — an inferred fact starts as a candidate and is only
+        # "confirmed" once reinforced past CANDIDATE_CONFIDENCE_THRESHOLD.
+        if self.is_candidate(best):
+            return (
+                f"UNBESTÄTIGTE VERMUTUNG (kein vom Nutzer bestätigter Fakt): {phrase}. "
+                f"Nur äußerst vorsichtig und ausdrücklich als Vermutung erwähnen, "
+                f"niemals als sichere Tatsache — und nur, wenn es wirklich zur "
+                f"aktuellen Frage passt."
+            )
+
         return (
-            f"You recall a relevant fact about this user: {phrase}. "
-            f"If naturally appropriate, you may briefly reference this in your response. "
-            f"Do NOT force it — only mention if genuinely relevant to what they're asking."
+            f"BESTÄTIGTER FAKT über den Nutzer: {phrase}. "
+            f"Falls es natürlich passt, darfst du kurz darauf eingehen. "
+            f"Nicht erzwingen — nur erwähnen, wenn es wirklich relevant ist."
         )
 
     def get_full_user_context(self, user_id: str = "primary_user",
@@ -1620,21 +1913,7 @@ class MemoryManager:
         if not facts:
             return None
 
-        # Group by category
-        grouped: dict[str, list[str]] = {}
-        for f in facts:
-            cat = f.get("category", "general") or "general"
-            phrase = self._fact_to_phrase(f) or f.get("content", "")
-            if phrase:
-                grouped.setdefault(cat, []).append(phrase)
-
-        # Build the block
-        lines = ["WHAT YOU KNOW ABOUT THE USER (use naturally, never recite):"]
-        for cat, items in sorted(grouped.items()):
-            label = cat.replace("_", " ").title()
-            lines.append(f"  {label}: {'; '.join(items)}")
-
-        block = "\n".join(lines)
+        block = self._build_user_context_block(facts)
 
         # Rough token estimate (~4 chars per token for English)
         est_tokens = len(block) // 4
@@ -1650,17 +1929,37 @@ class MemoryManager:
         remaining.sort(key=lambda x: x.get("times_referenced", 0), reverse=True)
         kept.extend(remaining[:50])
 
-        grouped_slim: dict[str, list[str]] = {}
-        for f in kept:
+        return self._build_user_context_block(kept)
+
+    def _build_user_context_block(self, facts: list) -> str:
+        """Build the "WHAT YOU KNOW ABOUT THE USER" prompt block, keeping
+        confirmed facts and unconfirmed candidates in clearly separate,
+        distinctly-labeled sections (§16 "Leine") — the LLM must never
+        state a system-inferred observation with the same authority as
+        something the user actually confirmed."""
+        confirmed: dict[str, list[str]] = {}
+        candidates: dict[str, list[str]] = {}
+        for f in facts:
             cat = f.get("category", "general") or "general"
             phrase = self._fact_to_phrase(f) or f.get("content", "")
-            if phrase:
-                grouped_slim.setdefault(cat, []).append(phrase)
+            if not phrase:
+                continue
+            bucket = candidates if self.is_candidate(f) else confirmed
+            bucket.setdefault(cat, []).append(phrase)
 
         lines = ["WHAT YOU KNOW ABOUT THE USER (use naturally, never recite):"]
-        for cat, items in sorted(grouped_slim.items()):
+        for cat, items in sorted(confirmed.items()):
             label = cat.replace("_", " ").title()
             lines.append(f"  {label}: {'; '.join(items)}")
+
+        if candidates:
+            lines.append(
+                "UNCONFIRMED OBSERVATIONS (present only as guesses, "
+                "never state as fact):"
+            )
+            for cat, items in sorted(candidates.items()):
+                label = cat.replace("_", " ").title()
+                lines.append(f"  {label}: {'; '.join(items)}")
 
         return "\n".join(lines)
 
@@ -1949,11 +2248,20 @@ class MemoryManager:
             return f"{content} who am I what is my name called"
         return content
 
-    def _find_similar_fact(self, user_id: str, subject: str, content: str) -> Optional[dict]:
+    def _find_similar_fact(self, user_id: str, subject: str, content: str,
+                            category: str = None) -> Optional[dict]:
         """Find an existing active fact with a similar subject (for dedup/supersede).
 
         Uses normalized substring matching to catch near-duplicates like
         "Mt. Olive Group" vs "Mt. Olive Group meetings".
+
+        Constrained to the same `category` when given: a generic subject
+        like "mutter" or "job" can legitimately apply to two completely
+        unrelated facts (e.g. "Mutter heißt Petra" and, in a different
+        category, an unrelated fact whose extractor happened to also pick
+        "mutter" as its subject) — without the category constraint those
+        could match each other and one would silently supersede the
+        other, losing a legitimate independent fact.
         """
         if not subject:
             return None
@@ -1961,24 +2269,27 @@ class MemoryManager:
         with self._db_lock:
             conn = self._get_conn()
             try:
+                cat_clause = " AND category = ?" if category else ""
+                cat_params = (category,) if category else ()
+
                 # First try exact match
-                row = conn.execute("""
+                row = conn.execute(f"""
                     SELECT * FROM facts
-                    WHERE user_id = ? AND subject = ?
+                    WHERE user_id = ? AND subject = ?{cat_clause}
                           AND deleted = 0 AND superseded_by IS NULL
                     ORDER BY created_at DESC
                     LIMIT 1
-                """, (user_id, subject)).fetchone()
+                """, (user_id, subject, *cat_params)).fetchone()
                 if row:
                     return dict(row)
 
                 # Fuzzy match: check if new subject contains or is contained
                 # by an existing subject (normalized, case-insensitive)
-                rows = conn.execute("""
+                rows = conn.execute(f"""
                     SELECT * FROM facts
-                    WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL
+                    WHERE user_id = ?{cat_clause} AND deleted = 0 AND superseded_by IS NULL
                     ORDER BY created_at DESC
-                """, (user_id,)).fetchall()
+                """, (user_id, *cat_params)).fetchall()
                 for row in rows:
                     existing_subject = (row["subject"] or "").lower().strip()
                     if not existing_subject:
