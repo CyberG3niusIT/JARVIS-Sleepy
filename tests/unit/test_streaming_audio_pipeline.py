@@ -111,8 +111,8 @@ class FakeTTS:
         return result if result is not None else (None, None)
 
 
-def _run_pipeline(tts, sentences, join_timeout=10.0):
-    pipeline = StreamingAudioPipeline(tts, logger=_NullLogger())
+def _run_pipeline(tts, sentences, join_timeout=10.0, on_first_audio=None):
+    pipeline = StreamingAudioPipeline(tts, logger=_NullLogger(), on_first_audio=on_first_audio)
     pipeline.start()
     for s in sentences:
         pipeline.put(s)
@@ -263,6 +263,53 @@ class SlowFakeAplay(FakeAplay):
         self.stdin = _Stdin(self)
 
 
+class TestPutNeverFalsePositiveOnStop:
+    """Reviewer-found race: submit() could return True for an item that
+    silently never gets processed if the writer decided to stop (error)
+    in the narrow window between _put()'s loop-guard check and the
+    queue.put() call landing. _put() now re-checks _stopped immediately
+    after a successful enqueue, closing the window down to a few
+    instructions instead of the whole remaining thread lifetime."""
+
+    def test_put_returns_false_if_stopped_flips_right_after_enqueue(self):
+        tts = FakeTTS()
+        writer = _ChatterboxAudioWriter(tts, _NullLogger())
+
+        real_put = writer._queue.put
+
+        def put_then_stop(item, timeout=None):
+            real_put(item, timeout=timeout)
+            # Simulate the writer thread deciding to stop in the instant
+            # right after this item landed in the queue.
+            writer._stopped.set()
+
+        writer._queue.put = put_then_stop
+        result = writer.submit(b"\x00\x00", 24000)
+
+        assert result is False, (
+            "submit() reported success for an item enqueued right as "
+            "the writer stopped — that item will never be played"
+        )
+
+    def test_put_returns_true_for_normal_enqueue(self):
+        tts = FakeTTS()
+        writer = _ChatterboxAudioWriter(tts, _NullLogger())
+        assert writer.submit(b"\x00\x00", 24000) is True
+
+    def test_error_paths_set_stopped_immediately_not_just_in_finally(self):
+        """_stopped must be set at the same moment self.error is set
+        (not only afterward in finally) — otherwise a producer racing
+        the exact break/except instant sees _stopped still False."""
+        tts = FakeTTS()
+        tts._open_aplay = lambda: None  # forces the "Failed to open audio device" path
+        writer = _ChatterboxAudioWriter(tts, _NullLogger())
+        writer.start()
+        writer.submit(b"\x00\x00", 24000)
+        writer.finish_and_wait(timeout=5)
+        assert writer.error == "Failed to open audio device"
+        assert writer._stopped.is_set()
+
+
 class TestBoundedQueueBackpressure:
     """core/pipeline.py's _ChatterboxAudioWriter — the task's explicit
     concern: an unbounded internal queue.Queue() let a fast producer pile
@@ -377,6 +424,34 @@ class TestBoundedQueueBackpressure:
         threading.Thread(target=releaser, daemon=True).start()
         ok, _total, _err = writer.finish_and_wait(timeout=10)
         assert ok is True
+
+
+class TestFirstAudioCallback:
+    """on_first_audio() — the hook core/latency_tracker.py uses to mark
+    "tts_first_pcm". Must fire exactly once, at first audio, and must
+    never break playback if the callback itself raises."""
+
+    def test_fires_once_on_first_chunk(self):
+        tts = FakeTTS()
+        calls = []
+        _run_pipeline(tts, ["Satz eins.", "Satz zwei.", "Satz drei."],
+                      on_first_audio=lambda: calls.append(time.monotonic()))
+        assert len(calls) == 1
+
+    def test_not_called_when_omitted(self):
+        tts = FakeTTS()
+        # Must not raise just because no callback was given.
+        _run_pipeline(tts, ["Hallo."])
+
+    def test_raising_callback_does_not_break_playback(self):
+        tts = FakeTTS()
+
+        def broken_callback():
+            raise RuntimeError("instrumentation bug")
+
+        pipeline = _run_pipeline(tts, ["Hallo Welt."], on_first_audio=broken_callback)
+        assert pipeline._error is None
+        assert len(tts._aplay_instances[0].written) > 0
 
 
 class TestAckCacheRace:

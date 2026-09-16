@@ -23,6 +23,7 @@ from typing import Optional
 
 from core.events import Event, EventType, PipelineState
 from core.speech_chunker import SpeechChunker
+from core.latency_tracker import LatencyTracker
 from core.continuous_listener import is_garbage_transcription
 from core.logger import get_logger
 from core.honorific import set_honorific
@@ -375,7 +376,16 @@ class _ChatterboxAudioWriter:
         while not self._stopped.is_set():
             try:
                 self._queue.put(item, timeout=self._PUT_POLL_INTERVAL)
-                return True
+                # Re-check immediately after a successful enqueue: if the
+                # writer decided to stop in the brief window between our
+                # loop-guard check above and this put() landing, the item
+                # is now sitting in a queue nobody will ever drain again —
+                # report that as failure so the caller stops generating
+                # further doomed chunks, instead of a false "submitted OK"
+                # for a chunk that will silently never play. Narrows what
+                # was previously a whole-chunk-processing-time race window
+                # down to the few instructions between put() and here.
+                return not self._stopped.is_set()
             except queue.Full:
                 continue
         return False
@@ -397,6 +407,7 @@ class _ChatterboxAudioWriter:
                     self.aplay = tts._open_aplay()
                     if self.aplay is None:
                         self.error = "Failed to open audio device"
+                        self._stopped.set()
                         break
                     tts._track_proc(self.aplay)
                 elif sr and sr != tts.sample_rate:
@@ -407,11 +418,15 @@ class _ChatterboxAudioWriter:
 
         except BrokenPipeError:
             self.error = self.error or "aplay broken pipe"
+            self._stopped.set()
         except Exception as e:
             self.error = self.error or str(e)
+            self._stopped.set()
         finally:
-            # Unblock any submit()/finish() currently spinning on a full
-            # queue before this thread exits — must happen before
+            # Redundant with the explicit set() calls above (belt and
+            # suspenders for the sentinel/clean-exit path, which has
+            # none) — unblocks any submit()/finish() currently spinning
+            # on a full queue before this thread exits. Must happen before
             # closing stdin so there's no window where a caller is stuck
             # retrying against a writer that will never drain again.
             self._stopped.set()
@@ -464,7 +479,7 @@ class StreamingAudioPipeline:
     Eliminates inter-sentence gaps by overlapping generation with playback.
     """
 
-    def __init__(self, tts, logger):
+    def __init__(self, tts, logger, on_first_audio=None):
         self.tts = tts
         self.logger = logger
         self._text_queue = queue.Queue()
@@ -472,6 +487,12 @@ class StreamingAudioPipeline:
         self._error = None
         self._total_chunks = 0
         self._thread = None
+        # Optional callback(), invoked exactly once at the same moment
+        # the "first chunk in Xs" log line fires below — i.e. when the
+        # first synthesized audio is actually handed to aplay. Used for
+        # latency instrumentation (core/latency_tracker.py); must never
+        # raise, so it's wrapped defensively at each call site.
+        self._on_first_audio = on_first_audio
 
     def start(self):
         """Start the background audio pipeline thread."""
@@ -487,6 +508,14 @@ class StreamingAudioPipeline:
         """Submit a sentence for audio generation and playback."""
         self._text_queue.put(text)
         self._total_chunks += 1
+
+    def _fire_first_audio_callback(self):
+        if self._on_first_audio is None:
+            return
+        try:
+            self._on_first_audio()
+        except Exception:
+            pass  # instrumentation must never break playback
 
     def finish(self):
         """Signal no more sentences. Blocks until all audio finishes."""
@@ -551,6 +580,7 @@ class StreamingAudioPipeline:
                                     f"Kokoro first chunk in "
                                     f"{time.time() - t0:.3f}s"
                                 )
+                                self._fire_first_audio_callback()
 
                         if self._error:
                             break
@@ -655,6 +685,7 @@ class StreamingAudioPipeline:
                             f"{tts.engine} first chunk in "
                             f"{time.time() - t0:.3f}s"
                         )
+                        self._fire_first_audio_callback()
 
                     submitted = writer.submit(pcm, sr)
 
@@ -802,6 +833,11 @@ class Coordinator:
         # Streaming LLM state
         self._streaming_active = False
         self._llm_responded = False
+
+        # Per-turn latency instrumentation (core/latency_tracker.py) —
+        # one active tracker at a time, matching the existing pattern of
+        # per-turn scratch state living on self (e.g. _contextual_ack_text).
+        self._current_latency = None
 
         # Watchdog heartbeat timestamps (monotonic, read by core.watchdog)
         self._last_transcription_ts = time.monotonic()
@@ -1092,6 +1128,7 @@ class Coordinator:
     def _handle_command(self, event: Event):
         """Route a detected command through the priority chain."""
         self._last_command_start_ts = time.monotonic()
+        self._current_latency = LatencyTracker()
         full_text = event.data
         in_conversation = self.listener.conversation_window_active
         self.state = PipelineState.PROCESSING_COMMAND
@@ -1195,6 +1232,7 @@ class Coordinator:
             ack_timer.start()
 
         result = self.router.route(command, in_conversation=in_conversation)
+        self._current_latency.mark("router_done")
 
         # Cancel ack timer if skill returned before it fired
         if ack_timer:
@@ -1255,6 +1293,11 @@ class Coordinator:
         print(f"💬 Jarvis: {response}")
         if not self.tts._spoke:
             self._speak_and_wait(response)
+
+        if self._current_latency:
+            self._current_latency.mark("response_done")
+            self._current_latency.emit(self.logger, self.config)
+            self._current_latency = None
 
         # Update centralized conversation state
         self.conv_state.update(
@@ -1481,7 +1524,13 @@ class Coordinator:
                 )
             )
 
+            if self._current_latency:
+                self._current_latency.mark("llm_start")
+
             for item in token_source:
+                if self._current_latency:
+                    self._current_latency.mark("llm_first_token")
+
                 # Tool call sentinel — break to Phase B
                 if isinstance(item, ToolCallRequest):
                     tool_call_request = item
@@ -1502,6 +1551,8 @@ class Coordinator:
                 chunk = chunker.feed(token)
 
                 if chunk:
+                    if self._current_latency:
+                        self._current_latency.mark("first_speakable_chunk")
                     chunks_spoken, first_chunk_checked, pending_chunk, audio_pipeline = \
                         self._process_speech_chunk(
                             chunk, command, history, memory_context,
@@ -1935,8 +1986,12 @@ class Coordinator:
             processed = self.llm.strip_metric(chunk, command)
             self.listener.speaking = True
             if use_pipeline:
+                _latency = self._current_latency
                 audio_pipeline = StreamingAudioPipeline(
-                    self.tts, self.logger
+                    self.tts, self.logger,
+                    on_first_audio=(
+                        (lambda: _latency.mark("tts_first_pcm")) if _latency else None
+                    ),
                 )
                 audio_pipeline.start()
                 audio_pipeline.put(processed)

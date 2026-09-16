@@ -305,17 +305,23 @@ class TextToSpeech:
         self._tts_cache = TTSCache(config)
         self._tts_cache.load_all()
 
-        threading.Thread(
-            target=self._build_ack_cache,
-            daemon=True,
-            name="chatterbox-ack-cache",
-        ).start()
-
+        # Ack cache (~9 short phrases) and CAL-L0 cache (~300 phrases) used
+        # to warm up in two PARALLEL background threads, both hammering
+        # the same single-threaded Chatterbox server at once. Since the
+        # server processes one request at a time, a live speak() request
+        # arriving during startup could end up queued behind whichever
+        # warmup requests the OS already accepted first — worst case,
+        # behind most of a ~300-phrase, several-minute CAL-L0 batch.
+        # Now sequential in one thread: the small/urgent ack cache goes
+        # first, then CAL-L0 — and CAL-L0 additionally acquires
+        # _tts_lock per-phrase (see _synthesize_short_pcm_throttled), so
+        # a live request only ever waits for the single in-flight warmup
+        # phrase to finish, not the whole batch.
         self._cal_l0_generating = False
         threading.Thread(
-            target=self._build_cal_l0_cache,
+            target=self._run_chatterbox_warmup,
             daemon=True,
-            name="cal-l0-cache",
+            name="chatterbox-warmup",
         ).start()
 
     def _synthesize_short_pcm(self, text: str) -> Optional[bytes]:
@@ -326,6 +332,30 @@ class TextToSpeech:
             pcm, _sr = self._chatterbox_generate_pcm(text)
             return pcm
         return None
+
+    def _synthesize_short_pcm_throttled(self, text: str) -> Optional[bytes]:
+        """Same as _synthesize_short_pcm, but acquires _tts_lock for just
+        this one phrase's synthesis instead of not at all.
+
+        Used only for the CAL-L0 background warmup loop against
+        Chatterbox: the lock is the same one speak() takes, so a live
+        request contends for it fairly against the warmup loop instead
+        of racing it unlocked at the HTTP level. Bounds the worst case a
+        live request can be delayed by warmup to "one in-flight warmup
+        phrase" (~1-3s), not the whole ~300-phrase batch — because the
+        lock is acquired and released per-phrase, not held for the
+        entire loop.
+        """
+        with self._tts_lock:
+            return self._synthesize_short_pcm(text)
+
+    def _run_chatterbox_warmup(self):
+        """Background warmup, ack cache first (small, most urgent for
+        perceived responsiveness), then CAL-L0 (large, throttled against
+        live requests) — see the call site's comment for why this
+        replaced two parallel threads."""
+        self._build_ack_cache()
+        self._build_cal_l0_cache()
 
     def _chatterbox_health_url(self) -> str:
         base = self.chatterbox_endpoint
@@ -733,15 +763,26 @@ class TextToSpeech:
         the cache from the main thread — incremental mutation risked a
         "dict changed size during iteration" crash if a read landed
         mid-build; a full dict is either fully old or fully new, never
-        half-built, so no lock is needed.
+        half-built, so no lock is needed for that part.
+
+        Chatterbox additionally uses the throttled (per-phrase _tts_lock)
+        synth path, same as the CAL-L0 warmup right after it — without
+        this, the ~9 ack phrases hit the Chatterbox server completely
+        unlocked, so a live speak() during just this early phase of
+        warmup wasn't actually protected despite _run_chatterbox_warmup's
+        docstring claiming it was.
         """
         from core import persona
         tagged_phrases = persona.pool_tagged("ack_cache")
         new_cache: Dict[str, tuple[bytes, str]] = {}
+        synth_fn = (
+            self._synthesize_short_pcm_throttled if self.engine == "chatterbox"
+            else self._synthesize_short_pcm
+        )
         t0 = time.time()
         for phrase, style in tagged_phrases:
             try:
-                pcm = self._synthesize_short_pcm(phrase)
+                pcm = synth_fn(phrase)
                 if pcm:
                     new_cache[phrase] = (pcm, style)
             except Exception as e:
@@ -991,10 +1032,18 @@ class TextToSpeech:
         """
         self._cal_l0_generating = True
         _t0 = time.time()
+        # Chatterbox: throttled (per-phrase _tts_lock) so this ~300-phrase
+        # batch can't starve a live speak() request queued behind it.
+        # Kokoro is an in-process CPU call with no shared server to
+        # contend over — no throttling needed there.
+        synth_fn = (
+            self._synthesize_short_pcm_throttled if self.engine == "chatterbox"
+            else self._synthesize_short_pcm
+        )
         generated = self._tts_cache.generate_missing(
             templates=self._CAL_L0_TEMPLATES,
             honorifics=self._CAL_L0_PRIMARY_HONORIFICS,
-            synthesize_fn=self._synthesize_short_pcm,
+            synthesize_fn=synth_fn,
             version=self._cache_voice_version(),
             throttle_sleep=0.05,
         )
