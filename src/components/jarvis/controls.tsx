@@ -230,14 +230,15 @@ export function Dialog({
   children?: ReactNode;
 }) {
   useEscape(open, onClose);
+  const { mounted, closing } = usePresence(open, duration.fast);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) ref.current?.focus();
   }, [open]);
-  if (!open) return null;
+  if (!mounted) return null;
   return (
     <>
-      <Scrim onClick={onClose} />
+      <Scrim onClick={onClose} closing={closing} />
       <div className="absolute inset-0 flex items-center justify-center px-6" style={{ zIndex: "var(--j-z-dialog)" }}>
         <div
           ref={ref}
@@ -245,7 +246,10 @@ export function Dialog({
           role="dialog"
           aria-modal="true"
           aria-label={title}
-          className="j-dialog-enter w-full rounded-md border border-border bg-surface-raised p-4 shadow-[var(--j-elevation-overlay)] outline-none"
+          className={cn(
+            "w-full rounded-md border border-border bg-surface-raised p-4 shadow-[var(--j-elevation-overlay)] outline-none",
+            closing ? "j-dialog-exit" : "j-dialog-enter",
+          )}
         >
           <h2 className="text-[14px] text-foreground">{title}</h2>
           {description ? (
