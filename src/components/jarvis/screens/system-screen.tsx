@@ -4,6 +4,7 @@ import {
   ExecutionTag,
   ListGroup,
   ListRow,
+  PrivacyTag,
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
