@@ -9,7 +9,12 @@ import {
 } from "@/components/jarvis/primitives";
 import { SectionEnter, ValueTransition } from "@/components/jarvis/motion";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
-import { stateLabel, systemDestinations, type AreaId } from "@/lib/jarvis/ia";
+import {
+  stateLabel,
+  systemDestinations,
+  type AreaId,
+  type SystemState,
+} from "@/lib/jarvis/ia";
 
 /**
  * System: technical control center of JARVIS Mobile (Phase 5, page 3).
