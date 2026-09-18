@@ -40,6 +40,7 @@ export function Button({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      data-filled={variant === "primary" && !disabled ? "true" : undefined}
       className={cn(
         "j-pressable inline-flex min-h-12 items-center justify-center rounded-sm border px-4 text-[13px] leading-5",
         buttonVariant[variant],
@@ -135,13 +136,33 @@ function useEscape(open: boolean, onClose: () => void) {
   }, [open, onClose]);
 }
 
-export function Scrim({ onClick }: { onClick: () => void }) {
+/**
+ * Keeps an overlay mounted for its exit animation, then unmounts it.
+ * Compose mapping: AnimatedVisibility with enter/exit transitions.
+ */
+function usePresence(open: boolean, exitMs: number) {
+  const [mounted, setMounted] = useState(open);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    if (!mounted) return;
+    const timer = window.setTimeout(() => setMounted(false), exitMs);
+    return () => window.clearTimeout(timer);
+  }, [open, mounted, exitMs]);
+
+  return { mounted, closing: mounted && !open };
+}
+
+export function Scrim({ onClick, closing = false }: { onClick: () => void; closing?: boolean }) {
   return (
     <button
       type="button"
       aria-label="Schließen"
       onClick={onClick}
-      className="j-scrim-enter absolute inset-0 bg-black/55"
+      className={cn("absolute inset-0 bg-black/55", closing ? "j-scrim-exit" : "j-scrim-enter")}
       style={{ zIndex: "var(--j-z-scrim)" }}
     />
   );
