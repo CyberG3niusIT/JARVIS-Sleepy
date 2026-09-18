@@ -42,7 +42,14 @@ import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
 import { Composer } from "@/components/jarvis/blocks";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
-import type { ExecutionLocation, PrivacyMode, SystemState } from "@/lib/jarvis/ia";
+import {
+  moreDestinations,
+  navTabs,
+  systemDestinations,
+  type ExecutionLocation,
+  type PrivacyMode,
+  type SystemState,
+} from "@/lib/jarvis/ia";
 
 /**
  * Development-only design system reference.
