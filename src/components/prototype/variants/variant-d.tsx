@@ -89,18 +89,6 @@ export function VariantD() {
   );
 }
 
-
-function ChatScreen() {
-  return (
-    <div className="flex min-h-full flex-col">
-      <div className="flex-1">
-        <ChatThread />
-      </div>
-      <Composer />
-    </div>
-  );
-}
-
 /** System: technisches Kontrollzentrum, feste Reihenfolge der Ziele. */
 function SystemScreen() {
   return (
