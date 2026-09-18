@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, HardDrive } from "lucide-react";
+import { HardDrive } from "lucide-react";
 import { ScrollBody } from "@/components/prototype/phone-frame";
 import {
   ListGroup,
@@ -9,6 +9,10 @@ import {
 } from "@/components/jarvis/primitives";
 import { BottomSheet, Button, EmptyState, InlineNotice } from "@/components/jarvis/controls";
 import { SectionEnter } from "@/components/jarvis/motion";
+import {
+  DetailHeader,
+  type SystemDetailProps,
+} from "@/components/jarvis/screens/detail-header";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import type { SystemState } from "@/lib/jarvis/ia";
 
@@ -126,14 +130,10 @@ const managementCapabilities = [
 
 /* -------------------------------- Screen --------------------------------- */
 
-export interface ModelsScreenProps {
-  onBack: () => void;
-}
-
 /** Sources offered by the add-model sheet. */
 type AddModelSource = "import" | "catalog";
 
-export function ModelsScreen({ onBack }: ModelsScreenProps) {
+export function ModelsScreen({ onBack }: SystemDetailProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [source, setSource] = useState<AddModelSource | null>(null);
   /**
@@ -151,7 +151,7 @@ export function ModelsScreen({ onBack }: ModelsScreenProps) {
     <>
       <ScrollBody>
         <SectionEnter index={0}>
-          <ModelsHeader onBack={onBack} />
+          <DetailHeader title="Modelle" subtitle="Lokale Inferenz" onBack={onBack} />
         </SectionEnter>
 
         <SectionEnter index={1}>
@@ -234,26 +234,6 @@ export function ModelsScreen({ onBack }: ModelsScreenProps) {
         onClose={closeSheet}
       />
     </>
-  );
-}
-
-/** Compact detail header with a native-feeling back affordance. */
-function ModelsHeader({ onBack }: { onBack: () => void }) {
-  return (
-    <div className="flex items-center gap-2 border-b border-border-soft bg-surface px-2 py-3">
-      <button
-        type="button"
-        onClick={onBack}
-        aria-label="Zurück zum Kontrollzentrum"
-        className="j-pressable flex size-12 shrink-0 items-center justify-center rounded-sm"
-      >
-        <ArrowLeft className="size-5 text-subtle-foreground" aria-hidden />
-      </button>
-      <span className="min-w-0">
-        <h1 className="text-[15px] leading-5 text-foreground">Modelle</h1>
-        <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">Lokale Inferenz</p>
-      </span>
-    </div>
   );
 }
 

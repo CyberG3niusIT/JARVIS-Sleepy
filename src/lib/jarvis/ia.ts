@@ -1,5 +1,5 @@
 /**
- * JARVIS Mobile — Information Architecture (Phase 4, locked)
+ * JARVIS Mobile - Information Architecture (Phase 4, locked)
  *
  * Derived from:
  *   JARVIS_MOBILE_PRODUCT_BRIEF.md   (product areas, runtime model, states)
@@ -16,7 +16,7 @@
 
 export type CapabilityDecision = "KEEP" | "MODIFY" | "REPLACE" | "NEW";
 
-/** Brand Spec §12 — Status Language. German labels are fixed wording. */
+/** Brand Spec §12 - Status Language. German labels are fixed wording. */
 export type SystemState =
   | "ready"
   | "local"
@@ -46,7 +46,7 @@ export const stateLabel: Record<SystemState, string> = {
   design_state: "Entwurfszustand",
 };
 
-/** Brand Spec §16 — Execution Location. */
+/** Brand Spec §16 - Execution Location. */
 export type ExecutionLocation = "LOKAL" | "SLEEPY" | "CLOUD" | "EXTERN";
 
 export type PrivacyMode = "NORMAL" | "PRIVACY" | "PRIVACY_LOCK";
