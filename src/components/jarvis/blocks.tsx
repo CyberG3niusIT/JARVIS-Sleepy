@@ -88,9 +88,9 @@ export function PrivacyBlock({
         ))}
       </div>
       <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-        Privacy Mode ist eine harte Grenze, keine Voreinstellung. In PRIVACY_LOCK
-        bleibt jede Ausführung lokal; blockierte Fähigkeiten werden als solche
-        angezeigt.
+        Privacy Mode ist eine harte Grenze, keine Voreinstellung. PRIVACY blockiert
+        geschützte Wahrnehmungs- und Datenpfade. PRIVACY_LOCK kann zusätzlich
+        Netzwerk-, Cloud- und externe Tool-Pfade hart sperren.
       </p>
     </div>
   );
