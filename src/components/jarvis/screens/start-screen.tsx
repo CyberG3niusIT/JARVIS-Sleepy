@@ -43,7 +43,7 @@ export function StartScreen({ onOpenChat, onOpenSystem }: StartScreenProps) {
         <ListGroup>
           <ListRow
             title="Lokales Modell"
-            subtitle="Ohne geladenes Modell bleibt die lokale Antwortfähigkeit aus."
+            subtitle="Modellgestützte lokale Antworten sind erst nach dem Laden eines Modells verfügbar."
             trailing={
               <StatusTag
                 state="design_state"
@@ -53,7 +53,7 @@ export function StartScreen({ onOpenChat, onOpenSystem }: StartScreenProps) {
           />
           <ListRow
             title="Berechtigungen"
-            subtitle="Bedienungshilfen, Benachrichtigungen, Mikrofon sind noch nicht freigegeben."
+            subtitle="Benötigte Android-Berechtigungen sind noch nicht vollständig freigegeben."
             trailing={
               <StatusTag
                 state="permission_required"
@@ -86,7 +86,7 @@ export function StartScreen({ onOpenChat, onOpenSystem }: StartScreenProps) {
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Optional, nicht erforderlich. J.A.R.V.I.S Mobile bleibt ohne beide nutzbar.
+          Sleepy und Cloud sind für den lokalen Betrieb nicht grundsätzlich erforderlich.
         </p>
       </SectionEnter>
 
@@ -129,7 +129,7 @@ function StatusSummary({ headline }: { headline: string }) {
     <div className="border-b border-border-soft bg-surface px-4 py-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-[15px] leading-5 text-foreground">JARVIS Mobile</h1>
+          <h1 className="text-[15px] leading-5 text-foreground">J.A.R.V.I.S Mobile</h1>
           <ValueTransition value={headline} className="mt-1">
             <p className="text-[13px] leading-5 text-subtle-foreground">{headline}</p>
           </ValueTransition>
@@ -141,8 +141,7 @@ function StatusSummary({ headline }: { headline: string }) {
         />
       </div>
       <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-        Prototyp ohne Runtime-Anbindung. Alle Zustände sind Entwurfszustände (
-        {stateLabel.design_state}) und keine gemessenen Werte. Standardausführung:{" "}
+        {stateLabel.design_state}. Keine gemessenen Laufzeitwerte. Standardausführung:{" "}
         {comparisonBaseline.execution}.
       </p>
     </div>
