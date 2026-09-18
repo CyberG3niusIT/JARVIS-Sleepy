@@ -31,25 +31,25 @@ export const Route = createFileRoute("/prototypes/shell")({
 const variants = [
   {
     name: "Systemleiste",
-    caption: "Variante A · Bottom Navigation · 393 × 852 dp",
+    caption: "Variante A: Bottom Navigation, 393 x 852 dp",
     axis: "Vertraute Android-Tableiste, vier feste Ziele, mittlere Dichte.",
     render: () => <VariantA />,
   },
   {
     name: "Konsole",
-    caption: "Variante B · Drawer + Runtime-Leiste · 393 × 852 dp",
+    caption: "Variante B: Drawer + Runtime-Leiste, 393 x 852 dp",
     axis: "Keine Tableiste. Persistente Runtime-Leiste, Drawer für alle Bereiche, maximale Dichte.",
     render: () => <VariantB />,
   },
   {
     name: "Konversation",
-    caption: "Variante C · Chat-Root + Systemblatt · 393 × 852 dp",
+    caption: "Variante C: Chat-Root + Systemblatt, 393 x 852 dp",
     axis: "Chat ist die Wurzel; das gesamte System liegt in einem ausklappbaren Bottom Sheet.",
     render: () => <VariantC />,
   },
   {
     name: "Systemleiste + Runtime",
-    caption: "Variante D · Bottom Navigation + Runtime-Leiste · 393 × 852 dp",
+    caption: "Variante D: Bottom Navigation + Runtime-Leiste, 393 x 852 dp",
     axis: "Konsolidierter Kandidat: Tableiste aus A, persistente Runtime-Leiste aus B, Composer nur im Chat.",
     render: () => <VariantD />,
   },
@@ -81,7 +81,7 @@ function ShellPrototypes() {
           <div>
             <h1 className="text-[15px] font-medium text-foreground">Shell-Prototypen</h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              Phase 1 · Navigationsentscheidung · keine Runtime-Anbindung
+              Phase 1: Navigationsentscheidung, keine Runtime-Anbindung
             </p>
           </div>
           <Link to="/" className="text-[12px] text-primary">

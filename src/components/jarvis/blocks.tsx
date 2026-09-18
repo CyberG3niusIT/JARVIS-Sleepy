@@ -26,7 +26,7 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
     <ListGroup>
       <ListRow
         title="Lokale Runtime"
-        subtitle={compact ? undefined : "LiteRT-LM · kein Modell gebunden"}
+        subtitle={compact ? undefined : "LiteRT-LM, kein Modell gebunden"}
         trailing={
           <StatusTag
             state="design_state"
