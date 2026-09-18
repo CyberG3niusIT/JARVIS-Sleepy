@@ -10,7 +10,7 @@ import {
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
-import { SectionEnter, ValueTransition } from "@/components/jarvis/motion";
+import { ScreenTransition, SectionEnter, ValueTransition } from "@/components/jarvis/motion";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import {
   stateLabel,
