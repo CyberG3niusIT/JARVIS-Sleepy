@@ -10,12 +10,10 @@ import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
 import {
   ChatThread,
   Composer,
-  NotBoundNotice,
-  PrivacyBlock,
   RoutingLadderBlock,
-  RuntimeSummary,
   SettingsList,
 } from "@/components/jarvis/blocks";
+import { StartScreen } from "@/components/jarvis/screens/start-screen";
 import {
   ListGroup,
   ListRow,
@@ -78,7 +76,12 @@ export function VariantD() {
 
       <div className="hide-scrollbar flex-1 overflow-y-auto">
         <ScreenTransition transitionKey={tab} direction={direction} className="min-h-full">
-          {tab === "start" ? <StartScreen /> : null}
+          {tab === "start" ? (
+            <StartScreen
+              onOpenChat={() => selectTab("chat")}
+              onOpenSystem={() => selectTab("system")}
+            />
+          ) : null}
           {tab === "chat" ? <ChatScreen /> : null}
           {tab === "system" ? <SystemScreen /> : null}
           {tab === "more" ? <MoreScreen focusSettings={focusSettings} /> : null}
@@ -90,22 +93,6 @@ export function VariantD() {
   );
 }
 
-function StartScreen() {
-  return (
-    <ScrollBody>
-      <NotBoundNotice />
-      <SectionHeader>Runtime</SectionHeader>
-      <RuntimeSummary />
-      <SectionHeader>Privacy</SectionHeader>
-      <PrivacyBlock mode={comparisonBaseline.privacyMode} />
-      <SectionHeader>Entscheidungsreihenfolge</SectionHeader>
-      <RoutingLadderBlock limit={5} />
-      <div className="px-4 py-2">
-        <span className="value-mono">3 weitere Stufen unter System</span>
-      </div>
-    </ScrollBody>
-  );
-}
 
 function ChatScreen() {
   return (

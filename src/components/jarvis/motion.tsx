@@ -58,6 +58,32 @@ export function ValueTransition({
 }
 
 /**
+ * Restrained entrance for a screen section. Stagger stays short and subtle;
+ * with reduced motion it degrades to a plain fade without delay.
+ * Compose mapping: AnimatedVisibility(fadeIn + slideInVertically, startDelay).
+ */
+export function SectionEnter({
+  index = 0,
+  step = 30,
+  children,
+  className,
+}: {
+  index?: number;
+  step?: number;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("j-section-enter", className)}
+      style={{ ["--j-stagger-delay" as string]: `${Math.min(index, 5) * step}ms` }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
  * Tracks navigation order so a tab change knows whether it moves forward or back.
  * The direction is computed during render, so the first render after a tab change
  * already carries the correct slide instead of a fade that upgrades later.
