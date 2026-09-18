@@ -102,6 +102,8 @@ export function ChatScreen() {
   /** Static part of the transcript. Everything after it is announced live. */
   const [baseCount, setBaseCount] = useState(demoConversation.length);
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -109,20 +111,60 @@ export function ChatScreen() {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length]);
 
+  const addFiles = (files: File[]) => {
+    const accepted: ChatAttachment[] = [];
+    const rejected: string[] = [];
+    files.forEach((file, i) => {
+      const kind = classifyAttachment(file);
+      if (!kind) {
+        rejected.push(file.name);
+        return;
+      }
+      accepted.push({
+        id: `a-${Date.now()}-${i}`,
+        kind,
+        name: file.name,
+        previewUrl: kind === "image" ? URL.createObjectURL(file) : undefined,
+      });
+    });
+    if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
+    setAttachmentError(
+      rejected.length > 0
+        ? `Nicht unterstützter Dateityp: ${rejected.join(", ")}. Erlaubt sind Bilder und PDF-Dateien.`
+        : null,
+    );
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const gone = prev.find((a) => a.id === id);
+      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+    setAttachmentError(null);
+  };
+
   const send = () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text && attachments.length === 0) return;
     const stamp = Date.now();
+    const sent = attachments;
+    const note = sent.length > 0
+      ? `Datei angehängt. Analyse ist erst nach Runtime-Anbindung verfügbar. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}.`
+      : `Keine Antwort erzeugt. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}. Der Prototyp übernimmt die Eingabe nur als Entwurfszustand.`;
     setMessages((prev) => [
       ...prev,
-      { id: `u-${stamp}`, role: "user", text },
       {
-        id: `s-${stamp}`,
-        role: "system",
-        text: `Keine Antwort erzeugt. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}. Der Prototyp übernimmt die Eingabe nur als Entwurfszustand.`,
+        id: `u-${stamp}`,
+        role: "user",
+        text,
+        attachments: sent.length > 0 ? sent : undefined,
       },
+      { id: `s-${stamp}`, role: "system", text: note },
     ]);
     setDraft("");
+    setAttachments([]);
+    setAttachmentError(null);
     inputRef.current?.focus();
   };
 
