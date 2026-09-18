@@ -102,13 +102,14 @@ function BrandReference() {
         description="Restrained radii, fine 1 px dividers, flat elevation. No glass, no glow."
       >
         <div className="grid gap-3 sm:grid-cols-3">
-          {["surface-sunken", "surface", "surface-raised"].map((s) => (
-            <div
-              key={s}
-              className={`rounded-md border border-border bg-${s} p-4`}
-            >
-              <p className="text-sm text-foreground">{s.replace("surface-", "").replace("surface", "base")}</p>
-              <p className="mt-1 font-mono text-[10px] text-muted-foreground">--{s}</p>
+          {[
+            { name: "sunken", token: "--surface-sunken", cls: "bg-surface-sunken" },
+            { name: "base", token: "--surface", cls: "bg-surface" },
+            { name: "raised", token: "--surface-raised", cls: "bg-surface-raised" },
+          ].map((s) => (
+            <div key={s.token} className={`rounded-md border border-border p-4 ${s.cls}`}>
+              <p className="text-sm text-foreground">{s.name}</p>
+              <p className="mt-1 font-mono text-[10px] text-muted-foreground">{s.token}</p>
             </div>
           ))}
         </div>
