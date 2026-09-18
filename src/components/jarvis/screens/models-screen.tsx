@@ -151,7 +151,7 @@ export function ModelsScreen({ onBack }: SystemDetailProps) {
     <>
       <ScrollBody>
         <SectionEnter index={0}>
-          <ModelsHeader onBack={onBack} />
+          <DetailHeader title="Modelle" subtitle="Lokale Inferenz" onBack={onBack} />
         </SectionEnter>
 
         <SectionEnter index={1}>
