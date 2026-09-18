@@ -124,7 +124,7 @@ export function ChatScreen() {
         id: `a-${Date.now()}-${i}`,
         kind,
         name: file.name,
-        previewUrl: kind === "image" ? URL.createObjectURL(file) : undefined,
+        ...(kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
       });
     });
     if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
