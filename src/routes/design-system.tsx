@@ -209,7 +209,7 @@ function DesignSystemPage() {
 
         <Block title="Zeilen">
           <ListGroup>
-            <ListRow title="Listenzeile" subtitle="Antippbar, 48 dp Mindesthöhe" chevron onClick={() => {}} />
+            <ListRow title="Listenzeile" subtitle="48 dp Mindesthöhe" />
             <ListRow
               title="Einstellungszeile"
               subtitle="Mit Schalter"
