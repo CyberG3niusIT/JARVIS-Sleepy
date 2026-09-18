@@ -130,36 +130,80 @@ export function ModelsDemoSection() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
-  const timers = useRef<Record<string, number>>({});
+  const intervals = useRef<Record<string, number>>({});
+  const timeouts = useRef<Record<string, Set<number>>>({});
+  const mountedRef = useRef(true);
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      Object.values(timers.current).forEach((t) => window.clearInterval(t));
+      mountedRef.current = false;
+      Object.values(intervals.current).forEach((t) => window.clearInterval(t));
+      intervals.current = {};
+      Object.values(timeouts.current).forEach((set) => {
+        set.forEach((t) => window.clearTimeout(t));
+      });
+      timeouts.current = {};
     };
   }, []);
+
+  const clearModelTimers = (id: string) => {
+    const interval = intervals.current[id];
+    if (interval) {
+      window.clearInterval(interval);
+      delete intervals.current[id];
+    }
+    const pending = timeouts.current[id];
+    if (pending) {
+      pending.forEach((t) => window.clearTimeout(t));
+      delete timeouts.current[id];
+    }
+  };
+
+  const runIfActive = (id: string, fn: () => void) => {
+    if (!mountedRef.current) return;
+    if (!modelsRef.current.some((m) => m.id === id)) return;
+    fn();
+  };
+
+  const scheduleTimeout = (id: string, fn: () => void, delay: number) => {
+    const timeoutId = window.setTimeout(() => {
+      const pending = timeouts.current[id];
+      if (pending) {
+        pending.delete(timeoutId);
+        if (pending.size === 0) delete timeouts.current[id];
+      }
+      runIfActive(id, fn);
+    }, delay);
+    if (!timeouts.current[id]) timeouts.current[id] = new Set();
+    timeouts.current[id].add(timeoutId);
+  };
 
   const update = (id: string, patch: Partial<DemoModelEntry>) => {
     setModels((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
   };
 
   const clearTimer = (id: string) => {
-    const timer = timers.current[id];
-    if (timer) {
-      window.clearInterval(timer);
-      delete timers.current[id];
-    }
+    clearModelTimers(id);
   };
 
   const startDownloadTimer = (id: string) => {
     clearTimer(id);
-    timers.current[id] = window.setInterval(() => {
+    intervals.current[id] = window.setInterval(() => {
+      if (!mountedRef.current) {
+        window.clearInterval(intervals.current[id]);
+        delete intervals.current[id];
+        return;
+      }
       setModels((prev) =>
         prev.map((m) => {
           if (m.id !== id || m.loadState !== "downloading") return m;
           const next = Math.min(100, (m.downloadProgress ?? 0) + 10);
           if (next >= 100) {
-            window.clearInterval(timers.current[id]);
-            delete timers.current[id];
+            window.clearInterval(intervals.current[id]);
+            delete intervals.current[id];
             return { ...m, loadState: "not_loaded", downloadProgress: undefined, integrity: "bestanden" };
           }
           return { ...m, downloadProgress: next };
@@ -168,11 +212,14 @@ export function ModelsDemoSection() {
     }, 700);
   };
 
-  const report = (message: string) => setConfirmation(message);
+  const report = (message: string) => {
+    if (!mountedRef.current) return;
+    setConfirmation(message);
+  };
 
   const load = (m: DemoModelEntry) => {
     update(m.id, { loadState: "loading" });
-    window.setTimeout(() => {
+    scheduleTimeout(m.id, () => {
       update(m.id, { loadState: "ready" });
       report(`"${m.name}" wurde im Demozustand geladen. ${DESIGN_STATE_ACTION}`);
     }, 600);
@@ -213,7 +260,7 @@ export function ModelsDemoSection() {
       startDownloadTimer(m.id);
     } else {
       update(m.id, { loadState: "loading", errorKind: undefined });
-      window.setTimeout(() => update(m.id, { loadState: "ready" }), 600);
+      scheduleTimeout(m.id, () => update(m.id, { loadState: "ready" }), 600);
     }
     report(`Vorgang für "${m.name}" wurde im Demozustand erneut versucht. ${DESIGN_STATE_ACTION}`);
   };
@@ -221,7 +268,7 @@ export function ModelsDemoSection() {
   const deleteEntry = () => {
     if (!deleteId) return;
     const model = models.find((m) => m.id === deleteId);
-    clearTimer(deleteId);
+    clearModelTimers(deleteId);
     setModels((prev) => prev.filter((m) => m.id !== deleteId));
     setDeleteId(null);
     setOpenId(null);
