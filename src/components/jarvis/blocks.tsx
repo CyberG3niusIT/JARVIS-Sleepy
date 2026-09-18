@@ -55,8 +55,6 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
             label={comparisonBaseline.labels.permissions}
           />
         }
-        chevron
-        onClick={() => {}}
       />
     </ListGroup>
   );
