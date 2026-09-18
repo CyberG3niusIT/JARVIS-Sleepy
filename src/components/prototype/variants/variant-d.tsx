@@ -78,7 +78,12 @@ export function VariantD() {
 
       <div className="hide-scrollbar flex-1 overflow-y-auto">
         <ScreenTransition transitionKey={tab} direction={direction} className="min-h-full">
-          {tab === "start" ? <StartScreen /> : null}
+          {tab === "start" ? (
+            <StartScreen
+              onOpenChat={() => selectTab("chat")}
+              onOpenSystem={() => selectTab("system")}
+            />
+          ) : null}
           {tab === "chat" ? <ChatScreen /> : null}
           {tab === "system" ? <SystemScreen /> : null}
           {tab === "more" ? <MoreScreen focusSettings={focusSettings} /> : null}
