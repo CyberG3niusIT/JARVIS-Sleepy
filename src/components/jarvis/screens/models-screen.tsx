@@ -108,7 +108,7 @@ const managementCapabilities = [
   },
   {
     title: "Download im Hintergrund",
-    detail: "Geplanter Download über WorkManager, netzbewusst.",
+    detail: "Hintergrunddownload über WorkManager mit Netzwerkprüfung.",
   },
   {
     title: "Pause / Fortsetzen",
