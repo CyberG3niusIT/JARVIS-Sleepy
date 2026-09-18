@@ -39,13 +39,13 @@ Voraussetzung: Bun (alternativ npm mit denselben Skripten).
 ```sh
 bun install
 bun run dev        # Entwicklungsserver auf http://localhost:8080
-bun run build      # Produktionsbuild
-bun run preview    # Vorschau des Builds
+bun run build      # Produktionsbuild nach .output (zusätzlich gespiegelt nach dist)
+bun run preview    # gebauten Server starten (node .output/server/index.mjs)
+bun run start      # identisch zu preview, für Produktionsbetrieb
 bun run lint
 bun run format
 ```
 
 ## Lizenzen
 
-Der Code dieses Repositories steht unter der Apache License 2.0.
 Drittanbieter-Lizenzhinweis: OpenDroid, Apache License 2.0.
