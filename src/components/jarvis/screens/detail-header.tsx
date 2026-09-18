@@ -1,7 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 
 /**
- * Shared compact header for System detail screens.
+ * Shared compact header for detail screens under System and under Mehr.
  * Back affordance, title and one technical secondary line. No hero treatment.
  *
  * Compose mapping: JarvisDetailTopBar(title, subtitle, onBack).
