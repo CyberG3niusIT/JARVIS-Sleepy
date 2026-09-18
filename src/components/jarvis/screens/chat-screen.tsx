@@ -135,8 +135,8 @@ export function ChatScreen() {
             }}
           />
         ) : (
-          <ol className="flex flex-col gap-3 px-4 py-3">
-            {messages.map((m) => (
+          <ol className="flex flex-col gap-3 px-4 py-3 pb-0">
+            {messages.slice(0, baseCount).map((m) => (
               <li key={m.id}>
                 <SectionEnter index={0}>
                   <MessageItem message={m} />
@@ -145,6 +145,20 @@ export function ChatScreen() {
             ))}
           </ol>
         )}
+        {/* Only newly appended turns are announced, the static example is not. */}
+        <ol
+          aria-live="polite"
+          aria-relevant="additions"
+          className="flex flex-col gap-3 px-4 pt-3"
+        >
+          {messages.slice(baseCount).map((m) => (
+            <li key={m.id}>
+              <SectionEnter index={0}>
+                <MessageItem message={m} />
+              </SectionEnter>
+            </li>
+          ))}
+        </ol>
         <div ref={endRef} />
       </div>
 
