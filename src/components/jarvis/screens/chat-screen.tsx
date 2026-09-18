@@ -134,33 +134,57 @@ export function ChatScreen() {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length]);
 
-  const addFiles = (files: File[]) => {
+  /**
+   * Count, single file size and total draft size are checked first, then the
+   * content signature. A preview URL is only created after a file has passed
+   * every check. An over sized file is rejected completely, never truncated.
+   */
+  const addFiles = async (files: File[]) => {
     const accepted: ChatAttachment[] = [];
-    const rejected: string[] = [];
-    files.forEach((file, i) => {
-      const kind = classifyAttachment(file);
-      if (!kind) {
-        rejected.push(file.name);
-        return;
+    const errors: string[] = [];
+    let count = attachmentsRef.current.length;
+    let total = attachmentsRef.current.reduce((sum, a) => sum + a.size, 0);
+
+    for (const [i, file] of files.entries()) {
+      if (count >= MAX_ATTACHMENTS) {
+        errors.push(`${file.name}: maximal ${MAX_ATTACHMENTS} Anhänge pro Nachricht.`);
+        continue;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        errors.push(
+          `${file.name}: ${formatMiB(file.size)} überschreitet das Limit von ${formatMiB(MAX_FILE_BYTES)} pro Datei.`,
+        );
+        continue;
+      }
+      if (total + file.size > MAX_TOTAL_BYTES) {
+        errors.push(
+          `${file.name}: Gesamtgröße überschreitet das Limit von ${formatMiB(MAX_TOTAL_BYTES)}.`,
+        );
+        continue;
+      }
+      const check = await validateAttachment(file);
+      if (!check.ok) {
+        errors.push(`${file.name}: ${check.reason}`);
+        continue;
       }
       let previewUrl: string | undefined;
-      if (kind === "image") {
+      if (check.kind === "image") {
         previewUrl = URL.createObjectURL(file);
         previewUrls.current.add(previewUrl);
       }
       accepted.push({
         id: `a-${Date.now()}-${i}`,
-        kind,
+        kind: check.kind,
         name: file.name,
+        size: file.size,
         ...(previewUrl ? { previewUrl } : {}),
       });
-    });
+      count += 1;
+      total += file.size;
+    }
+
     if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
-    setAttachmentError(
-      rejected.length > 0
-        ? `Nicht unterstützter Dateityp: ${rejected.join(", ")}. Erlaubt sind Bilder und PDF-Dateien.`
-        : null,
-    );
+    setAttachmentError(errors.length > 0 ? errors.join(" ") : null);
   };
 
   const removeAttachment = (id: string) => {
