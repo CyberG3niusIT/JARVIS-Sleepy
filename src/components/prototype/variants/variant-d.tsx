@@ -1,22 +1,10 @@
 import { useState } from "react";
-import {
-  Home,
-  MessageSquare,
-  LayoutGrid,
-  MoreHorizontal,
-  ShieldCheck,
-} from "lucide-react";
-import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
-import { SettingsList } from "@/components/jarvis/blocks";
+import { Home, MessageSquare, LayoutGrid, MoreHorizontal } from "lucide-react";
+import { GESTURE_BAR } from "@/components/prototype/phone-frame";
 import { StartScreen } from "@/components/jarvis/screens/start-screen";
 import { ChatScreen } from "@/components/jarvis/screens/chat-screen";
 import { SystemScreen } from "@/components/jarvis/screens/system-screen";
-import {
-  ListGroup,
-  ListRow,
-  SectionHeader,
-  StatusTag,
-} from "@/components/jarvis/primitives";
+import { MoreScreen } from "@/components/jarvis/screens/more-screen";
 import {
   BottomNav,
   RuntimeStrip,
@@ -24,7 +12,6 @@ import {
   type NavItem,
 } from "@/components/jarvis/shell";
 import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
-import { moreDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
