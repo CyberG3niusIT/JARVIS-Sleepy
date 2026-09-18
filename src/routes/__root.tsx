@@ -77,13 +77,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "J.A.R.V.I.S — Local AI Assistant" },
+      { title: "J.A.R.V.I.S: Local AI Assistant" },
       {
         name: "description",
-        content: "J.A.R.V.I.S — local-first AI assistant for Android. Unscheinbar. Überlegen. Meins.",
+        content: "J.A.R.V.I.S, local-first AI assistant for Android. Unscheinbar. Überlegen. Meins.",
       },
       { name: "theme-color", content: "#1f2224" },
-      { property: "og:title", content: "J.A.R.V.I.S — Local AI Assistant" },
+      { property: "og:title", content: "J.A.R.V.I.S: Local AI Assistant" },
       {
         property: "og:description",
         content: "Local-first AI control for Android. Calm, precise, discreet.",
