@@ -1,8 +1,9 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Info, Inbox, Lock, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusTag } from "./primitives";
 import type { SystemState } from "@/lib/jarvis/ia";
+import { duration } from "@/lib/jarvis/tokens";
 
 /**
  * Locked interactive primitives.
@@ -15,7 +16,7 @@ import type { SystemState } from "@/lib/jarvis/ia";
 type ButtonVariant = "primary" | "secondary" | "destructive";
 
 const buttonVariant: Record<ButtonVariant, string> = {
-  primary: "bg-primary/15 border-primary/60 text-primary",
+  primary: "bg-primary border-primary text-primary-foreground",
   secondary: "bg-transparent border-border text-subtle-foreground",
   destructive: "bg-transparent border-destructive/60 text-destructive",
 };
@@ -40,6 +41,7 @@ export function Button({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      data-filled={variant === "primary" && !disabled ? "true" : undefined}
       className={cn(
         "j-pressable inline-flex min-h-12 items-center justify-center rounded-sm border px-4 text-[13px] leading-5",
         buttonVariant[variant],
@@ -135,13 +137,33 @@ function useEscape(open: boolean, onClose: () => void) {
   }, [open, onClose]);
 }
 
-export function Scrim({ onClick }: { onClick: () => void }) {
+/**
+ * Keeps an overlay mounted for its exit animation, then unmounts it.
+ * Compose mapping: AnimatedVisibility with enter/exit transitions.
+ */
+function usePresence(open: boolean, exitMs: number) {
+  const [mounted, setMounted] = useState(open);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    if (!mounted) return;
+    const timer = window.setTimeout(() => setMounted(false), exitMs);
+    return () => window.clearTimeout(timer);
+  }, [open, mounted, exitMs]);
+
+  return { mounted, closing: mounted && !open };
+}
+
+export function Scrim({ onClick, closing = false }: { onClick: () => void; closing?: boolean }) {
   return (
     <button
       type="button"
       aria-label="Schließen"
       onClick={onClick}
-      className="j-scrim-enter absolute inset-0 bg-black/55"
+      className={cn("absolute inset-0 bg-black/55", closing ? "j-scrim-exit" : "j-scrim-enter")}
       style={{ zIndex: "var(--j-z-scrim)" }}
     />
   );
@@ -159,15 +181,19 @@ export function BottomSheet({
   children: ReactNode;
 }) {
   useEscape(open, onClose);
-  if (!open) return null;
+  const { mounted, closing } = usePresence(open, duration.deliberate);
+  if (!mounted) return null;
   return (
     <>
-      <Scrim onClick={onClose} />
+      <Scrim onClick={onClose} closing={closing} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="j-sheet-enter absolute inset-x-0 bottom-0 rounded-t-lg border-t border-border bg-surface-raised shadow-[var(--j-elevation-raised)]"
+        className={cn(
+          "absolute inset-x-0 bottom-0 rounded-t-lg border-t border-border bg-surface-raised shadow-[var(--j-elevation-raised)]",
+          closing ? "j-sheet-exit" : "j-sheet-enter",
+        )}
         style={{ zIndex: "var(--j-z-sheet)" }}
       >
         <div className="flex justify-center py-2" aria-hidden>
@@ -204,14 +230,15 @@ export function Dialog({
   children?: ReactNode;
 }) {
   useEscape(open, onClose);
+  const { mounted, closing } = usePresence(open, duration.fast);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) ref.current?.focus();
   }, [open]);
-  if (!open) return null;
+  if (!mounted) return null;
   return (
     <>
-      <Scrim onClick={onClose} />
+      <Scrim onClick={onClose} closing={closing} />
       <div className="absolute inset-0 flex items-center justify-center px-6" style={{ zIndex: "var(--j-z-dialog)" }}>
         <div
           ref={ref}
@@ -219,7 +246,10 @@ export function Dialog({
           role="dialog"
           aria-modal="true"
           aria-label={title}
-          className="j-dialog-enter w-full rounded-md border border-border bg-surface-raised p-4 shadow-[var(--j-elevation-overlay)] outline-none"
+          className={cn(
+            "w-full rounded-md border border-border bg-surface-raised p-4 shadow-[var(--j-elevation-overlay)] outline-none",
+            closing ? "j-dialog-exit" : "j-dialog-enter",
+          )}
         >
           <h2 className="text-[14px] text-foreground">{title}</h2>
           {description ? (

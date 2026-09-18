@@ -39,7 +39,7 @@ export const stateLabel: Record<SystemState, string> = {
   error: "Fehler",
   not_implemented: "Noch nicht implementiert",
   degraded: "Degradiert",
-  design_state: "Design state",
+  design_state: "Entwurfszustand",
 };
 
 /** Brand Spec §16 — Execution Location. */

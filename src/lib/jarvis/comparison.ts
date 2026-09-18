@@ -19,6 +19,6 @@ export const comparisonBaseline = {
     sleepyHandoff: "Noch nicht implementiert",
     cloud: "Nicht konfiguriert",
     permissions: "Berechtigung erforderlich",
-    backgroundService: "Design state",
+    backgroundService: "Entwurfszustand",
   },
 } as const;
