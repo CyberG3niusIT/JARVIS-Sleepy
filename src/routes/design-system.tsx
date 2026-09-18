@@ -39,6 +39,8 @@ import {
 } from "@/components/jarvis/controls";
 import { BottomNav, RuntimeStrip, TopAppBar, type NavItem } from "@/components/jarvis/shell";
 import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
+import { JarvisSymbol, JarvisWordmark } from "@/components/brand/jarvis-mark";
+import { cn } from "@/lib/utils";
 import { Composer } from "@/components/jarvis/blocks";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
@@ -255,6 +257,18 @@ function DesignSystemPage() {
 
         <Block title="Informationsarchitektur (festgelegt)">
           <IaSection />
+        </Block>
+
+        <Block title="Bildschirmzustände">
+          <ScreenStatesSection />
+        </Block>
+
+        <Block title="Android-Identität">
+          <AndroidIdentitySection />
+        </Block>
+
+        <Block title="Android-Systeminteraktion">
+          <AndroidSystemInteractionSection />
         </Block>
       </main>
     </div>
@@ -508,6 +522,491 @@ function IaSection() {
         Einkauf, Social-Suite, Gemini-Nano-Mock, simulierte Bildschirmaufnahme,
         Browser-Inkognito als Privacy) bleiben ausgeschlossen.
       </p>
+    </div>
+  );
+}
+
+/* ============================================================
+ * Bildschirmzustände (internal reference, development-only)
+ * ============================================================ */
+
+type ScreenStateKey =
+  | "loading"
+  | "ready"
+  | "empty"
+  | "offline"
+  | "error"
+  | "permission_required"
+  | "privacy_blocked"
+  | "runtime_unavailable"
+  | "not_implemented";
+
+const screenStateOrder: ScreenStateKey[] = [
+  "loading",
+  "ready",
+  "empty",
+  "offline",
+  "error",
+  "permission_required",
+  "privacy_blocked",
+  "runtime_unavailable",
+  "not_implemented",
+];
+
+const screenStateLabel: Record<ScreenStateKey, string> = {
+  loading: "Loading",
+  ready: "Ready",
+  empty: "Empty",
+  offline: "Offline",
+  error: "Fehler",
+  permission_required: "Berechtigung erforderlich",
+  privacy_blocked: "Privacy blockiert",
+  runtime_unavailable: "Runtime nicht verfügbar",
+  not_implemented: "Nicht implementiert",
+};
+
+type MatrixMark = "spec" | "baseline" | "na";
+
+const matrixLabel: Record<MatrixMark, string> = {
+  spec: "spezifiziert",
+  baseline: "Baseline",
+  na: "n/v",
+};
+
+const matrixSymbol: Record<MatrixMark, string> = {
+  spec: "S",
+  baseline: "B",
+  na: "-",
+};
+
+const matrixTone: Record<MatrixMark, string> = {
+  spec: "text-primary",
+  baseline: "text-success",
+  na: "text-disabled",
+};
+
+type ScreenFamily = {
+  name: string;
+  cells: Record<ScreenStateKey, MatrixMark>;
+};
+
+const screenFamilies: ScreenFamily[] = [
+  {
+    name: "Chat",
+    cells: {
+      loading: "spec",
+      ready: "baseline",
+      empty: "spec",
+      offline: "spec",
+      error: "spec",
+      permission_required: "na",
+      privacy_blocked: "spec",
+      runtime_unavailable: "spec",
+      not_implemented: "na",
+    },
+  },
+  {
+    name: "Modelle",
+    cells: {
+      loading: "spec",
+      ready: "baseline",
+      empty: "spec",
+      offline: "spec",
+      error: "spec",
+      permission_required: "na",
+      privacy_blocked: "na",
+      runtime_unavailable: "spec",
+      not_implemented: "na",
+    },
+  },
+  {
+    name: "Agenten",
+    cells: {
+      loading: "spec",
+      ready: "baseline",
+      empty: "spec",
+      offline: "na",
+      error: "spec",
+      permission_required: "spec",
+      privacy_blocked: "spec",
+      runtime_unavailable: "spec",
+      not_implemented: "spec",
+    },
+  },
+  {
+    name: "Berechtigungen",
+    cells: {
+      loading: "na",
+      ready: "baseline",
+      empty: "na",
+      offline: "na",
+      error: "spec",
+      permission_required: "spec",
+      privacy_blocked: "na",
+      runtime_unavailable: "na",
+      not_implemented: "na",
+    },
+  },
+  {
+    name: "Voice",
+    cells: {
+      loading: "spec",
+      ready: "baseline",
+      empty: "na",
+      offline: "spec",
+      error: "spec",
+      permission_required: "spec",
+      privacy_blocked: "spec",
+      runtime_unavailable: "spec",
+      not_implemented: "spec",
+    },
+  },
+  {
+    name: "Memory",
+    cells: {
+      loading: "spec",
+      ready: "baseline",
+      empty: "spec",
+      offline: "na",
+      error: "spec",
+      permission_required: "na",
+      privacy_blocked: "spec",
+      runtime_unavailable: "na",
+      not_implemented: "na",
+    },
+  },
+  {
+    name: "Automationen",
+    cells: {
+      loading: "spec",
+      ready: "baseline",
+      empty: "spec",
+      offline: "na",
+      error: "spec",
+      permission_required: "spec",
+      privacy_blocked: "na",
+      runtime_unavailable: "spec",
+      not_implemented: "spec",
+    },
+  },
+  {
+    name: "Runtimes",
+    cells: {
+      loading: "spec",
+      ready: "baseline",
+      empty: "na",
+      offline: "spec",
+      error: "spec",
+      permission_required: "na",
+      privacy_blocked: "na",
+      runtime_unavailable: "baseline",
+      not_implemented: "na",
+    },
+  },
+];
+
+/**
+ * Reusable state pattern documentation. Each pattern maps to one Compose
+ * state composable; the matrix below records which screen families use it.
+ * Development-only reference, not a product area.
+ */
+function ScreenStatesSection() {
+  return (
+    <div className="flex flex-col gap-8">
+      <div>
+        <h3 className="label-system pb-2">Zustandsmuster</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <LabeledPattern label="Loading">
+            <LoadingState label="Wird geladen" />
+          </LabeledPattern>
+          <LabeledPattern label="Ready">
+            <div className="flex flex-col gap-1.5 px-4 py-4">
+              <StatusTag state="ready" />
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                Inhalt ist vollständig geladen und zeigt echte oder klar markierte
+                Entwurfswerte, nie einen unbestimmten Zwischenstand.
+              </p>
+            </div>
+          </LabeledPattern>
+          <LabeledPattern label="Empty">
+            <EmptyState />
+          </LabeledPattern>
+          <LabeledPattern label="Offline">
+            <DesignStateBlock
+              state="offline"
+              note="Keine Verbindung zur Gegenstelle. Lokale Aktionen bleiben möglich, alles andere ist sichtbar gesperrt."
+            />
+          </LabeledPattern>
+          <LabeledPattern label="Fehler">
+            <ErrorState />
+          </LabeledPattern>
+          <LabeledPattern label="Berechtigung erforderlich">
+            <PermissionRequiredState />
+          </LabeledPattern>
+          <LabeledPattern label="Privacy blockiert">
+            <DesignStateBlock
+              state="privacy_blocked"
+              note="Privacy-Modus unterbindet die Aktion aktiv. Der Grund steht im Text, kein stiller Ausfall."
+            />
+          </LabeledPattern>
+          <LabeledPattern label="Runtime nicht verfügbar">
+            <DesignStateBlock
+              state="unavailable"
+              note="Die benötigte Laufzeit (z. B. Sleepy) ist nicht erreichbar. Kein automatischer Wechsel auf Cloud."
+            />
+          </LabeledPattern>
+          <LabeledPattern label="Nicht implementiert">
+            <NotImplementedState />
+          </LabeledPattern>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="label-system pb-2">Zustandsmatrix nach Bildschirmfamilie</h3>
+        <div className="overflow-x-auto border border-border-soft">
+          <table className="w-full min-w-[720px] border-collapse text-[11px]">
+            <thead>
+              <tr className="border-b border-border-soft bg-surface">
+                <th scope="col" className="px-3 py-2 text-left font-medium text-subtle-foreground">
+                  Bildschirmfamilie
+                </th>
+                {screenStateOrder.map((s) => (
+                  <th
+                    key={s}
+                    scope="col"
+                    className="px-2 py-2 text-left font-medium whitespace-nowrap text-subtle-foreground"
+                  >
+                    {screenStateLabel[s]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-soft">
+              {screenFamilies.map((f) => (
+                <tr key={f.name}>
+                  <th scope="row" className="px-3 py-2 text-left font-normal text-foreground">
+                    {f.name}
+                  </th>
+                  {screenStateOrder.map((s) => {
+                    const mark = f.cells[s];
+                    return (
+                      <td key={s} className="px-2 py-2">
+                        <span
+                          className={cn("value-mono", matrixTone[mark])}
+                          title={matrixLabel[mark]}
+                        >
+                          {matrixSymbol[mark]}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+          S = spezifiziert (Muster festgelegt, Umsetzung offen), B = wahrheitsgetreue
+          Baseline (Zustand ist der aktuell dargestellte Normalfall), - = nicht
+          anwendbar für diese Bildschirmfamilie.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LabeledPattern({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="border border-border-soft bg-surface">
+      <div className="border-b border-border-soft px-3 py-1.5">
+        <span className="text-[11px] text-subtle-foreground">{label}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/* ============================================================
+ * Android-Identität (internal visual spec, existing assets only)
+ * ============================================================ */
+
+/**
+ * Internal composition guidance for the Android launcher/notification
+ * identity. Built entirely from the approved symbol/wordmark PNGs and CSS.
+ * No new artwork, no Android project files.
+ */
+function AndroidIdentitySection() {
+  return (
+    <div className="flex flex-col gap-8">
+      <div>
+        <h3 className="label-system pb-2">Adaptives Launcher-Icon</h3>
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <div className="relative size-24 overflow-hidden rounded-md bg-surface-raised">
+              <div className="absolute inset-0 bg-background" aria-hidden />
+              <div
+                className="absolute inset-[8px] rounded-full border border-dashed border-primary/50"
+                aria-hidden
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <JarvisSymbol size={40} />
+              </div>
+            </div>
+            <span className="text-[11px] text-muted-foreground">108 x 108 dp Vollfläche</span>
+          </div>
+          <dl className="flex max-w-sm flex-col gap-2 text-[12px] leading-5 text-muted-foreground">
+            <div>
+              <dt className="text-foreground">Safe Zone</dt>
+              <dd>
+                Symbol bleibt innerhalb des inneren 66 dp Kreises (gestrichelte Linie).
+                Adaptive Masken (Kreis, Rund-Quadrat, Squircle) dürfen nichts vom Symbol
+                abschneiden.
+              </dd>
+            </div>
+            <div>
+              <dt className="text-foreground">Vordergrund/Hintergrund-Trennung</dt>
+              <dd>
+                Hintergrund ist eine flache Fläche in Markenfarbe (background layer),
+                das Symbol liegt als eigene Vordergrundebene (foreground layer)
+                zentriert darüber, ohne eigenen Schatten.
+              </dd>
+            </div>
+            <div>
+              <dt className="text-foreground">Innenabstand</dt>
+              <dd>
+                Mindestens 21 dp Abstand zwischen Symbolrand und Kachelrand auf jeder
+                Seite, damit Launcher-Parallax das Symbol nicht anschneidet.
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="label-system pb-2">Monochrome Variante (Themed Icon)</h3>
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="flex size-16 items-center justify-center rounded-full bg-foreground/90">
+            <JarvisSymbol size={30} className="brightness-0 invert" />
+          </div>
+          <p className="max-w-sm text-[12px] leading-5 text-muted-foreground">
+            Für themenfähige Launcher-Icons (Android 13+) liefert das Symbol eine
+            einfarbige Silhouette ohne Farbverlauf. Das System färbt die Fläche mit der
+            Systemfarbe ein, das Symbol selbst bleibt Alphamaske, kein separates Icon.
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="label-system pb-2">Splash- und Startbildschirm</h3>
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex h-40 w-24 flex-col items-center justify-center gap-2 rounded-md border border-border-soft bg-background">
+            <JarvisSymbol size={28} />
+            <JarvisWordmark height={10} />
+          </div>
+          <p className="max-w-sm text-[12px] leading-5 text-muted-foreground">
+            Symbol und Wortmarke bleiben vertikal zentriert gestapelt, feste
+            Abstände (8 dp) statt gemessener Ladezeit. Kein Fortschrittstext, kein
+            zusätzliches Motiv. Der Splash verschwindet mit einer Überblendung,
+            sobald Ready erreicht ist.
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="label-system pb-2">Benachrichtigungssymbol</h3>
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="flex size-9 items-center justify-center rounded-sm bg-foreground/90">
+            <JarvisSymbol size={16} className="brightness-0 invert" />
+          </div>
+          <p className="max-w-sm text-[12px] leading-5 text-muted-foreground">
+            Statusleisten-Icon (24 dp Zielraster) ist eine reine Umriss-Silhouette,
+            vollflächig weiß auf transparent, ohne Farbe und ohne Verlauf, wie es das
+            Android-System für Benachrichtigungssymbole verlangt.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+ * Android-Systeminteraktion (behaviour reference, no runtime claims)
+ * ============================================================ */
+
+const backMappingRows: [string, string][] = [
+  ["Start (Tab-Wurzel)", "Zurück verlässt die App (System-Standard), kein Doppel-Tap-Trick."],
+  ["Chat, Modelle, Agenten, Voice, Memory (Tab-Wurzeln)", "Zurück springt zum zuletzt aktiven Tab \"Start\", nicht zur App-Historie."],
+  ["Detailbildschirm innerhalb eines Tabs", "Zurück geht genau eine Ebene in der Tab-eigenen Historie zurück."],
+  ["Bottom Sheet", "Zurück schließt das Sheet, öffnet keine tiefere Navigation."],
+  ["Dialog", "Zurück verhält sich wie Abbrechen, außer bei destruktiver Bestätigung ohne Abbrechen-Option."],
+  ["Editor mit ungesicherter Eingabe", "Zurück zeigt zuerst einen Bestätigungsdialog (Verwerfen/Weiter bearbeiten)."],
+];
+
+const systemInteractionRows: [string, string][] = [
+  [
+    "Tastatur/IME-Insets",
+    "Composer und Formularfelder verschieben sich über den sichtbaren Fensterausschnitt (WindowInsets), Inhalte werden nie von der Tastatur verdeckt, keine feste Pixelannahme.",
+  ],
+  [
+    "Berechtigungsanfrage",
+    "Anfrage öffnet den nativen Android-Berechtigungsdialog. Vor dem ersten Systemdialog steht ein eigener Erklärungsschritt (Rationale), danach kein wiederholtes Anfragen ohne neue Nutzeraktion.",
+  ],
+  [
+    "Weiterleitung zu Systemeinstellungen",
+    "Bei dauerhaft verweigerter Berechtigung führt eine Zeile direkt in die App-Detailseite der Android-Einstellungen, mit Hinweistext davor, kein automatischer Sprung ohne Bestätigung.",
+  ],
+  [
+    "Foreground-Service-Benachrichtigung",
+    "Läuft eine Aktion als Vordergrunddienst (z. B. Sprachaufnahme), zeigt Android eine dauerhafte Benachrichtigung mit Stopp-Aktion. Die App darf diese Benachrichtigung nicht ausblenden.",
+  ],
+  [
+    "Externer Dateiauswähler",
+    "Datei- oder Bildauswahl übergibt an den System-Picker (Storage Access Framework), die App erhält nur die freigegebene Datei, keinen vollen Speicherzugriff.",
+  ],
+];
+
+/**
+ * Documented UI behaviour only. No claim about a working Android build,
+ * this is the specification the shell components above must honour.
+ */
+function AndroidSystemInteractionSection() {
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h3 className="label-system pb-2">System-Zurück-Zuordnung</h3>
+        <div className="overflow-x-auto border border-border-soft">
+          <table className="w-full min-w-[560px] border-collapse text-[12px]">
+            <tbody className="divide-y divide-border-soft">
+              {backMappingRows.map(([k, v]) => (
+                <tr key={k}>
+                  <th scope="row" className="w-1/3 px-3 py-2 text-left align-top font-normal text-foreground">
+                    {k}
+                  </th>
+                  <td className="px-3 py-2 align-top text-muted-foreground">{v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="label-system pb-2">Systemübergaben</h3>
+        <div className="overflow-x-auto border border-border-soft">
+          <table className="w-full min-w-[560px] border-collapse text-[12px]">
+            <tbody className="divide-y divide-border-soft">
+              {systemInteractionRows.map(([k, v]) => (
+                <tr key={k}>
+                  <th scope="row" className="w-1/3 px-3 py-2 text-left align-top font-normal text-foreground">
+                    {k}
+                  </th>
+                  <td className="px-3 py-2 align-top text-muted-foreground">{v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
