@@ -51,6 +51,8 @@ export interface ChatMessage {
   execution?: ExecutionLocation;
   actions?: ChatActionItem[];
   task?: ChatTaskStateId;
+  /** Files carried with the message. Never analysed in the prototype. */
+  attachments?: ChatAttachment[];
 }
 
 /**
