@@ -154,7 +154,7 @@ function SystemOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) 
                   />
                 }
                 chevron={navigable}
-                onClick={navigable ? () => onOpenArea(area.id) : undefined}
+                {...(navigable ? { onClick: () => onOpenArea(area.id) } : {})}
               />
             );
           })}
