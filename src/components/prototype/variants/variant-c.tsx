@@ -21,6 +21,7 @@ import {
   StatusTag,
 } from "@/components/jarvis/primitives";
 import { productAreas } from "@/lib/jarvis/ia";
+import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
  * Variant C — "Konversation + Systemblatt"
@@ -46,7 +47,7 @@ export function VariantC() {
           <span className="text-[15px] font-medium text-foreground">Chat</span>
         </span>
         <span className="flex items-center gap-3">
-          <PrivacyTag mode="PRIVACY_LOCK" />
+          <PrivacyTag mode={comparisonBaseline.privacyMode} />
           <Settings className="size-[18px] text-muted-foreground" aria-hidden />
         </span>
       </header>
@@ -112,8 +113,12 @@ function SystemSheet({
         <span className="flex-1 text-left text-[12px] text-subtle-foreground">
           System
         </span>
-        <StatusTag state="design_state" label="Nicht gebunden" dot={false} />
-        <ExecutionTag where="LOKAL" />
+        <StatusTag
+          state="design_state"
+          label={comparisonBaseline.labels.runtime}
+          dot={false}
+        />
+        <ExecutionTag where={comparisonBaseline.execution} />
         {expanded ? (
           <ChevronDown className="size-4 text-muted-foreground" aria-hidden />
         ) : (
@@ -150,7 +155,7 @@ function SystemSheet({
                 <SectionHeader>Laufzeit</SectionHeader>
                 <RuntimeSummary compact />
                 <SectionHeader>Privacy</SectionHeader>
-                <PrivacyBlock mode="PRIVACY_LOCK" />
+                <PrivacyBlock mode={comparisonBaseline.privacyMode} />
                 <SectionHeader>Entscheidungsreihenfolge</SectionHeader>
                 <RoutingLadderBlock limit={6} />
               </>
