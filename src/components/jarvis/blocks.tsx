@@ -98,15 +98,25 @@ export function PrivacyBlock({
   );
 }
 
-export function RoutingLadderBlock({ limit }: { limit?: number }) {
-  const items = limit ? routingLadder.slice(0, limit) : routingLadder;
+export function RoutingLadderBlock({
+  limit,
+  steps,
+  localSteps = 6,
+}: {
+  limit?: number;
+  steps?: string[];
+  /** How many leading steps run locally, so the tag stays truthful per list. */
+  localSteps?: number;
+}) {
+  const source = steps ?? routingLadder;
+  const items = limit ? source.slice(0, limit) : source;
   return (
     <ol className="divide-y divide-border-soft border-y border-border-soft bg-surface">
       {items.map((step, i) => (
         <li key={step} className="flex items-center gap-3 px-4 py-2">
           <span className="value-mono w-4 shrink-0 text-right">{i + 1}</span>
           <span className="flex-1 text-[12px] leading-4 text-subtle-foreground">{step}</span>
-          {i < 6 ? <ExecutionTag where="LOKAL" /> : null}
+          {i < localSteps ? <ExecutionTag where="LOKAL" /> : null}
         </li>
       ))}
     </ol>
