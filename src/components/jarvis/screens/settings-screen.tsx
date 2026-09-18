@@ -113,7 +113,7 @@ export function SettingsScreen({ onBack }: DetailScreenProps) {
           />
           <ListRow
             title="Cloud"
-            trailing={<StatusTag state="unavailable" label={labels.cloud} dot={false} />}
+            trailing={<StatusTag state="design_state" label={labels.cloud} dot={false} />}
           />
         </ListGroup>
       </SectionEnter>
