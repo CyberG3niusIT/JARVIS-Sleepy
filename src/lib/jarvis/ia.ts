@@ -327,7 +327,8 @@ export const capabilityRows: CapabilityRow[] = [
     detail: "Shizuku / Shell, begrenzt und protokolliert",
     execution: "LOKAL",
     decision: "MODIFY",
-    state: "unavailable",
+    state: "design_state",
+    statusLabel: "Status nicht gebunden",
   },
   {
     name: "Handoff an Sleepy",
@@ -341,14 +342,15 @@ export const capabilityRows: CapabilityRow[] = [
     detail: "Nur nach ausdrücklicher Freigabe",
     execution: "CLOUD",
     decision: "MODIFY",
-    state: "unavailable",
+    state: "design_state",
+    statusLabel: "Nicht konfiguriert",
   },
   {
     name: "MCP-Server",
     detail: "Externe Werkzeuge über MCP",
     execution: "EXTERN",
     decision: "MODIFY",
-    state: "not_implemented",
+    state: "design_state",
   },
 ];
 
