@@ -60,41 +60,26 @@ export function AboutScreen({ onBack }: DetailScreenProps) {
       </SectionEnter>
 
       <SectionEnter index={3}>
-        <SectionHeader>Basis</SectionHeader>
-        <ListGroup>
-          <ListRow
-            title="OpenDroid"
-            subtitle="J.A.R.V.I.S Mobile entsteht aus der OpenDroid-Android-Grundlage und passt sie an."
-          />
-        </ListGroup>
-        <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Die Grundlage betrifft die Android-Seite. J.A.R.V.I.S insgesamt ist ein eigenes
-          Produkt und nicht mit OpenDroid gleichzusetzen.
-        </p>
-      </SectionEnter>
-
-      <SectionEnter index={4}>
         <SectionHeader>Lizenzen</SectionHeader>
         <ListGroup>
           <ListRow
-            title="OpenDroid Basis"
+            title="OpenDroid"
             trailing={<span className="value-mono">Apache License 2.0</span>}
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Nur geprüfte Lizenzangaben. Für J.A.R.V.I.S-eigene Anteile wird hier keine
-          Lizenz behauptet.
+          Drittanbieter-Lizenzhinweis.
         </p>
       </SectionEnter>
 
-      <SectionEnter index={5}>
+      <SectionEnter index={4}>
         <SectionHeader>Prinzip</SectionHeader>
         <p className="px-4 pt-1 text-[13px] leading-5 text-subtle-foreground">
           Local First. Deterministisch vor generativ. Keine stillen Cloud-Fallbacks.
         </p>
       </SectionEnter>
 
-      <SectionEnter index={6}>
+      <SectionEnter index={5}>
         <DesignStateNote />
       </SectionEnter>
     </ScrollBody>
