@@ -63,7 +63,7 @@ function BrandReference() {
         label="Official assets"
         description="The J.A.R.V.I.S wordmark is a custom brand asset. These slots stay empty until the official files are supplied — no stock-font recreation."
       >
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid items-start gap-3 sm:grid-cols-2">
           <AssetSlot name="Wordmark" spec="SVG · horizontal" />
           <AssetSlot name="App icon / node mark" spec="SVG · 1:1" ratio="aspect-square" />
           <AssetSlot name="Wordmark, monochrome" spec="SVG · on dark" />
