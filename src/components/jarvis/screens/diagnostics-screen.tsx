@@ -45,7 +45,10 @@ export function LogListItem({ entry }: { entry: LogEntry }) {
 const redactionRules = [
   { title: "Zugangsdaten redigieren", detail: "Schlüssel, Token und Passwörter werden entfernt." },
   { title: "Sensible Parameter redigieren", detail: "Inhaltliche Argumente werden gekürzt." },
-  { title: "Kommunikationsinhalte minimieren", detail: "Nachrichtentexte werden nicht abgelegt." },
+  {
+    title: "Kommunikationsinhalte minimieren",
+    detail: "Nachrichteninhalte werden reduziert und redigiert.",
+  },
   { title: "Privacy-Status berücksichtigen", detail: "Geschützte Inhalte werden nicht protokolliert." },
 ];
 
