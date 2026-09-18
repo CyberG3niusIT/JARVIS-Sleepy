@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 /**
  * Harness chrome. Styles live in src/styles.css and are the prototype-skill
- * spec verbatim — deliberately not themed with the JARVIS design system.
+ * spec verbatim: deliberately not themed with the JARVIS design system.
  */
 export function VariantPicker({
   names,
