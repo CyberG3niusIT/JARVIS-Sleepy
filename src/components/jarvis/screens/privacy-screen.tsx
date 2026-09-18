@@ -27,10 +27,11 @@ import type { PrivacyMode } from "@/lib/jarvis/ia";
  */
 
 const modeCopy: Record<PrivacyMode, string> = {
-  NORMAL: "Regulärer Betrieb. Geschützte Fähigkeiten folgen der Standardrichtlinie.",
-  PRIVACY: "Geschützte Aufnahme und Auswertung sind gesperrt, lokale Aktionen bleiben möglich.",
+  NORMAL: "Normaler Betrieb.",
+  PRIVACY:
+    "JARVIS-Vorgänge laufen weiter, geschützte Wahrnehmungs- und Aufnahmepfade sind jedoch gesperrt.",
   PRIVACY_LOCK:
-    "Strengste Stufe. Zusätzlich sind Speicherung, Übergabe und Protokollierung geschützter Inhalte gesperrt.",
+    "Strengere Stufe. Zusätzlich können Netzwerk, Cloud und externe Werkzeugpfade hart gesperrt werden.",
 };
 
 const modes: PrivacyMode[] = ["NORMAL", "PRIVACY", "PRIVACY_LOCK"];
@@ -84,7 +85,7 @@ export function PrivacyScreen({ onBack }: SystemDetailProps) {
               selected={mode === current}
               trailing={
                 mode === current ? (
-                  <StatusTag state="design_state" label="Aktiv" dot={false} />
+                  <StatusTag state="design_state" label="Entwurfsmodus" dot={false} />
                 ) : undefined
               }
             />

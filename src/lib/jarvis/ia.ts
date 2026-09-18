@@ -272,6 +272,11 @@ export interface CapabilityRow {
   execution: ExecutionLocation;
   decision: CapabilityDecision;
   state: SystemState;
+  /**
+   * Truthful prototype label where the audited state alone would read as
+   * absence. Set here so every capability view shows the same wording.
+   */
+  statusLabel?: string;
 }
 
 export const capabilityRows: CapabilityRow[] = [
@@ -322,7 +327,8 @@ export const capabilityRows: CapabilityRow[] = [
     detail: "Shizuku / Shell, begrenzt und protokolliert",
     execution: "LOKAL",
     decision: "MODIFY",
-    state: "unavailable",
+    state: "design_state",
+    statusLabel: "Status nicht gebunden",
   },
   {
     name: "Handoff an Sleepy",
@@ -336,14 +342,15 @@ export const capabilityRows: CapabilityRow[] = [
     detail: "Nur nach ausdrücklicher Freigabe",
     execution: "CLOUD",
     decision: "MODIFY",
-    state: "unavailable",
+    state: "design_state",
+    statusLabel: "Nicht konfiguriert",
   },
   {
     name: "MCP-Server",
     detail: "Externe Werkzeuge über MCP",
     execution: "EXTERN",
     decision: "MODIFY",
-    state: "not_implemented",
+    state: "design_state",
   },
 ];
 
