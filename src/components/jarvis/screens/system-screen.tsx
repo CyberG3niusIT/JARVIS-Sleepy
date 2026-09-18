@@ -70,17 +70,34 @@ const navigableAreas: AreaId[] = ["models"];
  */
 export function SystemScreen() {
   const [detail, setDetail] = useState<AreaId | null>(null);
+  /**
+   * Direction of the last nested step. The first render shows the overview
+   * without a slide; the tab switch itself already carries that motion. The
+   * component unmounts when the System tab is left, so a later return starts
+   * on the overview again with direction "none".
+   */
+  const [direction, setDirection] = useState<"forward" | "back" | "none">("none");
+
+  const openArea = (area: AreaId) => {
+    setDirection("forward");
+    setDetail(area);
+  };
+
+  const closeDetail = () => {
+    setDirection("back");
+    setDetail(null);
+  };
 
   return (
     <ScreenTransition
       transitionKey={detail ?? "overview"}
-      direction={detail ? "forward" : "back"}
+      direction={direction}
       className="min-h-full"
     >
       {detail === "models" ? (
-        <ModelsScreen onBack={() => setDetail(null)} />
+        <ModelsScreen onBack={closeDetail} />
       ) : (
-        <SystemOverview onOpenArea={setDetail} />
+        <SystemOverview onOpenArea={openArea} />
       )}
     </ScreenTransition>
   );
