@@ -435,3 +435,54 @@ function NavSection() {
     </div>
   );
 }
+
+/** Development-only reference of the locked hierarchy. Not a product area. */
+function IaSection() {
+  return (
+    <div className="flex flex-col gap-6">
+      <ListGroup>
+        {navTabs.map((t) => (
+          <ListRow
+            key={t.id}
+            title={`${t.order}. ${t.label}`}
+            subtitle={t.purpose}
+          />
+        ))}
+      </ListGroup>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div>
+          <h3 className="label-system pb-2">System</h3>
+          <ListGroup>
+            {systemDestinations.map((a) => (
+              <ListRow
+                key={a.id}
+                title={`${a.order}. ${a.label}`}
+                subtitle={a.purpose}
+                trailing={<StatusTag state={a.state} dot={false} />}
+              />
+            ))}
+          </ListGroup>
+        </div>
+        <div>
+          <h3 className="label-system pb-2">Mehr</h3>
+          <ListGroup>
+            {moreDestinations.map((a) => (
+              <ListRow
+                key={a.id}
+                title={`${a.order}. ${a.label}`}
+                subtitle={a.purpose}
+                trailing={<StatusTag state={a.state} dot={false} />}
+              />
+            ))}
+          </ListGroup>
+        </div>
+      </div>
+      <p className="text-[12px] leading-5 text-muted-foreground">
+        Die vier Tabs sind fest. Jedes Ziel hat genau einen Platz, es gibt keine
+        Doppelung zwischen System und Mehr. Entfernte Bereiche (Finanzen, Essen und
+        Einkauf, Social-Suite, Gemini-Nano-Mock, simulierte Bildschirmaufnahme,
+        Browser-Inkognito als Privacy) bleiben ausgeschlossen.
+      </p>
+    </div>
+  );
+}
