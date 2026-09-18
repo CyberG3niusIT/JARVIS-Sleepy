@@ -427,62 +427,125 @@ export function TaskState({ state, onCancel }: TaskStateProps) {
 
 /* ----------------------------- Composer ------------------------------ */
 
+/** Idle height of the field, and the height at which it starts to scroll. */
+const COMPOSER_MIN_HEIGHT = 48;
+const COMPOSER_MAX_HEIGHT = 112;
+
 function ChatComposer({
   ref,
   value,
   onChange,
   onSend,
+  attachments,
+  onAddFiles,
+  onRemoveAttachment,
+  attachmentError,
 }: {
-  ref: React.Ref<HTMLTextAreaElement>;
+  ref: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
   onChange: (next: string) => void;
   onSend: () => void;
+  attachments: ChatAttachment[];
+  onAddFiles: (files: File[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  attachmentError: string | null;
 }) {
-  const canSend = value.trim().length > 0;
+  const fileRef = useRef<HTMLInputElement>(null);
+  const canSend = value.trim().length > 0 || attachments.length > 0;
+
+  /**
+   * Auto-grow: the field is exactly as tall as its content until the maximum,
+   * so an empty field never shows a scrollbar.
+   */
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(Math.max(el.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+  }, [value, ref]);
+
   return (
-    <div className="sticky bottom-0 flex items-end gap-2 border-t border-border-soft bg-surface px-3 py-2">
-      <label htmlFor="jarvis-composer" className="sr-only">
-        Nachricht an J.A.R.V.I.S
-      </label>
-      <textarea
-        id="jarvis-composer"
-        ref={ref}
-        rows={1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSend();
-          }
-        }}
-        placeholder="Lokal fragen oder Aktion nennen"
-        className="max-h-28 min-h-12 flex-1 resize-none rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground transition-[border-color,box-shadow] duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none"
-      />
-      <button
-        type="button"
-        disabled
-        aria-label="Spracheingabe, noch nicht implementiert"
-        title="Spracheingabe: noch nicht implementiert"
-        className="flex size-12 shrink-0 items-center justify-center rounded-sm border border-border-soft text-disabled"
-      >
-        <Mic className="size-4" aria-hidden />
-      </button>
-      <button
-        type="button"
-        onClick={onSend}
-        disabled={!canSend}
-        aria-label="Senden"
-        data-filled={canSend ? "true" : undefined}
-        className={cn(
-          "flex size-12 shrink-0 items-center justify-center rounded-sm border",
-          canSend
-            ? "j-pressable border-primary bg-primary text-primary-foreground"
-            : "border-border-soft text-disabled",
-        )}
-      >
-        <Send className="size-4" aria-hidden />
-      </button>
+    <div className="sticky bottom-0 border-t border-border-soft bg-surface">
+      <AttachmentDraftList attachments={attachments} onRemove={onRemoveAttachment} />
+
+      {attachmentError ? (
+        <div className="px-3 pt-2" role="alert">
+          <InlineNotice tone="error">{attachmentError}</InlineNotice>
+        </div>
+      ) : null}
+
+      <span className="sr-only" aria-live="polite">
+        {attachments.length > 0
+          ? `${attachments.length} Anhang bzw. Anhänge ausgewählt`
+          : "Keine Anhänge ausgewählt"}
+      </span>
+
+      <div className="flex items-end gap-2 px-3 py-2">
+        <label htmlFor="jarvis-composer" className="sr-only">
+          Nachricht an J.A.R.V.I.S
+        </label>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept={attachmentAccept}
+          className="sr-only"
+          onChange={(e) => {
+            onAddFiles(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          aria-label="Bild oder PDF anhängen"
+          className="j-pressable flex size-12 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground"
+        >
+          <Paperclip className="size-4" aria-hidden />
+        </button>
+        <textarea
+          id="jarvis-composer"
+          ref={ref}
+          rows={1}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder="Lokal fragen oder Aktion nennen"
+          style={{ height: COMPOSER_MIN_HEIGHT, maxHeight: COMPOSER_MAX_HEIGHT }}
+          className="flex-1 resize-none overflow-hidden rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground transition-[border-color,box-shadow] duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none"
+        />
+        <button
+          type="button"
+          disabled
+          aria-label="Spracheingabe, noch nicht implementiert"
+          title="Spracheingabe: noch nicht implementiert"
+          className="flex size-12 shrink-0 items-center justify-center rounded-sm border border-border-soft text-disabled"
+        >
+          <Mic className="size-4" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={!canSend}
+          aria-label="Senden"
+          data-filled={canSend ? "true" : undefined}
+          className={cn(
+            "flex size-12 shrink-0 items-center justify-center rounded-sm border",
+            canSend
+              ? "j-pressable border-primary bg-primary text-primary-foreground"
+              : "border-border-soft text-disabled",
+          )}
+        >
+          <Send className="size-4" aria-hidden />
+        </button>
+      </div>
     </div>
   );
 }
