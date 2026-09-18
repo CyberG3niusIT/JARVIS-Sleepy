@@ -98,8 +98,15 @@ export function PrivacyBlock({
   );
 }
 
-export function RoutingLadderBlock({ limit }: { limit?: number }) {
-  const items = limit ? routingLadder.slice(0, limit) : routingLadder;
+export function RoutingLadderBlock({
+  limit,
+  steps,
+}: {
+  limit?: number;
+  steps?: string[];
+}) {
+  const source = steps ?? routingLadder;
+  const items = limit ? source.slice(0, limit) : source;
   return (
     <ol className="divide-y divide-border-soft border-y border-border-soft bg-surface">
       {items.map((step, i) => (

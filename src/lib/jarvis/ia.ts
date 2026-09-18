@@ -347,7 +347,19 @@ export const capabilityRows: CapabilityRow[] = [
   },
 ];
 
-/** Local-first routing ladder — Product Brief §7. Shown, not simulated. */
+/**
+ * Condensed form of the ladder for Start. Same meaning, fewer rows; the full
+ * eight-step ladder stays in System.
+ */
+export const routingLadderShort = [
+  "Android-Aktion",
+  "Lokaler Skill oder Tool",
+  "Lokales Modell",
+  "Vertrauenswürdige Runtime",
+  "Freigegebener Cloud-Fallback",
+];
+
+/** Local-first routing ladder, Product Brief §7. Shown, not simulated. */
 export const routingLadder = [
   "Deterministische Android-Aktion",
   "Lokaler Skill",
