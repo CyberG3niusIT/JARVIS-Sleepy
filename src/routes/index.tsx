@@ -1,142 +1,119 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { AppShell, AssetSlot, Section } from "@/components/app-shell";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ArrowRight } from "lucide-react";
+import { JarvisWordmark, JarvisSymbol } from "@/components/brand/jarvis-mark";
+import { productAreas, capabilityRows, type CapabilityDecision } from "@/lib/jarvis/ia";
+import { StatusTag, ExecutionTag } from "@/components/jarvis/primitives";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Brand Reference — J.A.R.V.I.S" },
+      { title: "Phase 1 — J.A.R.V.I.S Mobile" },
       {
         name: "description",
         content:
-          "Brand reference for J.A.R.V.I.S, a local-first AI assistant: color, type, surfaces and asset slots.",
+          "Informationsarchitektur und Markenfundament für J.A.R.V.I.S Mobile, die lokale Android-Runtime.",
       },
-      { property: "og:title", content: "Brand Reference — J.A.R.V.I.S" },
+      { property: "og:title", content: "Phase 1 — J.A.R.V.I.S Mobile" },
       {
         property: "og:description",
-        content: "Color, typography, surfaces and official asset slots for J.A.R.V.I.S.",
+        content: "Produktbereiche, Zustandssprache und Shell-Prototypen für die lokale Android-Runtime.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: BrandReference,
+  component: PhaseOne,
 });
 
-const colors = [
-  { name: "background", token: "--background", className: "bg-background" },
-  { name: "surface", token: "--surface", className: "bg-surface" },
-  { name: "surface raised", token: "--surface-raised", className: "bg-surface-raised" },
-  { name: "foreground", token: "--foreground", className: "bg-foreground" },
-  { name: "muted fg", token: "--muted-foreground", className: "bg-muted-foreground" },
-  { name: "primary", token: "--primary", className: "bg-primary" },
-  { name: "primary dim", token: "--primary-dim", className: "bg-primary-dim" },
-  { name: "success", token: "--success", className: "bg-success" },
-  { name: "warning", token: "--warning", className: "bg-warning" },
-  { name: "destructive", token: "--destructive", className: "bg-destructive" },
-];
+const decisionTone: Record<CapabilityDecision, string> = {
+  KEEP: "text-success",
+  MODIFY: "text-subtle-foreground",
+  REPLACE: "text-warning",
+  NEW: "text-primary",
+};
 
-const typeScale = [
-  { name: "Display", cls: "text-2xl font-semibold tracking-tight", sample: "J.A.R.V.I.S" },
-  { name: "Title", cls: "text-base font-medium", sample: "Local AI Assistant" },
-  { name: "Body", cls: "text-sm text-muted-foreground", sample: "Runs on device. Answers stay here." },
-  { name: "Label", cls: "label-system", sample: "System status" },
-  { name: "Mono", cls: "font-mono text-xs text-muted-foreground", sample: "node.local · 12 ms" },
-];
+function PhaseOne() {
+  const tiers = [
+    { tier: "primary" as const, label: "Primäre Bereiche", note: "Kandidaten für Top-Level-Navigation" },
+    { tier: "secondary" as const, label: "Subsysteme", note: "Erreichbar über Drawer, Mehr oder Systemblatt" },
+    { tier: "settings" as const, label: "System & Einstellungen", note: "Nie in der Hauptnavigation" },
+  ];
 
-function BrandReference() {
   return (
-    <AppShell title="Brand Reference">
-      <Section
-        label="Identity"
-        description="Product name, subtitle and claim. Fixed wording — do not paraphrase."
-      >
-        <div className="panel p-5">
-          <p className="text-2xl font-semibold tracking-tight text-foreground">J.A.R.V.I.S</p>
-          <p className="mt-1 text-sm text-muted-foreground">Local AI Assistant</p>
-          <p className="mt-4 border-t border-border pt-4 text-sm font-medium tracking-wide text-primary">
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border-soft">
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
+          <span className="flex items-center gap-3">
+            <JarvisSymbol size={18} />
+            <JarvisWordmark height={12} />
+          </span>
+          <span className="value-mono">Phase 1</span>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-6 py-10">
+        <section>
+          <p className="text-[13px] leading-6 text-subtle-foreground">
+            J.A.R.V.I.S Mobile ist die eigenständige lokale Android-Runtime. Sleepy ist
+            eine optionale vertraute Laufzeit für begrenzte Handoffs, kein Voraussetzung.
+            Diese Seite hält die Informationsarchitektur; die Navigationsentscheidung
+            wird an drei Shell-Prototypen getroffen.
+          </p>
+          <p className="mt-4 text-[13px] font-medium tracking-wide text-primary">
             UNSCHEINBAR. ÜBERLEGEN. MEINS.
           </p>
-        </div>
-      </Section>
+          <Link
+            to="/prototypes/shell"
+            className="mt-6 inline-flex h-11 items-center gap-2 rounded-sm border border-primary/50 px-4 text-[13px] text-primary"
+          >
+            Drei Shell-Prototypen vergleichen
+            <ArrowRight className="size-4" aria-hidden />
+          </Link>
+        </section>
 
-      <Section
-        label="Official assets"
-        description="The J.A.R.V.I.S wordmark is a custom brand asset. These slots stay empty until the official files are supplied — no stock-font recreation."
-      >
-        <div className="grid items-start gap-3 sm:grid-cols-2">
-          <AssetSlot name="Wordmark" spec="SVG · horizontal" />
-          <AssetSlot name="App icon / node mark" spec="SVG · 1:1" ratio="aspect-square" />
-          <AssetSlot name="Wordmark, monochrome" spec="SVG · on dark" />
-          <AssetSlot name="Adaptive icon layers" spec="PNG · 432 px" ratio="aspect-square" />
-        </div>
-      </Section>
-
-      <Section
-        label="Color"
-        description="Graphite and anthracite surfaces with cool gray type. JARVIS blue is reserved for active states, system nodes, focus rings and status."
-      >
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-5">
-          {colors.map((c) => (
-            <div key={c.token} className="bg-surface p-3">
-              <div className={`h-10 rounded-sm border border-border ${c.className}`} />
-              <p className="mt-2 text-xs text-foreground">{c.name}</p>
-              <p className="font-mono text-[10px] text-muted-foreground">{c.token}</p>
+        {tiers.map((t) => (
+          <section key={t.tier} className="mt-10">
+            <h2 className="label-system">{t.label}</h2>
+            <p className="mt-1 text-[11px] text-muted-foreground">{t.note}</p>
+            <div className="mt-3 divide-y divide-border-soft border-y border-border-soft">
+              {productAreas
+                .filter((a) => a.tier === t.tier)
+                .map((a) => (
+                  <div key={a.id} className="flex items-start gap-4 py-2.5">
+                    <span className="w-32 shrink-0 text-[13px] text-foreground">{a.label}</span>
+                    <span className="flex-1 text-[12px] leading-5 text-muted-foreground">
+                      {a.purpose}
+                    </span>
+                    <span className={`value-mono w-16 shrink-0 text-right ${decisionTone[a.decision]}`}>
+                      {a.decision}
+                    </span>
+                  </div>
+                ))}
             </div>
-          ))}
-        </div>
-      </Section>
+          </section>
+        ))}
 
-      <Section label="Typography" description="Inter for all UI. Mono only for technical values.">
-        <div className="panel divide-y divide-border">
-          {typeScale.map((t) => (
-            <div key={t.name} className="flex items-baseline justify-between gap-6 px-4 py-3">
-              <span className={t.cls}>{t.sample}</span>
-              <span className="font-mono text-[10px] text-muted-foreground">{t.name}</span>
-            </div>
-          ))}
-        </div>
-      </Section>
+        <section className="mt-10">
+          <h2 className="label-system">Fähigkeiten und Ausführungsort</h2>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Entwurfszustände aus dem Capability-Audit. Keine gemessenen Werte.
+          </p>
+          <div className="mt-3 divide-y divide-border-soft border-y border-border-soft">
+            {capabilityRows.map((c) => (
+              <div key={c.name} className="flex items-center gap-4 py-2.5">
+                <span className="flex-1 text-[13px] text-foreground">{c.name}</span>
+                <StatusTag state={c.state} dot={false} />
+                <ExecutionTag where={c.execution} />
+              </div>
+            ))}
+          </div>
+        </section>
 
-      <Section
-        label="Surfaces & dividers"
-        description="Restrained radii, fine 1 px dividers, flat elevation. No glass, no glow."
-      >
-        <div className="grid gap-3 sm:grid-cols-3">
-          {[
-            { name: "sunken", token: "--surface-sunken", cls: "bg-surface-sunken" },
-            { name: "base", token: "--surface", cls: "bg-surface" },
-            { name: "raised", token: "--surface-raised", cls: "bg-surface-raised" },
-          ].map((s) => (
-            <div key={s.token} className={`rounded-md border border-border p-4 ${s.cls}`}>
-              <p className="text-sm text-foreground">{s.name}</p>
-              <p className="mt-1 font-mono text-[10px] text-muted-foreground">{s.token}</p>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <Section
-        label="States"
-        description="Blue appears only where the system is active, focused or reporting."
-      >
-        <div className="panel divide-y divide-border">
-          {[
-            { label: "Idle", dot: "bg-muted-foreground", value: "standby" },
-            { label: "Active", dot: "bg-primary", value: "listening" },
-            { label: "Healthy", dot: "bg-success", value: "model loaded" },
-            { label: "Attention", dot: "bg-warning", value: "storage low" },
-            { label: "Fault", dot: "bg-destructive", value: "node offline" },
-          ].map((s) => (
-            <div key={s.label} className="flex items-center justify-between px-4 py-2.5">
-              <span className="flex items-center gap-2.5 text-sm text-foreground">
-                <span className={`size-1.5 rounded-full ${s.dot}`} aria-hidden />
-                {s.label}
-              </span>
-              <span className="font-mono text-xs text-muted-foreground">{s.value}</span>
-            </div>
-          ))}
-        </div>
-      </Section>
-    </AppShell>
+        <p className="mt-10 border-t border-border-soft pt-4 text-[11px] leading-4 text-muted-foreground">
+          Entfernt und bewusst nicht in der Navigation: Finanzen, Essen und Einkauf,
+          Social-Management-Suite, Gemini-Nano-Mock, simulierte Bildschirmaufnahme.
+        </p>
+      </main>
+    </div>
   );
 }
