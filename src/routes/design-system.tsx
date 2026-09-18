@@ -224,9 +224,8 @@ function DesignSystemPage() {
                   <ExecutionTag where="LOKAL" />
                 </span>
               }
-              onClick={() => {}}
             />
-            <ListRow title="Ausgewählte Zeile" selected onClick={() => {}} />
+            <ListRow title="Ausgewählte Zeile" selected />
           </ListGroup>
         </Block>
 
