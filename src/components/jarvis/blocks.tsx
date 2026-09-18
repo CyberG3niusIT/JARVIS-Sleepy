@@ -27,12 +27,17 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
       <ListRow
         title="Lokale Runtime"
         subtitle={compact ? undefined : "LiteRT-LM · kein Modell gebunden"}
-        trailing={<StatusTag state="design_state" label="Kein Modell geladen" />}
+        trailing={
+          <StatusTag
+            state="design_state"
+            label={comparisonBaseline.labels.localModel}
+          />
+        }
       />
       <ListRow
         title="Ausführungsort"
         subtitle={compact ? undefined : "Standard: lokal, kein stiller Fallback"}
-        trailing={<ExecutionTag where="LOKAL" />}
+        trailing={<ExecutionTag where={comparisonBaseline.execution} />}
       />
       <ListRow
         title="Vertraute Runtime (Sleepy)"
@@ -44,7 +49,12 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
       <ListRow
         title="Berechtigungen"
         subtitle={compact ? undefined : "Bedienungshilfen, Benachrichtigungen, Mikrofon"}
-        trailing={<StatusTag state="permission_required" />}
+        trailing={
+          <StatusTag
+            state="permission_required"
+            label={comparisonBaseline.labels.permissions}
+          />
+        }
         chevron
         onClick={() => {}}
       />
