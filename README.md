@@ -39,9 +39,9 @@ Voraussetzung: Bun (alternativ npm mit denselben Skripten).
 ```sh
 bun install
 bun run dev        # Entwicklungsserver auf http://localhost:8080
-bun run build      # Produktionsbuild nach .output (zusätzlich gespiegelt nach dist)
-bun run preview    # gebauten Server starten (node .output/server/index.mjs)
-bun run start      # identisch zu preview, für Produktionsbetrieb
+bun run build      # Produktionsbuild
+bun run preview    # startet .output/server/index.mjs
+bun run start      # startet .output/server/index.mjs
 bun run lint
 bun run format
 ```
