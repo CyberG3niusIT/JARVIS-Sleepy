@@ -49,14 +49,17 @@ const variants = [
   },
   {
     name: "Systemleiste + Runtime",
-    caption: "Variante D: Bottom Navigation + Runtime-Leiste, 393 x 852 dp",
-    axis: "Konsolidierter Kandidat: Tableiste aus A, persistente Runtime-Leiste aus B, Composer nur im Chat.",
+    caption: "Variante D: Freigegebene Baseline, 393 x 852 dp",
+    axis: "Freigegebene UI/UX-Baseline: Tableiste aus A, persistente Runtime-Leiste aus B, Composer nur im Chat.",
     render: () => <VariantD />,
   },
 ];
 
+/** Variant D is the approved baseline, so it is the default without ?v parameter. */
+const defaultVariant = variants.length - 1;
+
 function ShellPrototypes() {
-  const [current, setCurrent] = useState(0);
+  const [current, setCurrent] = useState(defaultVariant);
   const [mountKey, setMountKey] = useState(0);
 
   useEffect(() => {
