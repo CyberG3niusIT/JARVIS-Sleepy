@@ -1,6 +1,8 @@
+import { useRef, useState } from "react";
 import { X, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionEnter } from "@/components/jarvis/motion";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 /**
  * Chat attachment primitives.
@@ -28,8 +30,14 @@ export const attachmentAccept = "image/*,application/pdf";
 export function classifyAttachment(file: File): ChatAttachmentKind | null {
   if (file.type.startsWith("image/")) return "image";
   if (file.type === "application/pdf") return "pdf";
+  // Some providers hand over an empty or unreliable MIME type, so fall back to
+  // the file ending. Nothing beyond images and PDF is accepted.
+  if (file.type === "" && file.name.toLowerCase().endsWith(".pdf")) return "pdf";
   return null;
 }
+
+/** Exit duration of a removed draft row, matching the fast motion token. */
+const REMOVE_EXIT_MS = 120;
 
 export const attachmentKindLabel: Record<ChatAttachmentKind, string> = {
   image: "Bild",
@@ -45,34 +53,52 @@ export function AttachmentDraftList({
   attachments: ChatAttachment[];
   onRemove: (id: string) => void;
 }) {
+  const reduced = useReducedMotion();
+  const [exiting, setExiting] = useState<string[]>([]);
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const startRemove = (id: string) => {
+    if (timers.current[id]) return;
+    setExiting((prev) => [...prev, id]);
+    timers.current[id] = setTimeout(() => {
+      delete timers.current[id];
+      setExiting((prev) => prev.filter((x) => x !== id));
+      onRemove(id);
+    }, REMOVE_EXIT_MS);
+  };
+
   if (attachments.length === 0) return null;
   return (
     <ul className="flex flex-col divide-y divide-border-soft border-b border-border-soft">
-      {attachments.map((a) => (
-        <li key={a.id}>
-          <SectionEnter index={0}>
-            <div className="flex items-center gap-3 px-3 py-2">
-              <AttachmentThumb attachment={a} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12px] leading-4 text-foreground">
-                  {a.name}
+      {attachments.map((a) => {
+        const leaving = exiting.includes(a.id);
+        return (
+          <li key={a.id} className={cn(leaving && (reduced ? "j-scrim-exit" : "j-row-exit"))}>
+            <SectionEnter index={0}>
+              <div className="flex items-center gap-3 px-3 py-2">
+                <AttachmentThumb attachment={a} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12px] leading-4 text-foreground">
+                    {a.name}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+                    {attachmentKindLabel[a.kind]}, angehängt
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
-                  {attachmentKindLabel[a.kind]}, angehängt
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => onRemove(a.id)}
-                aria-label={`Anhang entfernen: ${a.name}`}
-                className="j-pressable flex size-12 shrink-0 items-center justify-center rounded-sm"
-              >
-                <X className="size-4 text-muted-foreground" aria-hidden />
-              </button>
-            </div>
-          </SectionEnter>
-        </li>
-      ))}
+                <button
+                  type="button"
+                  onClick={() => startRemove(a.id)}
+                  disabled={leaving}
+                  aria-label={`Anhang entfernen: ${a.name}`}
+                  className="j-pressable flex size-12 shrink-0 items-center justify-center rounded-sm"
+                >
+                  <X className="size-4 text-muted-foreground" aria-hidden />
+                </button>
+              </div>
+            </SectionEnter>
+          </li>
+        );
+      })}
     </ul>
   );
 }

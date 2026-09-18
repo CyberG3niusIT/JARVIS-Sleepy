@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * J.A.R.V.I.S — Local AI Assistant
+ * J.A.R.V.I.S, Local AI Assistant
  * Tokens follow JARVIS_MOBILE_UI_BRAND_SPEC.md §31 (Implementation Tokens).
  * Graphite surfaces, soft white / cool gray type, restrained JARVIS blue.
  * Never hardcode colors in components.
@@ -133,7 +133,7 @@
   }
 }
 
-/* Dense technical label — section headers, meta labels */
+/* Dense technical label : section headers, meta labels */
 @utility label-system {
   font-size: 11px;
   line-height: 16px;
@@ -168,7 +168,7 @@
   }
 }
 
-/* ---- Prototype picker (harness chrome — spec verbatim, not themed) ---- */
+/* ---- Prototype picker (harness chrome : spec verbatim, not themed) ---- */
 .proto-picker {
   position: fixed;
   bottom: 24px;
@@ -307,6 +307,10 @@
   from { opacity: 1; }
   to { opacity: 0; }
 }
+@keyframes j-row-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(12px, 0, 0); }
+}
 @keyframes j-section-in {
   from { opacity: 0; transform: translate3d(0, 6px, 0); }
   to { opacity: 1; transform: translate3d(0, 0, 0); }
@@ -345,6 +349,10 @@
 }
 @utility j-scrim-exit {
   animation: j-fade-out var(--j-duration-fast) var(--j-ease-exit) both;
+}
+/* Restrained removal of a list row: short fade with a small sideways move. */
+@utility j-row-exit {
+  animation: j-row-out var(--j-duration-fast) var(--j-ease-exit) both;
 }
 /* Subtle, fast section entrance. Stagger via --j-stagger-delay, never decorative. */
 @utility j-section-enter {
@@ -426,6 +434,7 @@
   }
   .j-sheet-exit,
   .j-dialog-exit,
+  .j-row-exit,
   .j-scrim-exit {
     animation: j-fade-out var(--j-duration-fast) var(--j-ease-standard) both;
   }

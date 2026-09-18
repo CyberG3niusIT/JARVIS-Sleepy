@@ -11,6 +11,7 @@ import {
   classifyAttachment,
   type ChatAttachment,
 } from "@/components/jarvis/chat-attachment";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import type { ExecutionLocation } from "@/lib/jarvis/ia";
 
@@ -106,6 +107,24 @@ export function ChatScreen() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  /**
+   * Lifecycle of local preview URLs. A sent attachment keeps its URL, because
+   * the message still renders it, so revoking happens on reset and on unmount.
+   */
+  const previewUrls = useRef<Set<string>>(new Set());
+
+  const revokePreview = (url?: string) => {
+    if (!url || !previewUrls.current.has(url)) return;
+    previewUrls.current.delete(url);
+    URL.revokeObjectURL(url);
+  };
+
+  const revokeAllPreviews = () => {
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls.current.clear();
+  };
+
+  useEffect(() => () => revokeAllPreviews(), []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -120,11 +139,16 @@ export function ChatScreen() {
         rejected.push(file.name);
         return;
       }
+      let previewUrl: string | undefined;
+      if (kind === "image") {
+        previewUrl = URL.createObjectURL(file);
+        previewUrls.current.add(previewUrl);
+      }
       accepted.push({
         id: `a-${Date.now()}-${i}`,
         kind,
         name: file.name,
-        ...(kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
+        ...(previewUrl ? { previewUrl } : {}),
       });
     });
     if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
@@ -137,11 +161,20 @@ export function ChatScreen() {
 
   const removeAttachment = (id: string) => {
     setAttachments((prev) => {
-      const gone = prev.find((a) => a.id === id);
-      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      revokePreview(prev.find((a) => a.id === id)?.previewUrl);
       return prev.filter((a) => a.id !== id);
     });
     setAttachmentError(null);
+  };
+
+  const resetConversation = () => {
+    revokeAllPreviews();
+    setMessages([]);
+    setBaseCount(0);
+    setDraft("");
+    setAttachments([]);
+    setAttachmentError(null);
+    inputRef.current?.focus();
   };
 
   const send = () => {
@@ -150,7 +183,7 @@ export function ChatScreen() {
     const stamp = Date.now();
     const sent = attachments;
     const note = sent.length > 0
-      ? `Datei angehängt. Analyse ist erst nach Runtime-Anbindung verfügbar. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}.`
+      ? `${sent.length === 1 ? "1 Datei angehängt" : `${sent.length} Dateien angehängt`}. Analyse ist erst nach Runtime-Anbindung verfügbar. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}.`
       : `Keine Antwort erzeugt. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}. Der Prototyp übernimmt die Eingabe nur als Entwurfszustand.`;
     setMessages((prev) => [
       ...prev,
@@ -172,14 +205,7 @@ export function ChatScreen() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <ChatHeader
-        showReset={!isEmpty}
-        onReset={() => {
-          setMessages([]);
-          setBaseCount(0);
-          inputRef.current?.focus();
-        }}
-      />
+      <ChatHeader showReset={!isEmpty} onReset={resetConversation} />
 
       <div className="flex-1">
         {isEmpty ? (
@@ -457,18 +483,28 @@ function ChatComposer({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const canSend = value.trim().length > 0 || attachments.length > 0;
+  const reducedMotion = useReducedMotion();
 
   /**
    * Auto-grow: the field is exactly as tall as its content until the maximum,
-   * so an empty field never shows a scrollbar.
+   * so an empty field never shows a scrollbar. Measuring happens with the
+   * height transition switched off, so the eased change stays smooth and the
+   * field never collapses to zero in between.
    */
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const previous = el.offsetHeight;
+    const transition = el.style.transitionProperty;
+    el.style.transitionProperty = "none";
     el.style.height = "auto";
-    const next = Math.min(Math.max(el.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
+    const content = el.scrollHeight;
+    const next = Math.min(Math.max(content, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
+    el.style.height = `${previous}px`;
+    void el.offsetHeight;
+    el.style.transitionProperty = transition;
     el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+    el.style.overflowY = content > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
   }, [value, ref]);
 
   return (
@@ -482,9 +518,11 @@ function ChatComposer({
       ) : null}
 
       <span className="sr-only" aria-live="polite">
-        {attachments.length > 0
-          ? `${attachments.length} Anhang bzw. Anhänge ausgewählt`
-          : "Keine Anhänge ausgewählt"}
+        {attachments.length === 0
+          ? "Keine Anhänge ausgewählt"
+          : attachments.length === 1
+            ? "1 Anhang ausgewählt"
+            : `${attachments.length} Anhänge ausgewählt`}
       </span>
 
       <div className="flex items-end gap-2 px-3 py-2">
@@ -524,7 +562,12 @@ function ChatComposer({
           }}
           placeholder="Lokal fragen oder Aktion nennen"
           style={{ height: COMPOSER_MIN_HEIGHT, maxHeight: COMPOSER_MAX_HEIGHT }}
-          className="flex-1 resize-none overflow-hidden rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground transition-[border-color,box-shadow] duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none"
+          className={cn(
+            "flex-1 resize-none overflow-hidden rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none",
+            reducedMotion
+              ? "transition-[border-color,box-shadow]"
+              : "transition-[border-color,box-shadow,height]",
+          )}
         />
         <button
           type="button"
