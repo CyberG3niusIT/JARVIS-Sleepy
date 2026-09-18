@@ -61,7 +61,11 @@ export function ToolsScreen({ onBack }: SystemDetailProps) {
               trailing={
                 <span className="flex shrink-0 items-center gap-2">
                   <ExecutionTag where={row.execution} />
-                  <StatusTag state={row.state} dot={false} />
+                  <StatusTag
+                    state={row.state}
+                    {...(row.statusLabel ? { label: row.statusLabel } : {})}
+                    dot={false}
+                  />
                 </span>
               }
             />
