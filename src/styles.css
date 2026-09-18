@@ -295,6 +295,18 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes j-sheet-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0.6; transform: translate3d(0, 100%, 0); }
+}
+@keyframes j-dialog-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.97); }
+}
+@keyframes j-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 @keyframes j-indeterminate {
   from { transform: translate3d(-100%, 0, 0); }
   to { transform: translate3d(300%, 0, 0); }
@@ -320,6 +332,15 @@
 }
 @utility j-scrim-enter {
   animation: j-scrim-in var(--j-duration-fast) var(--j-ease-standard) both;
+}
+@utility j-sheet-exit {
+  animation: j-sheet-out var(--j-duration-deliberate) var(--j-ease-exit) both;
+}
+@utility j-dialog-exit {
+  animation: j-dialog-out var(--j-duration-fast) var(--j-ease-exit) both;
+}
+@utility j-scrim-exit {
+  animation: j-fade-out var(--j-duration-fast) var(--j-ease-exit) both;
 }
 
 /* Tactile press feedback. Touch has no hover, so :active carries the response. */
