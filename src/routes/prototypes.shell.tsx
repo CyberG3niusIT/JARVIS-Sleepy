@@ -84,9 +84,14 @@ function ShellPrototypes() {
               Phase 3: Konsolidierungsentscheidung, keine Runtime-Anbindung
             </p>
           </div>
-          <Link to="/" className="text-[12px] text-primary">
-            Grundlagen
-          </Link>
+          <nav className="flex items-center gap-4">
+            <Link to="/design-system" className="text-[12px] text-primary">
+              Designsystem
+            </Link>
+            <Link to="/" className="text-[12px] text-primary">
+              Grundlagen
+            </Link>
+          </nav>
         </div>
       </header>
 
