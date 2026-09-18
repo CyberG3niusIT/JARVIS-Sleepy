@@ -39,6 +39,15 @@ const areaStatusLabel: Partial<Record<AreaId, string>> = {
   diagnostics: "Keine Runtime-Daten",
 };
 
+/**
+ * Display state for this overview only. Runtimes reports the unbound local
+ * runtime here, so tone and label match. The locked IA state and the fact that
+ * the Sleepy handoff is not implemented stay untouched.
+ */
+const areaDisplayState: Partial<Record<AreaId, SystemState>> = {
+  runtimes: "design_state",
+};
+
 export function SystemScreen() {
   return (
     <ScrollBody>
