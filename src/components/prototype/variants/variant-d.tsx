@@ -24,7 +24,7 @@ import {
   type NavItem,
 } from "@/components/jarvis/shell";
 import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
-import { moreDestinations, systemDestinations } from "@/lib/jarvis/ia";
+import { moreDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
