@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
 import {
-  CapabilityList,
   ChatThread,
   Composer,
   NotBoundNotice,
@@ -30,7 +29,7 @@ import {
   type NavItem,
 } from "@/components/jarvis/shell";
 import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
-import { productAreas } from "@/lib/jarvis/ia";
+import { moreDestinations, systemDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
@@ -51,12 +50,23 @@ const tabs: NavItem<TabId>[] = [
 
 export function VariantD() {
   const [tab, setTab] = useState<TabId>("start");
+  const [focusSettings, setFocusSettings] = useState(false);
   const index = tabs.findIndex((t) => t.id === tab);
   const direction = useDirection(index);
 
+  const selectTab = (next: TabId) => {
+    setFocusSettings(false);
+    setTab(next);
+  };
+
   return (
     <div className="flex h-full flex-col">
-      <TopAppBar onSettings={() => setTab("more")} />
+      <TopAppBar
+        onSettings={() => {
+          setFocusSettings(true);
+          setTab("more");
+        }}
+      />
 
       {/* Persistent runtime strip: visible on Start, Chat, System und Mehr. */}
       <RuntimeStrip
@@ -71,11 +81,11 @@ export function VariantD() {
           {tab === "start" ? <StartScreen /> : null}
           {tab === "chat" ? <ChatScreen /> : null}
           {tab === "system" ? <SystemScreen /> : null}
-          {tab === "more" ? <MoreScreen /> : null}
+          {tab === "more" ? <MoreScreen focusSettings={focusSettings} /> : null}
         </ScreenTransition>
       </div>
 
-      <BottomNav items={tabs} current={tab} onSelect={setTab} safeBottom={GESTURE_BAR} />
+      <BottomNav items={tabs} current={tab} onSelect={selectTab} safeBottom={GESTURE_BAR} />
     </div>
   );
 }
@@ -108,26 +118,13 @@ function ChatScreen() {
   );
 }
 
+/** System: technisches Kontrollzentrum, feste Reihenfolge der Ziele. */
 function SystemScreen() {
   return (
     <ScrollBody>
-      <SectionHeader>Fähigkeiten</SectionHeader>
-      <CapabilityList dense />
-      <SectionHeader>Vollständige Entscheidungsreihenfolge</SectionHeader>
-      <RoutingLadderBlock />
-    </ScrollBody>
-  );
-}
-
-function MoreScreen() {
-  const secondary = productAreas.filter((a) => a.tier === "secondary");
-  return (
-    <ScrollBody>
-      <SectionHeader>Einstellungen</SectionHeader>
-      <SettingsList />
-      <SectionHeader>Bereiche</SectionHeader>
+      <SectionHeader>Kontrollzentrum</SectionHeader>
       <ListGroup>
-        {secondary.map((a) => (
+        {systemDestinations.map((a) => (
           <ListRow
             key={a.id}
             title={a.label}
@@ -138,6 +135,44 @@ function MoreScreen() {
           />
         ))}
       </ListGroup>
+      <SectionHeader>Vollständige Entscheidungsreihenfolge</SectionHeader>
+      <RoutingLadderBlock />
+    </ScrollBody>
+  );
+}
+
+/** Mehr: sekundäre Nutzerbereiche und Produkteinstellungen, feste Reihenfolge. */
+function MoreScreen({ focusSettings = false }: { focusSettings?: boolean }) {
+  const areaList = (
+    <>
+      <SectionHeader>Bereiche</SectionHeader>
+      <ListGroup>
+        {moreDestinations.map((a) => (
+          <ListRow
+            key={a.id}
+            title={a.label}
+            subtitle={a.purpose}
+            trailing={<StatusTag state={a.state} dot={false} />}
+            selected={focusSettings && a.id === "settings"}
+            chevron
+            onClick={() => {}}
+          />
+        ))}
+      </ListGroup>
+    </>
+  );
+
+  const settingsBlock = (
+    <>
+      <SectionHeader>Einstellungen</SectionHeader>
+      <SettingsList />
+    </>
+  );
+
+  return (
+    <ScrollBody>
+      {focusSettings ? settingsBlock : areaList}
+      {focusSettings ? areaList : settingsBlock}
       <div className="flex items-center gap-2 px-4 py-4 text-muted-foreground">
         <ShieldCheck className="size-4" aria-hidden />
         <span className="text-[11px]">Alle Bereiche laufen lokal, sofern nicht anders markiert.</span>

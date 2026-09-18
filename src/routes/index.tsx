@@ -1,28 +1,33 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight } from "lucide-react";
 import { JarvisWordmark, JarvisSymbol } from "@/components/brand/jarvis-mark";
-import { productAreas, capabilityRows, type CapabilityDecision } from "@/lib/jarvis/ia";
+import {
+  areasInGroup,
+  capabilityRows,
+  navTabs,
+  type CapabilityDecision,
+} from "@/lib/jarvis/ia";
 import { StatusTag, ExecutionTag } from "@/components/jarvis/primitives";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Phase 1: J.A.R.V.I.S Mobile" },
+      { title: "Informationsarchitektur: J.A.R.V.I.S Mobile" },
       {
         name: "description",
         content:
-          "Informationsarchitektur und Markenfundament für J.A.R.V.I.S Mobile, die lokale Android-Runtime.",
+          "Festgelegte Informationsarchitektur für J.A.R.V.I.S Mobile, die lokale Android-Runtime.",
       },
-      { property: "og:title", content: "Phase 1: J.A.R.V.I.S Mobile" },
+      { property: "og:title", content: "Informationsarchitektur: J.A.R.V.I.S Mobile" },
       {
         property: "og:description",
-        content: "Produktbereiche, Zustandssprache und Shell-Prototypen für die lokale Android-Runtime.",
+        content: "Navigation, Zieleordnung und Zustandssprache für die lokale Android-Runtime.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: PhaseOne,
+  component: PhaseOverview,
 });
 
 const decisionTone: Record<CapabilityDecision, string> = {
@@ -32,11 +37,18 @@ const decisionTone: Record<CapabilityDecision, string> = {
   NEW: "text-primary",
 };
 
-function PhaseOne() {
-  const tiers = [
-    { tier: "primary" as const, label: "Primäre Bereiche", note: "Kandidaten für Top-Level-Navigation" },
-    { tier: "secondary" as const, label: "Subsysteme", note: "Erreichbar über Drawer, Mehr oder Systemblatt" },
-    { tier: "settings" as const, label: "System & Einstellungen", note: "Nie in der Hauptnavigation" },
+function PhaseOverview() {
+  const groups = [
+    {
+      group: "system" as const,
+      label: "System",
+      note: "Technisches Kontrollzentrum, feste Reihenfolge",
+    },
+    {
+      group: "more" as const,
+      label: "Mehr",
+      note: "Sekundäre Nutzerbereiche und Produkteinstellungen",
+    },
   ];
 
   return (
@@ -47,7 +59,7 @@ function PhaseOne() {
             <JarvisSymbol size={18} />
             <JarvisWordmark height={12} />
           </span>
-          <span className="value-mono">Phase 1</span>
+          <span className="value-mono">Phase 4</span>
         </div>
       </header>
 
@@ -55,9 +67,9 @@ function PhaseOne() {
         <section>
           <p className="text-[13px] leading-6 text-subtle-foreground">
             J.A.R.V.I.S Mobile ist die eigenständige lokale Android-Runtime. Sleepy ist
-            eine optionale vertraute Laufzeit für begrenzte Handoffs, kein Voraussetzung.
-            Diese Seite hält die Informationsarchitektur; die Navigationsentscheidung
-            wird an drei Shell-Prototypen getroffen.
+            eine optionale vertraute Laufzeit für begrenzte Handoffs, keine Voraussetzung.
+            Die Bottom Navigation ist festgelegt: Start, Chat, System, Mehr. Jedes
+            spätere Ziel hat genau einen Platz in dieser Struktur.
           </p>
           <p className="mt-4 text-[13px] font-medium tracking-wide text-primary">
             UNSCHEINBAR. ÜBERLEGEN. MEINS.
@@ -66,29 +78,46 @@ function PhaseOne() {
             to="/prototypes/shell"
             className="mt-6 inline-flex h-11 items-center gap-2 rounded-sm border border-primary/50 px-4 text-[13px] text-primary"
           >
-            Drei Shell-Prototypen vergleichen
+            Vier Shell-Prototypen vergleichen
             <ArrowRight className="size-4" aria-hidden />
           </Link>
         </section>
 
-        {tiers.map((t) => (
-          <section key={t.tier} className="mt-10">
-            <h2 className="label-system">{t.label}</h2>
-            <p className="mt-1 text-[11px] text-muted-foreground">{t.note}</p>
+        <section className="mt-10">
+          <h2 className="label-system">Bottom Navigation</h2>
+          <p className="mt-1 text-[11px] text-muted-foreground">Fest, nicht erweiterbar</p>
+          <div className="mt-3 divide-y divide-border-soft border-y border-border-soft">
+            {navTabs.map((t) => (
+              <div key={t.id} className="flex items-start gap-4 py-2.5">
+                <span className="w-32 shrink-0 text-[13px] text-foreground">
+                  {t.order}. {t.label}
+                </span>
+                <span className="flex-1 text-[12px] leading-5 text-muted-foreground">
+                  {t.purpose}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {groups.map((g) => (
+          <section key={g.group} className="mt-10">
+            <h2 className="label-system">{g.label}</h2>
+            <p className="mt-1 text-[11px] text-muted-foreground">{g.note}</p>
             <div className="mt-3 divide-y divide-border-soft border-y border-border-soft">
-              {productAreas
-                .filter((a) => a.tier === t.tier)
-                .map((a) => (
-                  <div key={a.id} className="flex items-start gap-4 py-2.5">
-                    <span className="w-32 shrink-0 text-[13px] text-foreground">{a.label}</span>
-                    <span className="flex-1 text-[12px] leading-5 text-muted-foreground">
-                      {a.purpose}
-                    </span>
-                    <span className={`value-mono w-16 shrink-0 text-right ${decisionTone[a.decision]}`}>
-                      {a.decision}
-                    </span>
-                  </div>
-                ))}
+              {areasInGroup(g.group).map((a) => (
+                <div key={a.id} className="flex items-start gap-4 py-2.5">
+                  <span className="w-32 shrink-0 text-[13px] text-foreground">
+                    {a.order}. {a.label}
+                  </span>
+                  <span className="flex-1 text-[12px] leading-5 text-muted-foreground">
+                    {a.purpose}
+                  </span>
+                  <span className={`value-mono w-16 shrink-0 text-right ${decisionTone[a.decision]}`}>
+                    {a.decision}
+                  </span>
+                </div>
+              ))}
             </div>
           </section>
         ))}

@@ -20,7 +20,7 @@ import {
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
-import { productAreas } from "@/lib/jarvis/ia";
+import { areasInGroup, type AreaGroup } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
@@ -161,10 +161,9 @@ function Drawer({
   onClose: () => void;
   onSelect: (s: Screen) => void;
 }) {
-  const groups: { label: string; tier: "primary" | "secondary" | "settings" }[] = [
-    { label: "Betrieb", tier: "primary" },
-    { label: "Subsysteme", tier: "secondary" },
-    { label: "System", tier: "settings" },
+  const groups: { label: string; group: AreaGroup }[] = [
+    { label: "System", group: "system" },
+    { label: "Mehr", group: "more" },
   ];
   const target: Partial<Record<string, Screen>> = {
     start: "console",
@@ -194,11 +193,10 @@ function Drawer({
         </div>
         <div className="hide-scrollbar flex-1 overflow-y-auto" style={{ paddingBottom: GESTURE_BAR }}>
           {groups.map((g) => (
-            <div key={g.tier}>
+            <div key={g.group}>
               <SectionHeader>{g.label}</SectionHeader>
               <ListGroup>
-                {productAreas
-                  .filter((a) => a.tier === g.tier)
+                {areasInGroup(g.group)
                   .map((a) => (
                     <ListRow
                       key={a.id}

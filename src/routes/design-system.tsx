@@ -42,7 +42,14 @@ import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
 import { Composer } from "@/components/jarvis/blocks";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
-import type { ExecutionLocation, PrivacyMode, SystemState } from "@/lib/jarvis/ia";
+import {
+  moreDestinations,
+  navTabs,
+  systemDestinations,
+  type ExecutionLocation,
+  type PrivacyMode,
+  type SystemState,
+} from "@/lib/jarvis/ia";
 
 /**
  * Development-only design system reference.
@@ -79,7 +86,7 @@ function DesignSystemPage() {
           <div>
             <h1 className="text-[15px] font-medium text-foreground">Designsystem</h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              Interne Referenz, Phase 3. Kein Produktbereich, nicht in der Navigation.
+              Interne Referenz, Phase 4. Kein Produktbereich, nicht in der Navigation.
             </p>
           </div>
           <Link to="/prototypes/shell" className="text-[12px] text-primary">
@@ -253,6 +260,10 @@ function DesignSystemPage() {
 
         <Block title="Bottom Navigation und Bildschirmwechsel">
           <NavSection />
+        </Block>
+
+        <Block title="Informationsarchitektur (festgelegt)">
+          <IaSection />
         </Block>
       </main>
     </div>
@@ -428,6 +439,57 @@ function NavSection() {
         </ScreenTransition>
       </div>
       <BottomNav items={demoTabs} current={tab} onSelect={setTab} />
+    </div>
+  );
+}
+
+/** Development-only reference of the locked hierarchy. Not a product area. */
+function IaSection() {
+  return (
+    <div className="flex flex-col gap-6">
+      <ListGroup>
+        {navTabs.map((t) => (
+          <ListRow
+            key={t.id}
+            title={`${t.order}. ${t.label}`}
+            subtitle={t.purpose}
+          />
+        ))}
+      </ListGroup>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div>
+          <h3 className="label-system pb-2">System</h3>
+          <ListGroup>
+            {systemDestinations.map((a) => (
+              <ListRow
+                key={a.id}
+                title={`${a.order}. ${a.label}`}
+                subtitle={a.purpose}
+                trailing={<StatusTag state={a.state} dot={false} />}
+              />
+            ))}
+          </ListGroup>
+        </div>
+        <div>
+          <h3 className="label-system pb-2">Mehr</h3>
+          <ListGroup>
+            {moreDestinations.map((a) => (
+              <ListRow
+                key={a.id}
+                title={`${a.order}. ${a.label}`}
+                subtitle={a.purpose}
+                trailing={<StatusTag state={a.state} dot={false} />}
+              />
+            ))}
+          </ListGroup>
+        </div>
+      </div>
+      <p className="text-[12px] leading-5 text-muted-foreground">
+        Die vier Tabs sind fest. Jedes Ziel hat genau einen Platz, es gibt keine
+        Doppelung zwischen System und Mehr. Entfernte Bereiche (Finanzen, Essen und
+        Einkauf, Social-Suite, Gemini-Nano-Mock, simulierte Bildschirmaufnahme,
+        Browser-Inkognito als Privacy) bleiben ausgeschlossen.
+      </p>
     </div>
   );
 }

@@ -20,7 +20,7 @@ import {
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
-import { productAreas } from "@/lib/jarvis/ia";
+import { moreDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
@@ -170,8 +170,7 @@ function SystemSheet({
               <>
                 <SectionHeader>Bereiche</SectionHeader>
                 <ListGroup>
-                  {productAreas
-                    .filter((a) => a.tier === "secondary")
+                  {moreDestinations
                     .map((a) => (
                       <ListRow
                         key={a.id}
