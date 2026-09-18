@@ -22,12 +22,12 @@ import {
 } from "@/components/jarvis/screens/models-screen";
 
 /**
- * Zustandsdemonstration fuer die Modellverwaltung.
+ * Zustandsdemonstration für die Modellverwaltung.
  *
- * Dieser Bereich ist ausdruecklich vom truthful baseline getrennt: er zeigt
- * Beispieleintraege mit einer lokalen Zustandsmaschine (Laden, Entladen,
- * Download starten/pausieren/fortsetzen/abbrechen, Loeschen). Es handelt sich
- * um reinen React-Zustand im Speicher, keine Runtime- oder Geraetedaten.
+ * Dieser Bereich ist ausdrücklich vom truthful baseline getrennt: er zeigt
+ * Beispieleinträge mit einer lokalen Zustandsmaschine (Laden, Entladen,
+ * Download starten/pausieren/fortsetzen/abbrechen, Löschen). Es handelt sich
+ * um reinen React-Zustand im Speicher, keine Runtime- oder Gerätedaten.
  */
 
 interface DemoModelEntry extends LocalModelEntry {
@@ -50,7 +50,7 @@ const initialDemoModels: DemoModelEntry[] = [
   },
   {
     id: "demo-downloading",
-    name: "Beispielmodell B (Download laeuft)",
+    name: "Beispielmodell B (Download läuft)",
     loadState: "downloading",
     compatible: true,
     size: "1,1 GB",
@@ -81,13 +81,13 @@ const initialDemoModels: DemoModelEntry[] = [
 ];
 
 function compatibilityLabel(compatible?: boolean) {
-  if (compatible === undefined) return "Nicht geprueft";
-  return compatible ? "Kompatibilitaetspruefung bestanden" : "Kompatibilitaetspruefung nicht bestanden";
+  if (compatible === undefined) return "Nicht geprüft";
+  return compatible ? "Kompatibilitätsprüfung bestanden" : "Kompatibilitätsprüfung nicht bestanden";
 }
 
 function integrityLabel(integrity: DemoModelEntry["integrity"]) {
-  if (!integrity) return "Nicht geprueft";
-  return integrity === "bestanden" ? "Integritaetspruefung bestanden" : "Integritaetspruefung fehlgeschlagen";
+  if (!integrity) return "Nicht geprüft";
+  return integrity === "bestanden" ? "Integritätsprüfung bestanden" : "Integritätsprüfung fehlgeschlagen";
 }
 
 /** Compact list entry, reused from the locked ModelListItem shape but with a demo tag. */
@@ -215,7 +215,7 @@ export function ModelsDemoSection() {
       update(m.id, { loadState: "loading", errorKind: undefined });
       window.setTimeout(() => update(m.id, { loadState: "ready" }), 600);
     }
-    report(`Vorgang fuer "${m.name}" wurde im Demozustand erneut versucht. ${DESIGN_STATE_ACTION}`);
+    report(`Vorgang für "${m.name}" wurde im Demozustand erneut versucht. ${DESIGN_STATE_ACTION}`);
   };
 
   const deleteEntry = () => {
@@ -226,7 +226,7 @@ export function ModelsDemoSection() {
     setDeleteId(null);
     setOpenId(null);
     if (model) {
-      report(`"${model.name}" wurde im Demozustand geloescht. ${DESIGN_STATE_ACTION}`);
+      report(`"${model.name}" wurde im Demozustand gelöscht. ${DESIGN_STATE_ACTION}`);
     }
   };
 
@@ -267,9 +267,9 @@ export function ModelsDemoSection() {
                   dot={false}
                 />
               </DetailField>
-              <DetailField label="Kompatibilitaet">{compatibilityLabel(open.compatible)}</DetailField>
-              <DetailField label="Integritaet">{integrityLabel(open.integrity)}</DetailField>
-              {open.size ? <DetailField label="Groesse">{open.size}</DetailField> : null}
+              <DetailField label="Kompatibilität">{compatibilityLabel(open.compatible)}</DetailField>
+              <DetailField label="Integrität">{integrityLabel(open.integrity)}</DetailField>
+              {open.size ? <DetailField label="Größe">{open.size}</DetailField> : null}
               <DetailField label="Runtime-Zustand">Nicht an eine Runtime gebunden</DetailField>
               {open.loadState === "downloading" || open.loadState === "paused" ? (
                 <DetailField label="Fortschritt (Demo)">
@@ -337,7 +337,7 @@ export function ModelsDemoSection() {
                 <Button onClick={() => retry(open)}>Erneut versuchen</Button>
               ) : null}
               <Button variant="destructive" onClick={() => setDeleteId(open.id)}>
-                Loeschen
+                Löschen
               </Button>
             </div>
           </div>
@@ -348,16 +348,16 @@ export function ModelsDemoSection() {
         <Dialog
           open={!!deleteTarget}
           onClose={() => setDeleteId(null)}
-          title="Modell loeschen"
+          title="Modell löschen"
           description={`"${deleteTarget.name}" wird im Demozustand aus dieser Beispielliste entfernt.`}
         >
           <Button onClick={() => setDeleteId(null)}>Abbrechen</Button>
           <Button variant="destructive" onClick={deleteEntry}>
-            Loeschen
+            Löschen
           </Button>
         </Dialog>
       ) : (
-        <Dialog open={false} onClose={() => setDeleteId(null)} title="Modell loeschen">
+        <Dialog open={false} onClose={() => setDeleteId(null)} title="Modell löschen">
           <Button onClick={() => setDeleteId(null)}>Abbrechen</Button>
         </Dialog>
       )}
@@ -374,9 +374,9 @@ export function ImportFlow({ onDone }: { onDone: (message: string) => void }) {
   const [failedAt, setFailedAt] = useState<ImportStep | null>(null);
 
   const stepLabel: Record<ImportStep, string> = {
-    auswahl: "1 von 4: Datei auswaehlen",
-    kompatibilitaet: "2 von 4: Kompatibilitaetspruefung",
-    integritaet: "3 von 4: Integritaetspruefung",
+    auswahl: "1 von 4: Datei auswählen",
+    kompatibilitaet: "2 von 4: Kompatibilitätsprüfung",
+    integritaet: "3 von 4: Integritätsprüfung",
     registrierung: "4 von 4: Registrierung",
     fertig: "Abgeschlossen",
   };
@@ -390,8 +390,8 @@ export function ImportFlow({ onDone }: { onDone: (message: string) => void }) {
         <p className="label-system">{stepLabel[failedAt]}</p>
         <InlineNotice tone="error">
           {failedAt === "kompatibilitaet"
-            ? "Kompatibilitaetspruefung nicht bestanden (simuliert). Diese Beispieldatei gilt im Demozustand als nicht LiteRT-kompatibel."
-            : "Integritaetspruefung fehlgeschlagen (simuliert). Die Pruefsumme der Beispieldatei stimmt im Demozustand nicht ueberein."}
+            ? "Kompatibilitätsprüfung nicht bestanden (simuliert). Diese Beispieldatei gilt im Demozustand als nicht LiteRT-kompatibel."
+            : "Integritätsprüfung fehlgeschlagen (simuliert). Die Prüfsumme der Beispieldatei stimmt im Demozustand nicht überein."}
         </InlineNotice>
         <div className="flex gap-2">
           <Button onClick={retry}>Erneut versuchen</Button>
@@ -408,10 +408,10 @@ export function ImportFlow({ onDone }: { onDone: (message: string) => void }) {
         <>
           <InlineNotice tone="info">
             Die Android-Dateiauswahl ist im Entwurfszustand nicht angebunden. Dieser Ablauf zeigt nur
-            die Abfolge der Oberflaeche, es wird keine reale Datei ausgewaehlt.
+            die Abfolge der Oberfläche, es wird keine reale Datei ausgewählt.
           </InlineNotice>
           <Button variant="primary" full onClick={() => setStep("kompatibilitaet")}>
-            Beispieldatei auswaehlen (Demo)
+            Beispieldatei auswählen (Demo)
           </Button>
         </>
       ) : null}
@@ -419,7 +419,7 @@ export function ImportFlow({ onDone }: { onDone: (message: string) => void }) {
       {step === "kompatibilitaet" ? (
         <>
           <InlineNotice tone="info">
-            Prueft die Beispieldatei im Demozustand gegen die LiteRT-Runtime.
+            Prüft die Beispieldatei im Demozustand gegen die LiteRT-Runtime.
           </InlineNotice>
           <div className="flex gap-2">
             <Button variant="primary" onClick={() => setStep("integritaet")}>
@@ -435,7 +435,7 @@ export function ImportFlow({ onDone }: { onDone: (message: string) => void }) {
       {step === "integritaet" ? (
         <>
           <InlineNotice tone="info">
-            Prueft die Pruefsumme der Beispieldatei im Demozustand nach SHA-256.
+            Prüft die Prüfsumme der Beispieldatei im Demozustand nach SHA-256.
           </InlineNotice>
           <div className="flex gap-2">
             <Button variant="primary" onClick={() => setStep("registrierung")}>
@@ -461,14 +461,14 @@ export function ImportFlow({ onDone }: { onDone: (message: string) => void }) {
               onDone(`Import der Beispieldatei abgeschlossen. ${DESIGN_STATE_ACTION}`);
             }}
           >
-            Registrierung abschliessen
+            Registrierung abschließen
           </Button>
         </>
       ) : null}
 
       {step === "fertig" ? (
         <InlineNotice tone="info">
-          Import abgeschlossen (Demozustand). Es wurde keine reale Geraetedatei uebernommen.
+          Import abgeschlossen (Demozustand). Es wurde keine reale Gerätedatei übernommen.
         </InlineNotice>
       ) : null}
     </div>
@@ -487,7 +487,7 @@ interface CatalogEntry {
 const catalogEntries: CatalogEntry[] = [
   { id: "cat-1", name: "Katalogbeispiel Klein", size: "350 MB", note: "Katalogbeispiel" },
   { id: "cat-2", name: "Katalogbeispiel Mittel", size: "900 MB", note: "Katalogbeispiel" },
-  { id: "cat-3", name: "Katalogbeispiel Gross", size: "2,1 GB", note: "Katalogbeispiel" },
+  { id: "cat-3", name: "Katalogbeispiel Groß", size: "2,1 GB", note: "Katalogbeispiel" },
 ];
 
 export function CatalogBrowser({ onDone }: { onDone: (message: string) => void }) {
@@ -522,9 +522,9 @@ export function CatalogBrowser({ onDone }: { onDone: (message: string) => void }
               <DetailField label="Name">{open.name}</DetailField>
               <DetailField label="Quelle">Modellkatalog (Beispiel)</DetailField>
               <DetailField label="Lokaler Zustand">Nicht heruntergeladen</DetailField>
-              <DetailField label="Kompatibilitaet">Noch nicht geprueft</DetailField>
-              <DetailField label="Integritaet">Noch nicht geprueft</DetailField>
-              <DetailField label="Groesse">{open.size}</DetailField>
+              <DetailField label="Kompatibilität">Noch nicht geprüft</DetailField>
+              <DetailField label="Integrität">Noch nicht geprüft</DetailField>
+              <DetailField label="Größe">{open.size}</DetailField>
               <DetailField label="Runtime-Zustand">Nicht an eine Runtime gebunden</DetailField>
             </div>
             <div className="px-4 pb-1">
@@ -533,7 +533,7 @@ export function CatalogBrowser({ onDone }: { onDone: (message: string) => void }
                 full
                 onClick={() => {
                   onDone(
-                    `Download von "${open.name}" wurde im Entwurfszustand ausgeloest. ${DESIGN_STATE_ACTION}`,
+                    `Download von "${open.name}" wurde im Entwurfszustand ausgelöst. ${DESIGN_STATE_ACTION}`,
                   );
                   setOpenId(null);
                 }}
