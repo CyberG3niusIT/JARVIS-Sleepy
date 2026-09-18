@@ -9,6 +9,10 @@ import {
 } from "@/components/jarvis/primitives";
 import { BottomSheet, Button, EmptyState, InlineNotice } from "@/components/jarvis/controls";
 import { SectionEnter } from "@/components/jarvis/motion";
+import {
+  DetailHeader,
+  type SystemDetailProps,
+} from "@/components/jarvis/screens/detail-header";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import type { SystemState } from "@/lib/jarvis/ia";
 
