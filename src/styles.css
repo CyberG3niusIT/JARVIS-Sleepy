@@ -369,6 +369,14 @@
   .j-pressable:hover {
     background-color: var(--color-surface-raised);
   }
+  .j-pressable[data-filled="true"]:hover {
+    background-color: var(--color-primary-soft);
+  }
+}
+
+/* Filled primary action keeps its own press colour instead of the neutral one. */
+.j-pressable[data-filled="true"]:active {
+  background-color: var(--color-primary-soft);
 }
 
 @layer base {
