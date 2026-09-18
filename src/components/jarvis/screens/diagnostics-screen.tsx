@@ -90,7 +90,7 @@ export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
           <div className="px-4">
             <EmptyState
               title="Keine Logdaten angebunden"
-              body="Die Absturzprotokollierung ist Teil der Grundlage, im Entwurfszustand ist jedoch keine Logquelle angebunden."
+              body="Die Absturzprotokollierung ist technisch vorgesehen, im Entwurfszustand ist jedoch keine Logquelle angebunden."
             />
           </div>
         ) : (

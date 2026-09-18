@@ -196,21 +196,28 @@ function Drawer({
             <div key={g.group}>
               <SectionHeader>{g.label}</SectionHeader>
               <ListGroup>
-                {areasInGroup(g.group)
-                  .map((a) => (
+                {areasInGroup(g.group).map((a) => {
+                  const t = target[a.id];
+                  // Only areas with a real target in this historical shell are
+                  // interactive. The rest stay informational rows.
+                  return (
                     <ListRow
                       key={a.id}
                       title={a.label}
                       subtitle={a.purpose}
                       trailing={<StatusTag state={a.state} dot={false} />}
-                      onClick={() => {
-                        const t = target[a.id];
-                        if (t) onSelect(t);
-                        onClose();
-                      }}
-                      className={cn(!target[a.id] && "opacity-70")}
+                      {...(t
+                        ? {
+                            onClick: () => {
+                              onSelect(t);
+                              onClose();
+                            },
+                          }
+                        : {})}
+                      className={cn(!t && "opacity-70")}
                     />
-                  ))}
+                  );
+                })}
               </ListGroup>
             </div>
           ))}
