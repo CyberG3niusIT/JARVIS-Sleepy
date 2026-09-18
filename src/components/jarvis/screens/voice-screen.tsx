@@ -7,7 +7,6 @@ import {
   ActionResult,
   DEMO_AREA_NOTE,
   DESIGN_STATE_ACTION,
-  DetailField,
   PrototypeBanner,
   useActionResult,
 } from "@/components/jarvis/prototype-state";
@@ -249,13 +248,13 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
                 subtitle={cfg.desc}
                 selected={id === voiceState}
                 trailing={<StatusTag state={cfg.tag} label={cfg.label} dot={false} />}
-                onClick={() => goTo(id, `Beispielzustand "${cfg.label}" ausgewaehlt.`)}
+                onClick={() => goTo(id, `Beispielzustand "${cfg.label}" ausgewählt.`)}
               />
             );
           })}
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Die Auswahl dient allein der Ansicht jedes moeglichen Zustands und veraendert
+          Die Auswahl dient allein der Ansicht jedes möglichen Zustands und verändert
           nur den lokalen Vorschauzustand dieser Ansicht.
         </p>
       </SectionEnter>
@@ -274,12 +273,12 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
             trailing={<StatusTag state="design_state" label={UNBOUND} dot={false} />}
           />
           <ListRow
-            title="Schluesselwort"
+            title="Schlüsselwort"
             trailing={<span className="value-mono">{keyword || UNBOUND}</span>}
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Die Erkennung des Schluesselworts soll lokal auf dem Geraet laufen. Engine wird
+          Die Erkennung des Schlüsselworts soll lokal auf dem Geraet laufen. Engine wird
           erst festgelegt, wenn die mobile Sprachschicht steht. Die Werte hier sind reine
           Oberflaechen-Beispiele.
         </p>
@@ -298,7 +297,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Ziel ist eine lokale Transkription auf dem Geraet. Modell, Laufzeit und Guete
+          Ziel ist eine lokale Transkription auf dem Geraet. Modell, Laufzeit und Güte
           werden erst angezeigt, wenn sie wirklich gemessen werden.
         </p>
       </SectionEnter>
@@ -338,7 +337,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
         title="Wake-Word-Konfiguration"
       >
         <p className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
-          Reine Oberflaechen-Werte. Es ist noch keine Wake-Word-Engine ausgewaehlt, dieser
+          Reine Oberflaechen-Werte. Es ist noch keine Wake-Word-Engine ausgewählt, dieser
           Dialog legt keine fest.
         </p>
         <div className="flex min-h-12 items-center justify-between px-4">
@@ -347,7 +346,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
         </div>
         <TextInput
           id="wake-word-keyword"
-          label="Schluesselwort"
+          label="Schlüsselwort"
           value={keyword}
           onChange={setKeyword}
           placeholder="z. B. Jarvis"
@@ -375,14 +374,14 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
               report(`Wake-Word-Konfiguration gespeichert (lokal). ${DESIGN_STATE_ACTION}`);
             }}
           >
-            Uebernehmen
+            Übernehmen
           </Button>
         </div>
       </BottomSheet>
 
       <BottomSheet open={sttSheetOpen} onClose={() => setSttSheetOpen(false)} title="STT-Konfiguration">
         <p className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
-          Reine Oberflaechen-Werte. Es ist noch kein Erkennungsmodell ausgewaehlt.
+          Reine Oberflaechen-Werte. Es ist noch kein Erkennungsmodell ausgewählt.
         </p>
         <div className="px-4">
           <span className="label-system block pb-1.5">Sprache</span>
@@ -399,8 +398,8 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
           </div>
         </div>
         <div className="flex min-h-12 items-center justify-between px-4 pt-3">
-          <span className="text-[13px] text-foreground">Lokale Ausfuehrung</span>
-          <Toggle checked={sttLocalOnly} onChange={setSttLocalOnly} label="Lokale Ausfuehrung" />
+          <span className="text-[13px] text-foreground">Lokale Ausführung</span>
+          <Toggle checked={sttLocalOnly} onChange={setSttLocalOnly} label="Lokale Ausführung" />
         </div>
         <div className="flex min-h-12 items-center justify-between px-4">
           <span className="text-[13px] text-foreground">Interpunktion</span>
@@ -415,7 +414,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
               report(`STT-Konfiguration gespeichert (lokal). ${DESIGN_STATE_ACTION}`);
             }}
           >
-            Uebernehmen
+            Übernehmen
           </Button>
         </div>
       </BottomSheet>
@@ -423,7 +422,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
       <BottomSheet open={ttsSheetOpen} onClose={() => setTtsSheetOpen(false)} title="TTS-Stimmenauswahl">
         <p className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
           Neutrale Platzhalter, reine Oberflaechen-Beispiele. Es ist noch kein
-          Sprachausgabe-Anbieter ausgewaehlt.
+          Sprachausgabe-Anbieter ausgewählt.
         </p>
         <ListGroup>
           {ttsVoiceOptions.map((option) => (
@@ -450,7 +449,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
           </div>
         </div>
         <div className="px-4 pt-3">
-          <span className="label-system block pb-1.5">Lautstaerke</span>
+          <span className="label-system block pb-1.5">Lautstärke</span>
           <div className="flex gap-2">
             {volumeOptions.map((option) => (
               <Button
@@ -472,7 +471,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
               report(`TTS-Stimmenauswahl gespeichert (lokal). ${DESIGN_STATE_ACTION}`);
             }}
           >
-            Uebernehmen
+            Übernehmen
           </Button>
         </div>
       </BottomSheet>
