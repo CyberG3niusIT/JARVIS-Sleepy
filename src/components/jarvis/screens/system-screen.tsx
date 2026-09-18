@@ -77,7 +77,7 @@ export function SystemScreen() {
             title="Privacy"
             trailing={
               <ValueTransition value={comparisonBaseline.privacyMode}>
-                <StatusTag state="design_state" label={comparisonBaseline.privacyMode} />
+                <PrivacyTag mode={comparisonBaseline.privacyMode} />
               </ValueTransition>
             }
           />
