@@ -205,6 +205,8 @@ export function ChatScreen() {
 
   return (
     <div className="flex min-h-full flex-col">
+      {/* Persistent screen heading, also present while the conversation renders. */}
+      <h1 className="sr-only">Chat</h1>
       <ChatHeader showReset={!isEmpty} onReset={resetConversation} />
 
       <div className="flex-1">
@@ -283,7 +285,7 @@ function EmptyConversation({ onPick }: { onPick: (prompt: string) => void }) {
   return (
     <SectionEnter index={0}>
       <div className="px-4 pt-8">
-        <h1 className="text-[15px] leading-5 text-foreground">Was soll ich erledigen?</h1>
+        <h2 className="text-[15px] leading-5 text-foreground">Was soll ich erledigen?</h2>
         <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
           Lokale Aktionen, Fragen oder Abläufe. Standardausführung:{" "}
           {comparisonBaseline.execution}.

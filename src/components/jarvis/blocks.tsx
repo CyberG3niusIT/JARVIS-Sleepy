@@ -48,7 +48,9 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
       />
       <ListRow
         title="Berechtigungen"
-        subtitle={compact ? undefined : "Bedienungshilfen, Benachrichtigungen, Mikrofon"}
+        subtitle={
+          compact ? undefined : "Android-Zugriffe, Status noch nicht vollständig gebunden"
+        }
         trailing={
           <StatusTag
             state="permission_required"
@@ -210,28 +212,50 @@ function Turn({
   );
 }
 
+/**
+ * Composer of the historical variants and of the design system reference.
+ * The field is only a button when it has a real target, and Senden stays
+ * disabled without a send callback, so no control pretends to work.
+ */
 export function Composer({
   hint = "Lokal fragen oder Aktion nennen",
   onFocusField,
+  onSend,
   fieldLabel,
 }: {
   hint?: string;
   onFocusField?: () => void;
+  onSend?: () => void;
   fieldLabel?: string;
 }) {
+  const fieldClass =
+    "touch-row flex flex-1 items-center rounded-sm border border-border px-3 text-left text-[13px] text-muted-foreground";
   return (
     <div className="flex items-center gap-2 border-t border-border-soft bg-surface px-3 py-2">
+      {onFocusField ? (
+        <button
+          type="button"
+          onClick={onFocusField}
+          aria-label={fieldLabel}
+          className={cn("j-pressable focus:border-primary/70", fieldClass)}
+        >
+          {hint}
+        </button>
+      ) : (
+        <div className={fieldClass} aria-hidden>
+          {hint}
+        </div>
+      )}
       <button
         type="button"
-        onClick={onFocusField}
-        aria-label={fieldLabel}
-        className="j-pressable touch-row flex flex-1 items-center rounded-sm border border-border px-3 text-left text-[13px] text-muted-foreground focus:border-primary/70"
-      >
-        {hint}
-      </button>
-      <button
-        type="button"
-        className="j-pressable touch-row flex min-w-12 items-center justify-center rounded-sm border border-primary/50 px-3 text-[12px] text-primary"
+        onClick={onSend}
+        disabled={!onSend}
+        className={cn(
+          "touch-row flex min-w-12 items-center justify-center rounded-sm border px-3 text-[12px]",
+          onSend
+            ? "j-pressable border-primary/50 text-primary"
+            : "border-border-soft text-disabled",
+        )}
       >
         Senden
       </button>

@@ -85,7 +85,7 @@ export function RuntimesScreen({ onBack }: SystemDetailProps) {
           <ListRow
             title="Cloud-Ausführung"
             subtitle="Nur nach ausdrücklicher Freigabe, niemals als Standardweg."
-            trailing={<StatusTag state="unavailable" label={labels.cloud} dot={false} />}
+            trailing={<StatusTag state="design_state" label={labels.cloud} dot={false} />}
           />
         </ListGroup>
       </SectionEnter>
