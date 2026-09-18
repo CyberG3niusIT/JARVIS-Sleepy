@@ -36,6 +36,10 @@ export interface AgentEntry {
   /** Step budget and time budget, both enforced, both reported when known. */
   maxSteps?: number;
   timeoutSeconds?: number;
+  /** Context explicitly approved for the task, never widened by the agent. */
+  approvedContext?: string[];
+  /** Result the task is expected to deliver, agreed before execution. */
+  expectedResult?: string;
 }
 
 export function AgentListItem({ agent }: { agent: AgentEntry }) {
