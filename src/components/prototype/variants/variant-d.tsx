@@ -32,7 +32,7 @@ import { productAreas } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
- * Variant D — "Systemleiste + Runtime-Leiste"
+ * Variant D: "Systemleiste + Runtime-Leiste"
  * Consolidated candidate: bottom navigation from A, persistent runtime strip
  * from B. No drawer, composer only on the chat screen.
  */
