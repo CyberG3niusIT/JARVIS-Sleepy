@@ -106,20 +106,23 @@ export function SystemScreen() {
       <SectionEnter index={2}>
         <SectionHeader>Kontrollbereiche</SectionHeader>
         <ListGroup>
-          {systemDestinations.map((area) => (
-            <ListRow
-              key={area.id}
-              title={area.label}
-              subtitle={area.purpose}
-              trailing={
-                <StatusTag
-                  state={area.state}
-                  label={areaStatusLabel[area.id] ?? stateLabel[area.state]}
-                  dot={false}
-                />
-              }
-            />
-          ))}
+          {systemDestinations.map((area) => {
+            const display = areaDisplayState[area.id] ?? area.state;
+            return (
+              <ListRow
+                key={area.id}
+                title={area.label}
+                subtitle={area.purpose}
+                trailing={
+                  <StatusTag
+                    state={display}
+                    label={areaStatusLabel[area.id] ?? stateLabel[display]}
+                    dot={false}
+                  />
+                }
+              />
+            );
+          })}
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
           Teile der Tools und Android-Aktionen hängen von freigegebenen Berechtigungen
