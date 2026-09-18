@@ -167,6 +167,8 @@ function MoreScreen() {
   const secondary = productAreas.filter((a) => a.tier === "secondary");
   return (
     <ScrollBody>
+      <SectionHeader>Einstellungen</SectionHeader>
+      <SettingsList />
       <SectionHeader>Bereiche</SectionHeader>
       <ListGroup>
         {secondary.map((a) => (
@@ -180,8 +182,6 @@ function MoreScreen() {
           />
         ))}
       </ListGroup>
-      <SectionHeader>Einstellungen</SectionHeader>
-      <SettingsList />
       <div className="flex items-center gap-2 px-4 py-4 text-muted-foreground">
         <ShieldCheck className="size-4" aria-hidden />
         <span className="text-[11px]">Alle Bereiche laufen lokal, sofern nicht anders markiert.</span>
