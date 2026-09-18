@@ -21,6 +21,7 @@ import {
   StatusTag,
 } from "@/components/jarvis/primitives";
 import { productAreas } from "@/lib/jarvis/ia";
+import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
  * Variant B — "Konsole"
@@ -62,11 +63,11 @@ export function VariantB() {
       {/* Persistent runtime strip — visible on every screen. */}
       <div className="flex shrink-0 items-center justify-between border-b border-border-soft bg-surface px-4 py-1.5">
         <span className="flex items-center gap-2">
-          <StatusTag state="design_state" label="Runtime nicht gebunden" />
+          <StatusTag state="design_state" label={comparisonBaseline.labels.runtime} />
         </span>
         <span className="flex items-center gap-2">
-          <ExecutionTag where="LOKAL" />
-          <PrivacyTag mode="PRIVACY" />
+          <ExecutionTag where={comparisonBaseline.execution} />
+          <PrivacyTag mode={comparisonBaseline.privacyMode} />
         </span>
       </div>
 
@@ -116,12 +117,14 @@ function ConsoleScreen({ onOpen }: { onOpen: (s: Screen) => void }) {
       <SectionHeader>Laufzeit</SectionHeader>
       <div className="divide-y divide-border-soft border-y border-border-soft bg-surface">
         {[
-          ["Lokales Modell", "Kein Modell geladen"],
-          ["Modell-Runtime", "LiteRT-LM"],
-          ["Ausführungsort", "LOKAL"],
-          ["Sleepy-Handoff", "Noch nicht implementiert"],
-          ["Hintergrunddienst", "Design state"],
-          ["Berechtigungen", "Berechtigung erforderlich"],
+          ["Lokales Modell", comparisonBaseline.labels.localModel],
+          ["Modell-Runtime", comparisonBaseline.labels.modelRuntime],
+          ["Ausführungsort", comparisonBaseline.labels.execution],
+          ["Sleepy-Runtime", comparisonBaseline.labels.sleepy],
+          ["Sleepy-Handoff", comparisonBaseline.labels.sleepyHandoff],
+          ["Cloud", comparisonBaseline.labels.cloud],
+          ["Hintergrunddienst", comparisonBaseline.labels.backgroundService],
+          ["Berechtigungen", comparisonBaseline.labels.permissions],
         ].map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-4 px-4 py-2">
             <span className="text-[12px] leading-4 text-subtle-foreground">{k}</span>
@@ -146,7 +149,7 @@ function ConsoleScreen({ onOpen }: { onOpen: (s: Screen) => void }) {
       <CapabilityList dense />
 
       <SectionHeader>Privacy</SectionHeader>
-      <PrivacyBlock mode="PRIVACY" />
+      <PrivacyBlock mode={comparisonBaseline.privacyMode} />
     </ScrollBody>
   );
 }
