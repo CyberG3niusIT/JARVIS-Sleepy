@@ -124,6 +124,7 @@ export function ChatScreen() {
         showReset={!isEmpty}
         onReset={() => {
           setMessages([]);
+          setBaseCount(0);
           inputRef.current?.focus();
         }}
       />
