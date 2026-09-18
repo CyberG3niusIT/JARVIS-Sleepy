@@ -213,8 +213,8 @@ export function ModelsScreen({ onBack }: ModelsScreenProps) {
             ))}
           </ListGroup>
           <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-            Fähigkeiten der Modellverwaltung, keine laufenden Vorgänge. Es werden hier
-            keine laufenden Runtime-Vorgänge simuliert.
+            Fähigkeiten der Modellverwaltung. Es werden hier keine laufenden
+            Runtime-Vorgänge simuliert.
           </p>
         </SectionEnter>
 
