@@ -7,8 +7,14 @@ import {
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
-import { BottomSheet, Button, EmptyState, InlineNotice } from "@/components/jarvis/controls";
+import { BottomSheet, Button, EmptyState } from "@/components/jarvis/controls";
 import { SectionEnter } from "@/components/jarvis/motion";
+import { ActionResult, useActionResult } from "@/components/jarvis/prototype-state";
+import {
+  CatalogBrowser,
+  ImportFlow,
+  ModelsDemoSection,
+} from "@/components/jarvis/screens/models-demo";
 import {
   DetailHeader,
   type SystemDetailProps,
@@ -136,6 +142,7 @@ type AddModelSource = "import" | "catalog";
 export function ModelsScreen({ onBack }: SystemDetailProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [source, setSource] = useState<AddModelSource | null>(null);
+  const { message: addResult, report: reportAddResult } = useActionResult();
   /**
    * Prototype list. It stays empty because the registry is not bound yet; this
    * is not a claim that the real device carries no model file.
@@ -203,7 +210,10 @@ export function ModelsScreen({ onBack }: SystemDetailProps) {
               Modell hinzufügen
             </Button>
           </div>
+          <ActionResult message={addResult} />
         </SectionEnter>
+
+        <ModelsDemoSection />
 
         <SectionEnter index={3}>
           <SectionHeader>Verwaltung</SectionHeader>
@@ -232,6 +242,7 @@ export function ModelsScreen({ onBack }: SystemDetailProps) {
         onSelect={setSource}
         onBackToChoice={() => setSource(null)}
         onClose={closeSheet}
+        onResult={reportAddResult}
       />
     </>
   );
@@ -239,15 +250,9 @@ export function ModelsScreen({ onBack }: SystemDetailProps) {
 
 /* ------------------------------ Add model -------------------------------- */
 
-const sourceCopy: Record<AddModelSource, { title: string; body: string }> = {
-  import: {
-    title: "Lokale Datei importieren",
-    body: "Die Dateiauswahl ist im Entwurfszustand noch nicht angebunden. Auswahl, Kompatibilitätsprüfung und Registrierung erfolgen später über die Android-Dateiauswahl.",
-  },
-  catalog: {
-    title: "Modellkatalog öffnen",
-    body: "Der Modellkatalog ist im Entwurfszustand noch nicht angebunden. Auswahl, Hintergrunddownload und Integritätsprüfung werden hier später über die Modellverwaltung ausgeführt.",
-  },
+const sourceTitle: Record<AddModelSource, string> = {
+  import: "Lokale Datei importieren",
+  catalog: "Modellkatalog",
 };
 
 function AddModelSheet({
@@ -256,25 +261,38 @@ function AddModelSheet({
   onSelect,
   onBackToChoice,
   onClose,
+  onResult,
 }: {
   open: boolean;
   source: AddModelSource | null;
   onSelect: (next: AddModelSource) => void;
   onBackToChoice: () => void;
   onClose: () => void;
+  onResult: (message: string) => void;
 }) {
+  const finish = (message: string) => {
+    onResult(message);
+    onClose();
+  };
+
   return (
     <BottomSheet
       open={open}
       onClose={onClose}
-      title={source ? sourceCopy[source].title : "Modell hinzufügen"}
+      title={source ? sourceTitle[source] : "Modell hinzufügen"}
     >
-      {source ? (
-        <div className="flex flex-col gap-3 px-4 pt-3">
-          <InlineNotice tone="info">{sourceCopy[source].body}</InlineNotice>
-          <div className="flex gap-2">
+      {source === "import" ? (
+        <div className="flex flex-col gap-3">
+          <ImportFlow onDone={finish} />
+          <div className="flex gap-2 px-4 pt-1">
             <Button onClick={onBackToChoice}>Zurück</Button>
-            <Button onClick={onClose}>Schließen</Button>
+          </div>
+        </div>
+      ) : source === "catalog" ? (
+        <div className="flex flex-col gap-3">
+          <CatalogBrowser onDone={finish} />
+          <div className="flex gap-2 px-4 pt-1">
+            <Button onClick={onBackToChoice}>Zurück</Button>
           </div>
         </div>
       ) : (
