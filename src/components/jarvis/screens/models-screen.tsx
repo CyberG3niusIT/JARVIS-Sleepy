@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, HardDrive } from "lucide-react";
+import { HardDrive } from "lucide-react";
 import { ScrollBody } from "@/components/prototype/phone-frame";
 import {
   ListGroup,
