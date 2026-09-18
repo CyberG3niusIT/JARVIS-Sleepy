@@ -89,8 +89,8 @@ export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
         {crashLogs.length === 0 ? (
           <div className="px-4">
             <EmptyState
-              title="Keine Runtime-Daten"
-              body="Die Absturzprotokollierung ist Teil der Grundlage, im Entwurfszustand liegen jedoch keine Einträge vor."
+              title="Keine Logdaten angebunden"
+              body="Die Absturzprotokollierung ist Teil der Grundlage, im Entwurfszustand ist jedoch keine Logquelle angebunden."
             />
           </div>
         ) : (
