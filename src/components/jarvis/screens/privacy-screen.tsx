@@ -261,7 +261,7 @@ export function PrivacyScreen({ onBack }: SystemDetailProps) {
         description={
           overlay.kind === "confirm_relax"
             ? `Wechsel zu ${overlay.target}. Zuvor gesperrte Fähigkeiten würden wieder freigegeben. Das ist eine lokale Entwurfsauswahl, keine Runtime-Aktion. Wirklich fortfahren?`
-            : undefined
+            : "Weniger strenger Modus, lokale Entwurfsauswahl."
         }
       >
         <Button onClick={closeOverlay}>Abbrechen</Button>
