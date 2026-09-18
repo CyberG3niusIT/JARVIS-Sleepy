@@ -101,9 +101,12 @@ export function PrivacyBlock({
 export function RoutingLadderBlock({
   limit,
   steps,
+  localSteps = 6,
 }: {
   limit?: number;
   steps?: string[];
+  /** How many leading steps run locally, so the tag stays truthful per list. */
+  localSteps?: number;
 }) {
   const source = steps ?? routingLadder;
   const items = limit ? source.slice(0, limit) : source;
