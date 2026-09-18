@@ -140,6 +140,7 @@ function SystemOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) 
         <ListGroup>
           {systemDestinations.map((area) => {
             const display = areaDisplayState[area.id] ?? area.state;
+            const navigable = navigableAreas.includes(area.id);
             return (
               <ListRow
                 key={area.id}
@@ -152,6 +153,8 @@ function SystemOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) 
                     dot={false}
                   />
                 }
+                chevron={navigable}
+                onClick={navigable ? () => onOpenArea(area.id) : undefined}
               />
             );
           })}
