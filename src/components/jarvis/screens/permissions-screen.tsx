@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ScrollBody } from "@/components/prototype/phone-frame";
 import { ListGroup, ListRow, SectionHeader, StatusTag } from "@/components/jarvis/primitives";
+import { cn } from "@/lib/utils";
 import { SectionEnter } from "@/components/jarvis/motion";
 import { BottomSheet, Button, InlineNotice } from "@/components/jarvis/controls";
 import {
@@ -216,6 +217,54 @@ export function PermissionsScreen({ onBack }: SystemDetailProps) {
 
 /* ---------------------------- Permission detail --------------------------- */
 
+const demoStateOrder: PermissionGrantState[] = [
+  "not_requested",
+  "granted",
+  "denied",
+  "denied_permanently",
+  "revoked",
+  "not_applicable",
+];
+
+/** Local demo state selector, compact list-row segmented control, radiogroup semantics. */
+function DemoStateSelector({
+  value,
+  onChange,
+}: {
+  value: PermissionGrantState;
+  onChange: (next: PermissionGrantState) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Demo-Zustand auswählen"
+      className="divide-y divide-border-soft border-y border-border-soft bg-surface"
+    >
+      {demoStateOrder.map((state) => {
+        const checked = state === value;
+        return (
+          <button
+            key={state}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            onClick={() => onChange(state)}
+            className={cn(
+              "touch-row j-pressable flex w-full items-center gap-3 px-4 py-2.5 text-left",
+              checked && "bg-surface-selected",
+            )}
+          >
+            <span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-foreground">
+              {permissionGrantLabel[state]}
+            </span>
+            <StatusTag state={permissionGrantTone[state]} label={checked ? "Ausgewählt" : ""} dot={!checked} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PermissionDetailSheet({
   group,
   onClose,
@@ -226,16 +275,22 @@ function PermissionDetailSheet({
   const [demoState, setDemoState] = useState<PermissionGrantState>("not_requested");
   const { message, report } = useActionResult();
 
+  const canRequest =
+    demoState === "not_requested" || demoState === "denied" || demoState === "revoked";
+
+  const changeDemoState = (next: PermissionGrantState) => {
+    setDemoState(next);
+    report(`Demo-Zustand auf "${permissionGrantLabel[next]}" gesetzt. ${DESIGN_STATE_ACTION}`);
+  };
+
   const requestPermission = () => {
-    setDemoState((prev) =>
-      prev === "not_requested" || prev === "revoked" || prev === "denied" ? "granted" : prev,
-    );
-    report(`Demo-Zustand auf "Erteilt" gesetzt. ${DESIGN_STATE_ACTION}`);
+    setDemoState("granted");
+    report(`Berechtigung angefragt, Demo-Zustand auf "Erteilt" gesetzt. ${DESIGN_STATE_ACTION}`);
   };
 
   const openAndroidSettings = () => {
     report(
-      `Android-Einstellungen wurden nicht geöffnet, es besteht keine Systemanbindung. ${DESIGN_STATE_ACTION}`,
+      `Android-Einstellungen wurden nicht geöffnet, es besteht keine Systemanbindung. Diese Schaltfläche zeigt nur die spätere Route. ${DESIGN_STATE_ACTION}`,
     );
   };
 
@@ -274,18 +329,44 @@ function PermissionDetailSheet({
             <StatusTag state={permissionGrantTone[demoState]} label={permissionGrantLabel[demoState]} dot={false} />
           </DetailField>
 
-          <p className="px-4 pt-1 text-[11px] leading-4 text-muted-foreground">
-            Zustandsmuster: Nicht angefragt, Erteilt, Abgelehnt, Dauerhaft abgelehnt, Widerrufen,
-            Nicht zutreffend.
-          </p>
+          <div className="pt-2">
+            <DemoStateSelector value={demoState} onChange={changeDemoState} />
+          </div>
+
+          {demoState === "denied_permanently" ? (
+            <div className="px-4 pt-3">
+              <InlineNotice tone="warning">
+                Bei dauerhafter Ablehnung führt die spätere Route direkt in die
+                Android-Systemeinstellungen. In diesem Web-Entwurf wird nichts geöffnet.
+              </InlineNotice>
+            </div>
+          ) : null}
+
+          {demoState === "not_applicable" ? (
+            <div className="px-4 pt-3">
+              <InlineNotice tone="info">
+                Diese Berechtigung ist im Demo-Zustand nicht zutreffend, eine Anfrage ist hier
+                nicht verfügbar.
+              </InlineNotice>
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-2 px-4 pt-3">
-            <Button variant="primary" full onClick={requestPermission}>
-              Berechtigung anfragen (Demo)
-            </Button>
-            <Button full onClick={openAndroidSettings}>
-              Android-Einstellungen öffnen (Demo)
-            </Button>
+            {canRequest ? (
+              <Button variant="primary" full onClick={requestPermission}>
+                Berechtigung anfragen
+              </Button>
+            ) : null}
+            {demoState === "granted" ? (
+              <Button full onClick={openAndroidSettings}>
+                Widerrufen über Android-Einstellungen (spätere Route)
+              </Button>
+            ) : null}
+            {demoState === "denied_permanently" ? (
+              <Button full onClick={openAndroidSettings}>
+                Android-Einstellungen öffnen (spätere Route)
+              </Button>
+            ) : null}
             <Button full onClick={resetDemo}>
               Demo-Zustand zurücksetzen
             </Button>
