@@ -278,9 +278,9 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Die Erkennung des Schlüsselworts soll lokal auf dem Geraet laufen. Engine wird
+          Die Erkennung des Schlüsselworts soll lokal auf dem Gerät laufen. Engine wird
           erst festgelegt, wenn die mobile Sprachschicht steht. Die Werte hier sind reine
-          Oberflaechen-Beispiele.
+          Oberflächen-Beispiele.
         </p>
       </SectionEnter>
 
@@ -297,7 +297,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Ziel ist eine lokale Transkription auf dem Geraet. Modell, Laufzeit und Güte
+          Ziel ist eine lokale Transkription auf dem Gerät. Modell, Laufzeit und Güte
           werden erst angezeigt, wenn sie wirklich gemessen werden.
         </p>
       </SectionEnter>
@@ -310,7 +310,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
           <ListRow title="TTS" trailing={<StatusTag state="not_implemented" dot={false} />} />
           <ListRow
             title="Stimme"
-            subtitle="Oberflaechen-Beispiel, kein echtes Stimmprofil."
+            subtitle="Oberflächen-Beispiel, kein echtes Stimmprofil."
             trailing={<span className="value-mono">{ttsVoice}</span>}
           />
         </ListGroup>
@@ -321,7 +321,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
         <div className="px-4">
           <InlineNotice tone="info">
             Sprachaufnahme muss dem zentralen PrivacyGate folgen. In PRIVACY sind
-            geschuetzte Mikrofon- und STT-Pfade gesperrt, PRIVACY_LOCK kann strengere
+            geschützte Mikrofon- und STT-Pfade gesperrt, PRIVACY_LOCK kann strengere
             Grenzen erzwingen. Das Gate ist im Entwurfszustand noch nicht verdrahtet.
           </InlineNotice>
         </div>
@@ -337,7 +337,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
         title="Wake-Word-Konfiguration"
       >
         <p className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
-          Reine Oberflaechen-Werte. Es ist noch keine Wake-Word-Engine ausgewählt, dieser
+          Reine Oberflächen-Werte. Es ist noch keine Wake-Word-Engine ausgewählt, dieser
           Dialog legt keine fest.
         </p>
         <div className="flex min-h-12 items-center justify-between px-4">
@@ -381,7 +381,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
 
       <BottomSheet open={sttSheetOpen} onClose={() => setSttSheetOpen(false)} title="STT-Konfiguration">
         <p className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
-          Reine Oberflaechen-Werte. Es ist noch kein Erkennungsmodell ausgewählt.
+          Reine Oberflächen-Werte. Es ist noch kein Erkennungsmodell ausgewählt.
         </p>
         <div className="px-4">
           <span className="label-system block pb-1.5">Sprache</span>
@@ -421,7 +421,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
 
       <BottomSheet open={ttsSheetOpen} onClose={() => setTtsSheetOpen(false)} title="TTS-Stimmenauswahl">
         <p className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
-          Neutrale Platzhalter, reine Oberflaechen-Beispiele. Es ist noch kein
+          Neutrale Platzhalter, reine Oberflächen-Beispiele. Es ist noch kein
           Sprachausgabe-Anbieter ausgewählt.
         </p>
         <ListGroup>
