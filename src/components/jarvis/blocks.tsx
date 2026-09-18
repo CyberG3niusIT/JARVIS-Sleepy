@@ -36,7 +36,9 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
       <ListRow
         title="Vertraute Runtime (Sleepy)"
         subtitle={compact ? undefined : "Optionaler begrenzter Handoff"}
-        trailing={<StatusTag state="not_implemented" />}
+        trailing={
+          <StatusTag state="unavailable" label={comparisonBaseline.labels.sleepy} />
+        }
       />
       <ListRow
         title="Berechtigungen"
