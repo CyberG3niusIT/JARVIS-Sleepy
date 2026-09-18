@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Mic, Send } from "lucide-react";
+import { Mic, Paperclip, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ExecutionTag, StatusTag } from "@/components/jarvis/primitives";
 import { SectionEnter, ValueTransition } from "@/components/jarvis/motion";
+import { InlineNotice } from "@/components/jarvis/controls";
+import {
+  AttachmentDraftList,
+  MessageAttachmentList,
+  attachmentAccept,
+  classifyAttachment,
+  type ChatAttachment,
+} from "@/components/jarvis/chat-attachment";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import type { ExecutionLocation } from "@/lib/jarvis/ia";
 
@@ -43,6 +51,8 @@ export interface ChatMessage {
   execution?: ExecutionLocation;
   actions?: ChatActionItem[];
   task?: ChatTaskStateId;
+  /** Files carried with the message. Never analysed in the prototype. */
+  attachments?: ChatAttachment[];
 }
 
 /**
@@ -92,6 +102,8 @@ export function ChatScreen() {
   /** Static part of the transcript. Everything after it is announced live. */
   const [baseCount, setBaseCount] = useState(demoConversation.length);
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -99,20 +111,60 @@ export function ChatScreen() {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length]);
 
+  const addFiles = (files: File[]) => {
+    const accepted: ChatAttachment[] = [];
+    const rejected: string[] = [];
+    files.forEach((file, i) => {
+      const kind = classifyAttachment(file);
+      if (!kind) {
+        rejected.push(file.name);
+        return;
+      }
+      accepted.push({
+        id: `a-${Date.now()}-${i}`,
+        kind,
+        name: file.name,
+        ...(kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
+      });
+    });
+    if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
+    setAttachmentError(
+      rejected.length > 0
+        ? `Nicht unterstützter Dateityp: ${rejected.join(", ")}. Erlaubt sind Bilder und PDF-Dateien.`
+        : null,
+    );
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const gone = prev.find((a) => a.id === id);
+      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+    setAttachmentError(null);
+  };
+
   const send = () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text && attachments.length === 0) return;
     const stamp = Date.now();
+    const sent = attachments;
+    const note = sent.length > 0
+      ? `Datei angehängt. Analyse ist erst nach Runtime-Anbindung verfügbar. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}.`
+      : `Keine Antwort erzeugt. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}. Der Prototyp übernimmt die Eingabe nur als Entwurfszustand.`;
     setMessages((prev) => [
       ...prev,
-      { id: `u-${stamp}`, role: "user", text },
       {
-        id: `s-${stamp}`,
-        role: "system",
-        text: `Keine Antwort erzeugt. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}. Der Prototyp übernimmt die Eingabe nur als Entwurfszustand.`,
+        id: `u-${stamp}`,
+        role: "user",
+        text,
+        ...(sent.length > 0 ? { attachments: sent } : {}),
       },
+      { id: `s-${stamp}`, role: "system", text: note },
     ]);
     setDraft("");
+    setAttachments([]);
+    setAttachmentError(null);
     inputRef.current?.focus();
   };
 
@@ -170,6 +222,10 @@ export function ChatScreen() {
         value={draft}
         onChange={setDraft}
         onSend={send}
+        attachments={attachments}
+        onAddFiles={addFiles}
+        onRemoveAttachment={removeAttachment}
+        attachmentError={attachmentError}
       />
     </div>
   );
@@ -241,7 +297,12 @@ function MessageItem({
   if (message.role === "user") {
     return (
       <div className="ml-auto max-w-[78%] rounded-sm rounded-br-xs bg-surface-selected px-3 py-2">
-        <p className="text-[13px] leading-5 text-foreground">{message.text}</p>
+        {message.text ? (
+          <p className="text-[13px] leading-5 text-foreground">{message.text}</p>
+        ) : null}
+        {message.attachments ? (
+          <MessageAttachmentList attachments={message.attachments} />
+        ) : null}
       </div>
     );
   }
@@ -371,62 +432,125 @@ export function TaskState({ state, onCancel }: TaskStateProps) {
 
 /* ----------------------------- Composer ------------------------------ */
 
+/** Idle height of the field, and the height at which it starts to scroll. */
+const COMPOSER_MIN_HEIGHT = 48;
+const COMPOSER_MAX_HEIGHT = 112;
+
 function ChatComposer({
   ref,
   value,
   onChange,
   onSend,
+  attachments,
+  onAddFiles,
+  onRemoveAttachment,
+  attachmentError,
 }: {
-  ref: React.Ref<HTMLTextAreaElement>;
+  ref: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
   onChange: (next: string) => void;
   onSend: () => void;
+  attachments: ChatAttachment[];
+  onAddFiles: (files: File[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  attachmentError: string | null;
 }) {
-  const canSend = value.trim().length > 0;
+  const fileRef = useRef<HTMLInputElement>(null);
+  const canSend = value.trim().length > 0 || attachments.length > 0;
+
+  /**
+   * Auto-grow: the field is exactly as tall as its content until the maximum,
+   * so an empty field never shows a scrollbar.
+   */
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(Math.max(el.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+  }, [value, ref]);
+
   return (
-    <div className="sticky bottom-0 flex items-end gap-2 border-t border-border-soft bg-surface px-3 py-2">
-      <label htmlFor="jarvis-composer" className="sr-only">
-        Nachricht an J.A.R.V.I.S
-      </label>
-      <textarea
-        id="jarvis-composer"
-        ref={ref}
-        rows={1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSend();
-          }
-        }}
-        placeholder="Lokal fragen oder Aktion nennen"
-        className="max-h-28 min-h-12 flex-1 resize-none rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground transition-[border-color,box-shadow] duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none"
-      />
-      <button
-        type="button"
-        disabled
-        aria-label="Spracheingabe, noch nicht implementiert"
-        title="Spracheingabe: noch nicht implementiert"
-        className="flex size-12 shrink-0 items-center justify-center rounded-sm border border-border-soft text-disabled"
-      >
-        <Mic className="size-4" aria-hidden />
-      </button>
-      <button
-        type="button"
-        onClick={onSend}
-        disabled={!canSend}
-        aria-label="Senden"
-        data-filled={canSend ? "true" : undefined}
-        className={cn(
-          "flex size-12 shrink-0 items-center justify-center rounded-sm border",
-          canSend
-            ? "j-pressable border-primary bg-primary text-primary-foreground"
-            : "border-border-soft text-disabled",
-        )}
-      >
-        <Send className="size-4" aria-hidden />
-      </button>
+    <div className="sticky bottom-0 border-t border-border-soft bg-surface">
+      <AttachmentDraftList attachments={attachments} onRemove={onRemoveAttachment} />
+
+      {attachmentError ? (
+        <div className="px-3 pt-2" role="alert">
+          <InlineNotice tone="error">{attachmentError}</InlineNotice>
+        </div>
+      ) : null}
+
+      <span className="sr-only" aria-live="polite">
+        {attachments.length > 0
+          ? `${attachments.length} Anhang bzw. Anhänge ausgewählt`
+          : "Keine Anhänge ausgewählt"}
+      </span>
+
+      <div className="flex items-end gap-2 px-3 py-2">
+        <label htmlFor="jarvis-composer" className="sr-only">
+          Nachricht an J.A.R.V.I.S
+        </label>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept={attachmentAccept}
+          className="sr-only"
+          onChange={(e) => {
+            onAddFiles(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          aria-label="Bild oder PDF anhängen"
+          className="j-pressable flex size-12 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground"
+        >
+          <Paperclip className="size-4" aria-hidden />
+        </button>
+        <textarea
+          id="jarvis-composer"
+          ref={ref}
+          rows={1}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder="Lokal fragen oder Aktion nennen"
+          style={{ height: COMPOSER_MIN_HEIGHT, maxHeight: COMPOSER_MAX_HEIGHT }}
+          className="flex-1 resize-none overflow-hidden rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground transition-[border-color,box-shadow] duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none"
+        />
+        <button
+          type="button"
+          disabled
+          aria-label="Spracheingabe, noch nicht implementiert"
+          title="Spracheingabe: noch nicht implementiert"
+          className="flex size-12 shrink-0 items-center justify-center rounded-sm border border-border-soft text-disabled"
+        >
+          <Mic className="size-4" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={!canSend}
+          aria-label="Senden"
+          data-filled={canSend ? "true" : undefined}
+          className={cn(
+            "flex size-12 shrink-0 items-center justify-center rounded-sm border",
+            canSend
+              ? "j-pressable border-primary bg-primary text-primary-foreground"
+              : "border-border-soft text-disabled",
+          )}
+        >
+          <Send className="size-4" aria-hidden />
+        </button>
+      </div>
     </div>
   );
 }
