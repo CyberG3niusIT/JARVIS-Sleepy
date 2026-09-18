@@ -43,7 +43,7 @@ export default defineConfig(async ({ command }) => {
       host: true,
       port: 8080,
       strictPort: true,
-      allowedHosts: true,
+      allowedHosts: true as const,
     },
     preview: {
       host: true,

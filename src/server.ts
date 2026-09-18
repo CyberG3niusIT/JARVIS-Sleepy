@@ -47,39 +47,18 @@ function isH3SwallowedErrorBody(body: string): boolean {
 /* ---------------------------- Security headers ---------------------------- */
 
 /**
- * The Lovable editor preview injects its own helper script and uses a live
- * reload channel. That relaxation stays limited to the preview host, the
- * published output keeps the strict policy.
+ * One project owned policy for every host. Inline script and style are still
+ * required by the framework for the hydration payload and critical styles,
+ * everything else stays on the own origin. No external origin is allowed.
  */
-function isPreviewHost(request: Request): boolean {
-  let host = "";
-  try {
-    host = new URL(request.url).hostname;
-  } catch {
-    return false;
-  }
-  return (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host.startsWith("id-preview--") ||
-    host.endsWith(".lovableproject.com")
-  );
-}
-
-function contentSecurityPolicy(preview: boolean): string {
-  // Inline script and style are still required by the framework for hydration
-  // payload and critical styles, everything else stays on the own origin.
-  const scriptSrc = preview
-    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.gpteng.co"
-    : "script-src 'self' 'unsafe-inline'";
-  const connectSrc = preview ? "connect-src 'self' ws: wss: https://cdn.gpteng.co" : "connect-src 'self'";
+function contentSecurityPolicy(): string {
   return [
     "default-src 'self'",
-    scriptSrc,
+    "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    connectSrc,
+    "connect-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'",
@@ -87,10 +66,10 @@ function contentSecurityPolicy(preview: boolean): string {
   ].join("; ");
 }
 
-function withSecurityHeaders(request: Request, response: Response): Response {
+function withSecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
   if (!headers.has("content-security-policy")) {
-    headers.set("content-security-policy", contentSecurityPolicy(isPreviewHost(request)));
+    headers.set("content-security-policy", contentSecurityPolicy());
   }
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
@@ -110,11 +89,10 @@ export default {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return withSecurityHeaders(request, await normalizeCatastrophicSsrResponse(response));
+      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
       return withSecurityHeaders(
-        request,
         new Response(renderErrorPage(), {
           status: 500,
           headers: { "content-type": "text/html; charset=utf-8" },

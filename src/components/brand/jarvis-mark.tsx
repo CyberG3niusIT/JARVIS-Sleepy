@@ -1,5 +1,5 @@
-import wordmarkAsset from "@/assets/jarvis-wordmark.png.asset.json";
-import symbolAsset from "@/assets/jarvis-symbol.png.asset.json";
+import wordmarkUrl from "@/assets/jarvis-wordmark.png";
+import symbolUrl from "@/assets/jarvis-symbol.png";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,7 +16,7 @@ export function JarvisWordmark({
 }) {
   return (
     <img
-      src={wordmarkAsset.url}
+      src={wordmarkUrl}
       alt="J.A.R.V.I.S"
       style={{ height }}
       className={cn("w-auto select-none", className)}
@@ -34,7 +34,7 @@ export function JarvisSymbol({
 }) {
   return (
     <img
-      src={symbolAsset.url}
+      src={symbolUrl}
       alt=""
       aria-hidden
       style={{ height: size }}
