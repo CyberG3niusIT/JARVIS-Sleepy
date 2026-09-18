@@ -86,11 +86,11 @@ function DesignSystemPage() {
           <div>
             <h1 className="text-[15px] font-medium text-foreground">Designsystem</h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              Interne Referenz, Phase 4. Kein Produktbereich, nicht in der Navigation.
+              Interne Referenz der freigegebenen UI/UX-Baseline. Kein Produktbereich, nicht in der Navigation.
             </p>
           </div>
           <Link to="/prototypes/shell" className="text-[12px] text-primary">
-            Shell-Prototypen
+            J.A.R.V.I.S Mobile Vorschau
           </Link>
         </div>
       </header>
@@ -239,8 +239,8 @@ function DesignSystemPage() {
             <DesignStateBlock state="design_state" note="Platzhalter statt gemessener Werte." />
             <LoadingState label="Modellindex wird gelesen" />
             <EmptyState />
-            <ErrorState onRetry={() => {}} />
-            <PermissionRequiredState onGrant={() => {}} />
+            <ErrorState />
+            <PermissionRequiredState />
             <NotImplementedState />
           </div>
         </Block>

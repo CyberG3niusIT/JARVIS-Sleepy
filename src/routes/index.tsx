@@ -134,7 +134,11 @@ function PhaseOverview() {
             {capabilityRows.map((c) => (
               <div key={c.name} className="flex items-center gap-4 py-2.5">
                 <span className="flex-1 text-[13px] text-foreground">{c.name}</span>
-                <StatusTag state={c.state} dot={false} />
+                <StatusTag
+                  state={c.state}
+                  {...(c.statusLabel ? { label: c.statusLabel } : {})}
+                  dot={false}
+                />
                 <ExecutionTag where={c.execution} />
               </div>
             ))}
