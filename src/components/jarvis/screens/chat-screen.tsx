@@ -240,7 +240,11 @@ function MessageItem({ message }: { message: ChatMessage }) {
       ) : null}
       <p className="text-[13px] leading-5 text-subtle-foreground">{message.text}</p>
       {message.actions ? <ActionRows actions={message.actions} /> : null}
-      {message.task ? <TaskState state={message.task} /> : null}
+      {message.task === "RUNNING" || message.task === "WAITING_FOR_REMOTE" ? (
+        onCancelTask ? <TaskState state={message.task} onCancel={onCancelTask} /> : null
+      ) : message.task ? (
+        <TaskState state={message.task} />
+      ) : null}
     </div>
   );
 }
