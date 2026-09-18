@@ -22,9 +22,9 @@ const severityLabel: Record<LogEntry["severity"], string> = {
   error: "Fehler",
 };
 
-const severityTone: Record<LogEntry["severity"], "neutral" | "warning" | "error"> = {
-  info: "neutral",
-  warn: "warning",
+const severityTone: Record<LogEntry["severity"], import("@/lib/jarvis/ia").SystemState> = {
+  info: "ready",
+  warn: "waiting_remote",
   error: "error",
 };
 
