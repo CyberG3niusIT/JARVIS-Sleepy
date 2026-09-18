@@ -12,22 +12,22 @@ import { StatusTag, ExecutionTag } from "@/components/jarvis/primitives";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Phase 1: J.A.R.V.I.S Mobile" },
+      { title: "Informationsarchitektur: J.A.R.V.I.S Mobile" },
       {
         name: "description",
         content:
-          "Informationsarchitektur und Markenfundament für J.A.R.V.I.S Mobile, die lokale Android-Runtime.",
+          "Festgelegte Informationsarchitektur für J.A.R.V.I.S Mobile, die lokale Android-Runtime.",
       },
-      { property: "og:title", content: "Phase 1: J.A.R.V.I.S Mobile" },
+      { property: "og:title", content: "Informationsarchitektur: J.A.R.V.I.S Mobile" },
       {
         property: "og:description",
-        content: "Produktbereiche, Zustandssprache und Shell-Prototypen für die lokale Android-Runtime.",
+        content: "Navigation, Zieleordnung und Zustandssprache für die lokale Android-Runtime.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: PhaseOne,
+  component: PhaseOverview,
 });
 
 const decisionTone: Record<CapabilityDecision, string> = {
