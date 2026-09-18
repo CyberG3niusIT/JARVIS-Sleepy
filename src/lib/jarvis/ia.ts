@@ -189,7 +189,7 @@ export const productAreas: ProductArea[] = [
     purpose: "Lokale Android- und Geräteinformationen sowie Zustand des JARVIS-Dienstes.",
     group: "system",
     order: 7,
-    decision: "NEW",
+    decision: "MODIFY",
     state: "design_state",
   },
   {
@@ -342,7 +342,7 @@ export const capabilityRows: CapabilityRow[] = [
     name: "MCP-Server",
     detail: "Externe Werkzeuge über MCP",
     execution: "EXTERN",
-    decision: "NEW",
+    decision: "MODIFY",
     state: "not_implemented",
   },
 ];
