@@ -374,9 +374,10 @@
   }
 }
 
-/* Filled primary action keeps its own press colour instead of the neutral one. */
+/* Filled primary action keeps its blue press colour instead of the neutral surface. */
 .j-pressable[data-filled="true"]:active {
-  background-color: var(--color-primary-soft);
+  background-color: var(--color-primary-dim);
+  border-color: var(--color-primary-dim);
 }
 
 @layer base {
