@@ -81,7 +81,7 @@ function ShellPrototypes() {
           <div>
             <h1 className="text-[15px] font-medium text-foreground">Shell-Prototypen</h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              Phase 1: Navigationsentscheidung, keine Runtime-Anbindung
+              Phase 3: Konsolidierungsentscheidung, keine Runtime-Anbindung
             </p>
           </div>
           <Link to="/" className="text-[12px] text-primary">

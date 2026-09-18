@@ -16,7 +16,7 @@ import {
 } from "./primitives";
 
 /**
- * Content blocks shared by all three shell prototypes, so the variants differ
+ * Content blocks shared by all shell prototypes (A, B, C, D), so the variants differ
  * in navigation and density rather than in fabricated content.
  * No value below is runtime data.
  */
