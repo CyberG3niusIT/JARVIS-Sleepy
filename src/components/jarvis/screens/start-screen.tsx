@@ -81,7 +81,7 @@ export function StartScreen({ onOpenChat, onOpenSystem }: StartScreenProps) {
             title="Cloud"
             subtitle="Optional und nur nach ausdrücklicher Freigabe."
             trailing={
-              <StatusTag state="unavailable" label={comparisonBaseline.labels.cloud} />
+              <StatusTag state="design_state" label={comparisonBaseline.labels.cloud} />
             }
           />
         </ListGroup>
