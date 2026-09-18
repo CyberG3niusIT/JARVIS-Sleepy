@@ -22,16 +22,26 @@ import { comparisonBaseline } from "@/lib/jarvis/comparison";
  * Owns language, appearance, storage policy, background service and the
  * general defaults. Models, permissions, logs and product information stay in
  * their own destinations and are not duplicated here. Nothing on this screen
- * writes a setting; values are product defaults or explicitly unbound.
+ * writes a setting; every row carries exactly one explicit marker for what
+ * kind of non-editable state it shows: a fixed product decision (FESTGELEGT),
+ * an unbound prototype status (STATUS NICHT GEBUNDEN), or a pointer to the
+ * destination that actually manages the value.
  *
  * Compose mapping: SettingsScreen(state, onBack).
  */
 
+const FIXED = "Festgelegt";
 const UNBOUND_STATUS = "Status nicht gebunden";
+const MANAGED_MODELS = "Verwaltung in Modelle";
+const MANAGED_PRIVACY = "Verwaltung in Privacy";
+const MANAGED_RUNTIMES = "Verwaltung in Runtimes";
+const MANAGED_PERMISSIONS = "Verwaltung in Berechtigungen";
+
+function MarkerTag({ label }: { label: string }) {
+  return <StatusTag state="design_state" label={label} dot={false} />;
+}
 
 export function SettingsScreen({ onBack }: DetailScreenProps) {
-  const { labels } = comparisonBaseline;
-
   return (
     <ScrollBody>
       <SectionEnter index={0}>
@@ -48,8 +58,13 @@ export function SettingsScreen({ onBack }: DetailScreenProps) {
         <ListGroup>
           <ListRow
             title="Anwendungssprache"
-            subtitle="Produktsprache der Oberfläche, kein erkannter Gerätewert."
-            trailing={<span className="value-mono">Deutsch</span>}
+            subtitle="Deutsch ist die festgelegte Produktsprache der Oberfläche, kein erkannter Gerätewert."
+            trailing={
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="value-mono">Deutsch</span>
+                <MarkerTag label={FIXED} />
+              </span>
+            }
           />
         </ListGroup>
       </SectionEnter>
@@ -57,11 +72,25 @@ export function SettingsScreen({ onBack }: DetailScreenProps) {
       <SectionEnter index={2}>
         <SectionHeader>Darstellung</SectionHeader>
         <ListGroup>
-          <ListRow title="Design" trailing={<span className="value-mono">Dunkel</span>} />
+          <ListRow
+            title="Design"
+            subtitle="Festgelegtes Designsystem des Prototyps."
+            trailing={
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="value-mono">Dunkel</span>
+                <MarkerTag label={FIXED} />
+              </span>
+            }
+          />
           <ListRow
             title="Dichte"
             subtitle="Kompakte Systemdichte des festgelegten Designsystems."
-            trailing={<span className="value-mono">Kompakt</span>}
+            trailing={
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="value-mono">Kompakt</span>
+                <MarkerTag label={FIXED} />
+              </span>
+            }
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
@@ -74,27 +103,20 @@ export function SettingsScreen({ onBack }: DetailScreenProps) {
         <SectionHeader>Speicher</SectionHeader>
         <ListGroup>
           <ListRow
-            title="Speicherort"
-            subtitle="Lokale Anwendungsdaten werden auf dem Gerät verwaltet."
-            trailing={<StatusTag state="design_state" label={UNBOUND_STATUS} dot={false} />}
-          />
-          <ListRow
-            title="Nutzung"
-            trailing={<StatusTag state="design_state" label={UNBOUND_STATUS} dot={false} />}
+            title="Modellspeicher"
+            subtitle="Modelldateien werden unter Modelle verwaltet und hier nicht doppelt geführt."
+            trailing={<MarkerTag label={MANAGED_MODELS} />}
           />
         </ListGroup>
-        <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Modelldateien werden unter Modelle verwaltet und hier nicht doppelt geführt.
-        </p>
       </SectionEnter>
 
       <SectionEnter index={4}>
         <SectionHeader>Hintergrunddienst</SectionHeader>
         <ListGroup>
           <ListRow
-            title="Assistenzdienst"
+            title="Hintergrunddienst des Assistenten"
             subtitle="Der Assistenzdienst ist technisch vorgesehen, sein Laufzeitzustand ist hier nicht gebunden."
-            trailing={<StatusTag state="design_state" label={UNBOUND_STATUS} dot={false} />}
+            trailing={<MarkerTag label={UNBOUND_STATUS} />}
           />
         </ListGroup>
       </SectionEnter>
@@ -104,16 +126,28 @@ export function SettingsScreen({ onBack }: DetailScreenProps) {
         <ListGroup>
           <ListRow
             title="Lokale Standardausführung"
+            subtitle="Anzeige des aktuellen Ausführungsorts der Vergleichsgrundlage."
             trailing={<ExecutionTag where={comparisonBaseline.execution} />}
           />
           <ListRow
-            title="Privacy-Vorgabe"
-            subtitle="Aktuelle Entwurfsgrundlage, keine gespeicherte Einstellung."
-            trailing={<PrivacyTag mode={comparisonBaseline.privacyMode} />}
+            title="Privacy-Modus"
+            subtitle="Wird vollständig in Privacy verwaltet, hier nur zur Einordnung angezeigt."
+            trailing={
+              <span className="flex shrink-0 items-center gap-2">
+                <PrivacyTag mode={comparisonBaseline.privacyMode} />
+                <MarkerTag label={MANAGED_PRIVACY} />
+              </span>
+            }
           />
           <ListRow
-            title="Cloud"
-            trailing={<StatusTag state="design_state" label={labels.cloud} dot={false} />}
+            title="Cloud- und Runtime-Auswahl"
+            subtitle="Wird vollständig in Runtimes verwaltet."
+            trailing={<MarkerTag label={MANAGED_RUNTIMES} />}
+          />
+          <ListRow
+            title="Berechtigungen"
+            subtitle="Wird vollständig in Berechtigungen verwaltet."
+            trailing={<MarkerTag label={MANAGED_PERMISSIONS} />}
           />
         </ListGroup>
       </SectionEnter>

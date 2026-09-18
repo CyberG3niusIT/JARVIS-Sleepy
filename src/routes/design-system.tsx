@@ -609,13 +609,13 @@ const screenFamilies: ScreenFamily[] = [
     name: "Modelle",
     cells: {
       loading: "spec",
-      ready: "baseline",
-      empty: "spec",
+      ready: "spec",
+      empty: "baseline",
       offline: "spec",
       error: "spec",
       permission_required: "na",
       privacy_blocked: "na",
-      runtime_unavailable: "spec",
+      runtime_unavailable: "baseline",
       not_implemented: "na",
     },
   },
@@ -623,13 +623,13 @@ const screenFamilies: ScreenFamily[] = [
     name: "Agenten",
     cells: {
       loading: "spec",
-      ready: "baseline",
-      empty: "spec",
+      ready: "spec",
+      empty: "baseline",
       offline: "na",
       error: "spec",
       permission_required: "spec",
       privacy_blocked: "spec",
-      runtime_unavailable: "spec",
+      runtime_unavailable: "baseline",
       not_implemented: "spec",
     },
   },
@@ -637,11 +637,11 @@ const screenFamilies: ScreenFamily[] = [
     name: "Berechtigungen",
     cells: {
       loading: "na",
-      ready: "baseline",
+      ready: "spec",
       empty: "na",
       offline: "na",
       error: "spec",
-      permission_required: "spec",
+      permission_required: "baseline",
       privacy_blocked: "na",
       runtime_unavailable: "na",
       not_implemented: "na",
@@ -651,22 +651,22 @@ const screenFamilies: ScreenFamily[] = [
     name: "Voice",
     cells: {
       loading: "spec",
-      ready: "baseline",
+      ready: "spec",
       empty: "na",
       offline: "spec",
       error: "spec",
       permission_required: "spec",
       privacy_blocked: "spec",
       runtime_unavailable: "spec",
-      not_implemented: "spec",
+      not_implemented: "baseline",
     },
   },
   {
     name: "Memory",
     cells: {
       loading: "spec",
-      ready: "baseline",
-      empty: "spec",
+      ready: "spec",
+      empty: "baseline",
       offline: "na",
       error: "spec",
       permission_required: "na",
@@ -679,8 +679,8 @@ const screenFamilies: ScreenFamily[] = [
     name: "Automationen",
     cells: {
       loading: "spec",
-      ready: "baseline",
-      empty: "spec",
+      ready: "spec",
+      empty: "baseline",
       offline: "na",
       error: "spec",
       permission_required: "spec",
@@ -693,7 +693,7 @@ const screenFamilies: ScreenFamily[] = [
     name: "Runtimes",
     cells: {
       loading: "spec",
-      ready: "baseline",
+      ready: "spec",
       empty: "na",
       offline: "spec",
       error: "spec",
@@ -806,9 +806,11 @@ function ScreenStatesSection() {
           </table>
         </div>
         <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-          S = spezifiziert (Muster festgelegt, Umsetzung offen), B = wahrheitsgetreue
-          Baseline (Zustand ist der aktuell dargestellte Normalfall), - = nicht
-          anwendbar für diese Bildschirmfamilie.
+          S = "Nur spezifiziert" (Muster festgelegt, Umsetzung offen), B = "Baseline"
+          (Zustand, der aktuell tatsächlich als Normalfall dargestellt wird, z. B. weil
+          eine Runtime-Anbindung fehlt), - = nicht anwendbar für diese
+          Bildschirmfamilie. Mehrere Baseline-Markierungen in einer Zeile beschreiben
+          getrennte Teilzustände, keinen Widerspruch.
         </p>
       </div>
     </div>
@@ -934,12 +936,24 @@ function AndroidIdentitySection() {
  * ============================================================ */
 
 const backMappingRows: [string, string][] = [
-  ["Start (Tab-Wurzel)", "Zurück verlässt die App (System-Standard), kein Doppel-Tap-Trick."],
-  ["Chat, Modelle, Agenten, Voice, Memory (Tab-Wurzeln)", "Zurück springt zum zuletzt aktiven Tab \"Start\", nicht zur App-Historie."],
-  ["Detailbildschirm innerhalb eines Tabs", "Zurück geht genau eine Ebene in der Tab-eigenen Historie zurück."],
-  ["Bottom Sheet", "Zurück schließt das Sheet, öffnet keine tiefere Navigation."],
-  ["Dialog", "Zurück verhält sich wie Abbrechen, außer bei destruktiver Bestätigung ohne Abbrechen-Option."],
-  ["Editor mit ungesicherter Eingabe", "Zurück zeigt zuerst einen Bestätigungsdialog (Verwerfen/Weiter bearbeiten)."],
+  ["Start (Tab-Wurzel)", "Android Back beendet die App nach normalem Systemverhalten."],
+  ["Chat (Tab-Wurzel)", "Back führt zurück zu Start."],
+  ["System (Tab-Wurzel)", "Back führt zurück zu Start."],
+  ["Mehr (Tab-Wurzel)", "Back führt zurück zu Start."],
+  [
+    "System-Detailseiten (Modelle, Agenten, Tools, Berechtigungen, Privacy, Runtimes, Gerät, Logs & Diagnose)",
+    "Back führt zurück zur System-Übersicht.",
+  ],
+  [
+    "Mehr-Detailseiten (Voice, Memory, Automationen, Einstellungen, Über J.A.R.V.I.S)",
+    "Back führt zurück zur Mehr-Übersicht.",
+  ],
+  [
+    "Automationen-Editor",
+    "Back führt zurück zu Automationen, bei ungespeicherten Änderungen erscheint zuerst die Verwerfen-Bestätigung.",
+  ],
+  ["Bottom Sheet", "Back schließt das Sheet."],
+  ["Dialog", "Back bedeutet Abbrechen, wo Abbrechen zulässig ist."],
 ];
 
 const systemInteractionRows: [string, string][] = [

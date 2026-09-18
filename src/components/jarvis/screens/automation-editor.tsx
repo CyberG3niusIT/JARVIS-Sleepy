@@ -87,14 +87,14 @@ export function createEmptyDraft(type: AutomationType): AutomationDraft {
 
 const RUNTIME_OPTIONS: { value: AutomationRuntime; label: string; detail: string }[] = [
   { value: "LOKAL", label: "LOKAL", detail: "Läuft auf dem Gerät, ohne Netzwerkschritt." },
-  { value: "SLEEPY", label: "SLEEPY", detail: "Läuft verzögert, sobald das Gerät ruht." },
+  { value: "SLEEPY", label: "SLEEPY", detail: "Optionale Übergabe an die vertraute Runtime Sleepy, nur wenn verbunden und ausdrücklich freigegeben." },
   { value: "CLOUD", label: "CLOUD", detail: "Braucht einen Cloud-Weg mit vorheriger Freigabe." },
 ];
 
 const PRIVACY_OPTIONS: { value: PrivacyMode; label: string; detail: string }[] = [
-  { value: "NORMAL", label: "NORMAL", detail: "Keine besonderen Einschränkungen." },
-  { value: "PRIVACY", label: "PRIVACY", detail: "Geschützte Schritte werden eingeschränkt." },
-  { value: "PRIVACY_LOCK", label: "PRIVACY_LOCK", detail: "Geschützte Schritte werden gesperrt." },
+  { value: "NORMAL", label: "NORMAL", detail: "Normaler Betrieb." },
+  { value: "PRIVACY", label: "PRIVACY", detail: "Geschützte Wahrnehmungs- und Aufnahmepfade sind gesperrt." },
+  { value: "PRIVACY_LOCK", label: "PRIVACY_LOCK", detail: "Zusätzlich können Netzwerk-, Cloud- und externe Werkzeugpfade hart gesperrt sein." },
 ];
 
 const PERMISSION_OPTIONS = [
@@ -104,7 +104,7 @@ const PERMISSION_OPTIONS = [
   "Benachrichtigungen",
   "Mikrofon",
   "Kamera",
-  "Nutzungszugriff (Accessibility)",
+  "Bedienungshilfen (Accessibility)",
 ];
 
 function stepListLabel(type: AutomationType): { heading: string; addLabel: string; empty: string } {
@@ -316,6 +316,10 @@ export function AutomationEditor({
 
         <SectionEnter index={2}>
           <SectionHeader>Ausführungsruntime</SectionHeader>
+          <InlineNotice tone="info">
+            CLOUD und SLEEPY sind hier nur auswählbare Entwurfsoptionen. Die Auswahl macht diese
+            Runtimes nicht verfügbar oder autorisiert.
+          </InlineNotice>
           <ListGroup>
             {RUNTIME_OPTIONS.map((opt) => (
               <ListRow
