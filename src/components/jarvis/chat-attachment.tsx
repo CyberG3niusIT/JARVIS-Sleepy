@@ -20,6 +20,8 @@ export interface ChatAttachment {
   id: string;
   kind: ChatAttachmentKind;
   name: string;
+  /** Size in bytes of the selected file, used for the local draft budget. */
+  size: number;
   /**
    * Object URL for the local preview. It stays valid after sending, because the
    * sent message still shows it, and is revoked on explicit removal, on
