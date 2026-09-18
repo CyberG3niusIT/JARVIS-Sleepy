@@ -493,12 +493,13 @@ function ChatComposer({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const previous = el.offsetHeight;
     const transition = el.style.transitionProperty;
     el.style.transitionProperty = "none";
     el.style.height = "auto";
     const content = el.scrollHeight;
     const next = Math.min(Math.max(content, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
-    el.style.height = `${el.offsetHeight}px`;
+    el.style.height = `${previous}px`;
     void el.offsetHeight;
     el.style.transitionProperty = transition;
     el.style.height = `${next}px`;
