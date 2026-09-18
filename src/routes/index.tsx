@@ -1,7 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight } from "lucide-react";
 import { JarvisWordmark, JarvisSymbol } from "@/components/brand/jarvis-mark";
-import { productAreas, capabilityRows, type CapabilityDecision } from "@/lib/jarvis/ia";
+import {
+  areasInGroup,
+  capabilityRows,
+  navTabs,
+  type CapabilityDecision,
+} from "@/lib/jarvis/ia";
 import { StatusTag, ExecutionTag } from "@/components/jarvis/primitives";
 
 export const Route = createFileRoute("/")({
