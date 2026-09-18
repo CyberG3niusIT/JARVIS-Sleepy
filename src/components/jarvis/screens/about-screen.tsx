@@ -54,8 +54,8 @@ export function AboutScreen({ onBack }: DetailScreenProps) {
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Für J.A.R.V.I.S Mobile liegt in dieser Grundlage keine geprüfte Release-Version
-          vor, deshalb wird hier keine Versionsnummer angezeigt.
+          Für J.A.R.V.I.S Mobile ist im Entwurfszustand noch keine geprüfte
+          Release-Version hinterlegt.
         </p>
       </SectionEnter>
 
