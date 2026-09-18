@@ -35,10 +35,16 @@ export function DetailHeader({
   );
 }
 
-/** Every System detail screen takes the same back contract. */
-export interface SystemDetailProps {
+/** Every detail screen, under System and under Mehr, takes the same contract. */
+export interface DetailScreenProps {
   onBack: () => void;
 }
+
+/** Kept name for the System detail screens, same contract. */
+export type SystemDetailProps = DetailScreenProps;
+
+/** Back label for detail screens that live under the Mehr tab. */
+export const MORE_BACK_LABEL = "Zurück zu Mehr";
 
 /** Shared closing note: states come from the project base, not from telemetry. */
 export function DesignStateNote() {
