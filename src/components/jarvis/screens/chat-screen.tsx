@@ -222,6 +222,10 @@ export function ChatScreen() {
         value={draft}
         onChange={setDraft}
         onSend={send}
+        attachments={attachments}
+        onAddFiles={addFiles}
+        onRemoveAttachment={removeAttachment}
+        attachmentError={attachmentError}
       />
     </div>
   );
