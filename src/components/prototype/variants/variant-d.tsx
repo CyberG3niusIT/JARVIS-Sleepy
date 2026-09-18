@@ -30,7 +30,7 @@ import {
   type NavItem,
 } from "@/components/jarvis/shell";
 import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
-import { productAreas } from "@/lib/jarvis/ia";
+import { moreDestinations, systemDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
@@ -51,12 +51,23 @@ const tabs: NavItem<TabId>[] = [
 
 export function VariantD() {
   const [tab, setTab] = useState<TabId>("start");
+  const [focusSettings, setFocusSettings] = useState(false);
   const index = tabs.findIndex((t) => t.id === tab);
   const direction = useDirection(index);
 
+  const selectTab = (next: TabId) => {
+    setFocusSettings(false);
+    setTab(next);
+  };
+
   return (
     <div className="flex h-full flex-col">
-      <TopAppBar onSettings={() => setTab("more")} />
+      <TopAppBar
+        onSettings={() => {
+          setFocusSettings(true);
+          setTab("more");
+        }}
+      />
 
       {/* Persistent runtime strip: visible on Start, Chat, System und Mehr. */}
       <RuntimeStrip
@@ -71,11 +82,11 @@ export function VariantD() {
           {tab === "start" ? <StartScreen /> : null}
           {tab === "chat" ? <ChatScreen /> : null}
           {tab === "system" ? <SystemScreen /> : null}
-          {tab === "more" ? <MoreScreen /> : null}
+          {tab === "more" ? <MoreScreen focusSettings={focusSettings} /> : null}
         </ScreenTransition>
       </div>
 
-      <BottomNav items={tabs} current={tab} onSelect={setTab} safeBottom={GESTURE_BAR} />
+      <BottomNav items={tabs} current={tab} onSelect={selectTab} safeBottom={GESTURE_BAR} />
     </div>
   );
 }
