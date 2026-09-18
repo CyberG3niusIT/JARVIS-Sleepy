@@ -108,26 +108,13 @@ function ChatScreen() {
   );
 }
 
+/** System: technisches Kontrollzentrum, feste Reihenfolge der Ziele. */
 function SystemScreen() {
   return (
     <ScrollBody>
-      <SectionHeader>Fähigkeiten</SectionHeader>
-      <CapabilityList dense />
-      <SectionHeader>Vollständige Entscheidungsreihenfolge</SectionHeader>
-      <RoutingLadderBlock />
-    </ScrollBody>
-  );
-}
-
-function MoreScreen() {
-  const secondary = productAreas.filter((a) => a.tier === "secondary");
-  return (
-    <ScrollBody>
-      <SectionHeader>Einstellungen</SectionHeader>
-      <SettingsList />
-      <SectionHeader>Bereiche</SectionHeader>
+      <SectionHeader>Kontrollzentrum</SectionHeader>
       <ListGroup>
-        {secondary.map((a) => (
+        {systemDestinations.map((a) => (
           <ListRow
             key={a.id}
             title={a.label}
@@ -138,6 +125,44 @@ function MoreScreen() {
           />
         ))}
       </ListGroup>
+      <SectionHeader>Vollständige Entscheidungsreihenfolge</SectionHeader>
+      <RoutingLadderBlock />
+    </ScrollBody>
+  );
+}
+
+/** Mehr: sekundäre Nutzerbereiche und Produkteinstellungen, feste Reihenfolge. */
+function MoreScreen({ focusSettings = false }: { focusSettings?: boolean }) {
+  const areaList = (
+    <>
+      <SectionHeader>Bereiche</SectionHeader>
+      <ListGroup>
+        {moreDestinations.map((a) => (
+          <ListRow
+            key={a.id}
+            title={a.label}
+            subtitle={a.purpose}
+            trailing={<StatusTag state={a.state} dot={false} />}
+            selected={focusSettings && a.id === "settings"}
+            chevron
+            onClick={() => {}}
+          />
+        ))}
+      </ListGroup>
+    </>
+  );
+
+  const settingsBlock = (
+    <>
+      <SectionHeader>Einstellungen</SectionHeader>
+      <SettingsList />
+    </>
+  );
+
+  return (
+    <ScrollBody>
+      {focusSettings ? settingsBlock : areaList}
+      {focusSettings ? areaList : settingsBlock}
       <div className="flex items-center gap-2 px-4 py-4 text-muted-foreground">
         <ShieldCheck className="size-4" aria-hidden />
         <span className="text-[11px]">Alle Bereiche laufen lokal, sofern nicht anders markiert.</span>
