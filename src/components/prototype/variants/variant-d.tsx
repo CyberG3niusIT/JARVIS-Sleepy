@@ -7,13 +7,9 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
-import {
-  ChatThread,
-  Composer,
-  RoutingLadderBlock,
-  SettingsList,
-} from "@/components/jarvis/blocks";
+import { RoutingLadderBlock, SettingsList } from "@/components/jarvis/blocks";
 import { StartScreen } from "@/components/jarvis/screens/start-screen";
+import { ChatScreen } from "@/components/jarvis/screens/chat-screen";
 import {
   ListGroup,
   ListRow,
@@ -89,18 +85,6 @@ export function VariantD() {
       </div>
 
       <BottomNav items={tabs} current={tab} onSelect={selectTab} safeBottom={GESTURE_BAR} />
-    </div>
-  );
-}
-
-
-function ChatScreen() {
-  return (
-    <div className="flex min-h-full flex-col">
-      <div className="flex-1">
-        <ChatThread />
-      </div>
-      <Composer />
     </div>
   );
 }
