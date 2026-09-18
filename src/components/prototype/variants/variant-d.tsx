@@ -90,28 +90,6 @@ export function VariantD() {
   );
 }
 
-/** System: technisches Kontrollzentrum, feste Reihenfolge der Ziele. */
-function SystemScreen() {
-  return (
-    <ScrollBody>
-      <SectionHeader>Kontrollzentrum</SectionHeader>
-      <ListGroup>
-        {systemDestinations.map((a) => (
-          <ListRow
-            key={a.id}
-            title={a.label}
-            subtitle={a.purpose}
-            trailing={<StatusTag state={a.state} dot={false} />}
-            chevron
-            onClick={() => {}}
-          />
-        ))}
-      </ListGroup>
-      <SectionHeader>Vollständige Entscheidungsreihenfolge</SectionHeader>
-      <RoutingLadderBlock />
-    </ScrollBody>
-  );
-}
 
 /** Mehr: sekundäre Nutzerbereiche und Produkteinstellungen, feste Reihenfolge. */
 function MoreScreen({ focusSettings = false }: { focusSettings?: boolean }) {
