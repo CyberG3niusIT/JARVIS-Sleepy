@@ -11,6 +11,7 @@ import {
   classifyAttachment,
   type ChatAttachment,
 } from "@/components/jarvis/chat-attachment";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import type { ExecutionLocation } from "@/lib/jarvis/ia";
 
