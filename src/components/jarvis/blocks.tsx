@@ -55,8 +55,6 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
             label={comparisonBaseline.labels.permissions}
           />
         }
-        chevron
-        onClick={() => {}}
       />
     </ListGroup>
   );
@@ -90,9 +88,9 @@ export function PrivacyBlock({
         ))}
       </div>
       <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-        Privacy Mode ist eine harte Grenze, keine Voreinstellung. In PRIVACY_LOCK
-        bleibt jede Ausführung lokal; blockierte Fähigkeiten werden als solche
-        angezeigt.
+        Privacy Mode ist eine harte Grenze, keine Voreinstellung. PRIVACY blockiert
+        geschützte Wahrnehmungs- und Datenpfade. PRIVACY_LOCK kann zusätzlich
+        Netzwerk-, Cloud- und externe Tool-Pfade hart sperren.
       </p>
     </div>
   );
@@ -141,7 +139,6 @@ export function CapabilityList({ dense = false }: { dense?: boolean }) {
               <ExecutionTag where={c.execution} />
             </span>
           }
-          onClick={() => {}}
         />
       ))}
     </ListGroup>
@@ -243,16 +240,17 @@ export function Composer({
 }
 
 /**
- * Content of the Einstellungen destination. Logs & Diagnose liegt unter System,
- * Über J.A.R.V.I.S ist ein eigenes Ziel unter Mehr, deshalb hier nicht doppelt.
+ * Content of the Einstellungen destination in the historical variants A, B and C.
+ * Informational rows only: these reference shells have no settings detail screen,
+ * so no chevron and no empty handler pretends navigation exists.
  */
 export function SettingsList() {
   return (
     <ListGroup>
-      <ListRow title="Sprache & Ausgabe" subtitle="Deutsch" chevron onClick={() => {}} />
-      <ListRow title="Darstellung" subtitle="Dunkel, Systemdichte" chevron onClick={() => {}} />
-      <ListRow title="Speicher & Modelle" trailing={<StatusTag state="design_state" />} chevron onClick={() => {}} />
-      <ListRow title="Hintergrunddienst" trailing={<StatusTag state="design_state" />} chevron onClick={() => {}} />
+      <ListRow title="Sprache & Ausgabe" subtitle="Deutsch" />
+      <ListRow title="Darstellung" subtitle="Dunkel, Systemdichte" />
+      <ListRow title="Speicher & Modelle" trailing={<StatusTag state="design_state" />} />
+      <ListRow title="Hintergrunddienst" trailing={<StatusTag state="design_state" />} />
     </ListGroup>
   );
 }

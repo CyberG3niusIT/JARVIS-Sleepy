@@ -25,7 +25,7 @@ import { moreDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
- * Variant A — "Systemleiste"
+ * Variant A: "Systemleiste"
  * Axis: conventional Android NavigationBar. Four fixed destinations, moderate
  * density, everything advanced behind "Mehr". Most familiar, least dense.
  */
@@ -155,8 +155,6 @@ function MoreScreen() {
             title={a.label}
             subtitle={a.purpose}
             trailing={<StatusTag state={a.state} dot={false} />}
-            chevron
-            onClick={() => {}}
           />
         ))}
       </ListGroup>

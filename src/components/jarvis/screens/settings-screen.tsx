@@ -93,7 +93,7 @@ export function SettingsScreen({ onBack }: DetailScreenProps) {
         <ListGroup>
           <ListRow
             title="Assistenzdienst"
-            subtitle="Der Vordergrunddienst gehört zur Grundlage, sein Laufzeitzustand ist hier nicht bekannt."
+            subtitle="Der Assistenzdienst ist technisch vorgesehen, sein Laufzeitzustand ist hier nicht gebunden."
             trailing={<StatusTag state="design_state" label={UNBOUND_STATUS} dot={false} />}
           />
         </ListGroup>

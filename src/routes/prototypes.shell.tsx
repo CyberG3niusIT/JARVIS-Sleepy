@@ -10,13 +10,13 @@ import { VariantD } from "@/components/prototype/variants/variant-d";
 export const Route = createFileRoute("/prototypes/shell")({
   head: () => ({
     meta: [
-      { title: "Shell-Prototypen: J.A.R.V.I.S Mobile" },
+      { title: "J.A.R.V.I.S Mobile Vorschau" },
       {
         name: "description",
         content:
           "Android-Shell- und Navigationsvarianten für J.A.R.V.I.S Mobile: Systemleiste, Konsole, Konversation + Systemblatt, Systemleiste + Runtime.",
       },
-      { property: "og:title", content: "Shell-Prototypen: J.A.R.V.I.S Mobile" },
+      { property: "og:title", content: "J.A.R.V.I.S Mobile Vorschau" },
       {
         property: "og:description",
         content: "Navigationsvergleich für den lokalen Android-Runtime-Shell von J.A.R.V.I.S.",
@@ -32,31 +32,34 @@ const variants = [
   {
     name: "Systemleiste",
     caption: "Variante A: Bottom Navigation, 393 x 852 dp",
-    axis: "Vertraute Android-Tableiste, vier feste Ziele, mittlere Dichte.",
+    axis: "Historischer Entwicklungsvergleich: vertraute Android-Tableiste, vier feste Ziele, mittlere Dichte.",
     render: () => <VariantA />,
   },
   {
     name: "Konsole",
     caption: "Variante B: Drawer + Runtime-Leiste, 393 x 852 dp",
-    axis: "Keine Tableiste. Persistente Runtime-Leiste, Drawer für alle Bereiche, maximale Dichte.",
+    axis: "Historischer Entwicklungsvergleich: keine Tableiste, persistente Runtime-Leiste, Drawer für alle Bereiche, maximale Dichte.",
     render: () => <VariantB />,
   },
   {
     name: "Konversation",
     caption: "Variante C: Chat-Root + Systemblatt, 393 x 852 dp",
-    axis: "Chat ist die Wurzel; das gesamte System liegt in einem ausklappbaren Bottom Sheet.",
+    axis: "Historischer Entwicklungsvergleich: Chat als Wurzel, das gesamte System in einem ausklappbaren Bottom Sheet.",
     render: () => <VariantC />,
   },
   {
     name: "Systemleiste + Runtime",
-    caption: "Variante D: Bottom Navigation + Runtime-Leiste, 393 x 852 dp",
-    axis: "Konsolidierter Kandidat: Tableiste aus A, persistente Runtime-Leiste aus B, Composer nur im Chat.",
+    caption: "Variante D: Freigegebene Baseline, 393 x 852 dp",
+    axis: "Freigegebene UI/UX-Baseline: Tableiste aus A, persistente Runtime-Leiste aus B, Composer nur im Chat.",
     render: () => <VariantD />,
   },
 ];
 
+/** Variant D is the approved baseline, so it is the default without ?v parameter. */
+const defaultVariant = variants.length - 1;
+
 function ShellPrototypes() {
-  const [current, setCurrent] = useState(0);
+  const [current, setCurrent] = useState(defaultVariant);
   const [mountKey, setMountKey] = useState(0);
 
   useEffect(() => {
@@ -79,9 +82,11 @@ function ShellPrototypes() {
       <header className="border-b border-border-soft px-6 py-4">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4">
           <div>
-            <h1 className="text-[15px] font-medium text-foreground">Shell-Prototypen</h1>
+            <h1 className="text-[15px] font-medium text-foreground">
+              J.A.R.V.I.S Mobile Vorschau
+            </h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              Phase 3: Konsolidierungsentscheidung, keine Runtime-Anbindung
+              Freigegebene UI/UX-Baseline, keine Runtime-Anbindung
             </p>
           </div>
           <nav className="flex items-center gap-4">

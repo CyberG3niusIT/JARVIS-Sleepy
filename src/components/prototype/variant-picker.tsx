@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 /**
  * Harness chrome. Styles live in src/styles.css and are the prototype-skill
- * spec verbatim — deliberately not themed with the JARVIS design system.
+ * spec verbatim: deliberately not themed with the JARVIS design system.
  */
 export function VariantPicker({
   names,
@@ -52,7 +52,7 @@ export function VariantPicker({
   }, [current, names.length, onSelect]);
 
   return (
-    <nav className="proto-picker" aria-label="Prototype variants" ref={pickerRef}>
+    <nav className="proto-picker" aria-label="Prototypvarianten" ref={pickerRef}>
       <span
         className="proto-picker-highlight"
         aria-hidden="true"

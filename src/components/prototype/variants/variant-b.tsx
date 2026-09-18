@@ -24,7 +24,7 @@ import { areasInGroup, type AreaGroup } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
- * Variant B — "Konsole"
+ * Variant B: "Konsole"
  * Axis: no bottom navigation. One dense console surface with an always-present
  * runtime strip and a full modal navigation drawer holding every area.
  * Highest information density; closest to Android developer/system tooling.
@@ -60,7 +60,7 @@ export function VariantB() {
         <JarvisSymbol size={18} />
       </header>
 
-      {/* Persistent runtime strip — visible on every screen. */}
+      {/* Persistent runtime strip: visible on every screen. */}
       <div className="flex shrink-0 items-center justify-between border-b border-border-soft bg-surface px-4 py-1.5">
         <span className="flex items-center gap-2">
           <StatusTag state="design_state" label={comparisonBaseline.labels.runtime} />
