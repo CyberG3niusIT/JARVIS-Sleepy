@@ -20,7 +20,11 @@ export interface ChatAttachment {
   id: string;
   kind: ChatAttachmentKind;
   name: string;
-  /** Object URL for the local preview. Revoked when the draft is dropped. */
+  /**
+   * Object URL for the local preview. It stays valid after sending, because the
+   * sent message still shows it, and is revoked on explicit removal, on
+   * conversation reset and when the screen unmounts.
+   */
   previewUrl?: string;
 }
 
