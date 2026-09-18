@@ -237,26 +237,6 @@ export function ModelsScreen({ onBack }: SystemDetailProps) {
   );
 }
 
-/** Compact detail header with a native-feeling back affordance. */
-function ModelsHeader({ onBack }: { onBack: () => void }) {
-  return (
-    <div className="flex items-center gap-2 border-b border-border-soft bg-surface px-2 py-3">
-      <button
-        type="button"
-        onClick={onBack}
-        aria-label="Zurück zum Kontrollzentrum"
-        className="j-pressable flex size-12 shrink-0 items-center justify-center rounded-sm"
-      >
-        <ArrowLeft className="size-5 text-subtle-foreground" aria-hidden />
-      </button>
-      <span className="min-w-0">
-        <h1 className="text-[15px] leading-5 text-foreground">Modelle</h1>
-        <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">Lokale Inferenz</p>
-      </span>
-    </div>
-  );
-}
-
 /* ------------------------------ Add model -------------------------------- */
 
 const sourceCopy: Record<AddModelSource, { title: string; body: string }> = {
