@@ -89,6 +89,8 @@ const examplePrompts = [
 
 export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>(demoConversation);
+  /** Static part of the transcript. Everything after it is announced live. */
+  const [baseCount, setBaseCount] = useState(demoConversation.length);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -122,6 +124,7 @@ export function ChatScreen() {
         showReset={!isEmpty}
         onReset={() => {
           setMessages([]);
+          setBaseCount(0);
           inputRef.current?.focus();
         }}
       />
@@ -135,8 +138,8 @@ export function ChatScreen() {
             }}
           />
         ) : (
-          <ol className="flex flex-col gap-3 px-4 py-3">
-            {messages.map((m) => (
+          <ol className="flex flex-col gap-3 px-4 py-3 pb-0">
+            {messages.slice(0, baseCount).map((m) => (
               <li key={m.id}>
                 <SectionEnter index={0}>
                   <MessageItem message={m} />
@@ -145,6 +148,20 @@ export function ChatScreen() {
             ))}
           </ol>
         )}
+        {/* Only newly appended turns are announced, the static example is not. */}
+        <ol
+          aria-live="polite"
+          aria-relevant="additions"
+          className="flex flex-col gap-3 px-4 pt-3"
+        >
+          {messages.slice(baseCount).map((m) => (
+            <li key={m.id}>
+              <SectionEnter index={0}>
+                <MessageItem message={m} />
+              </SectionEnter>
+            </li>
+          ))}
+        </ol>
         <div ref={endRef} />
       </div>
 
@@ -195,10 +212,9 @@ function EmptyConversation({ onPick }: { onPick: (prompt: string) => void }) {
               <button
                 type="button"
                 onClick={() => onPick(p)}
-                className="j-pressable touch-row flex w-full items-center justify-between gap-3 py-2.5 text-left"
+                className="j-pressable touch-row flex w-full items-center py-2.5 text-left"
               >
                 <span className="text-[13px] leading-5 text-subtle-foreground">{p}</span>
-                <ExecutionTag where="LOKAL" />
               </button>
             </li>
           ))}
@@ -214,7 +230,14 @@ function EmptyConversation({ onPick }: { onPick: (prompt: string) => void }) {
 
 /* ----------------------------- Messages ------------------------------ */
 
-function MessageItem({ message }: { message: ChatMessage }) {
+function MessageItem({
+  message,
+  onCancelTask,
+}: {
+  message: ChatMessage;
+  /** Required before a cancellable task state may render its control. */
+  onCancelTask?: () => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="ml-auto max-w-[78%] rounded-sm rounded-br-xs bg-surface-selected px-3 py-2">
@@ -241,7 +264,11 @@ function MessageItem({ message }: { message: ChatMessage }) {
       ) : null}
       <p className="text-[13px] leading-5 text-subtle-foreground">{message.text}</p>
       {message.actions ? <ActionRows actions={message.actions} /> : null}
-      {message.task ? <TaskState state={message.task} /> : null}
+      {message.task === "RUNNING" || message.task === "WAITING_FOR_REMOTE" ? (
+        onCancelTask ? <TaskState state={message.task} onCancel={onCancelTask} /> : null
+      ) : message.task ? (
+        <TaskState state={message.task} />
+      ) : null}
     </div>
   );
 }
@@ -262,59 +289,67 @@ function ActionRows({ actions }: { actions: ChatActionItem[] }) {
 
 /* --------------------------- Task states ----------------------------- */
 
+/** States that can be stopped by the user. They always need a real callback. */
+export type CancellableTaskStateId = "RUNNING" | "WAITING_FOR_REMOTE";
+
 const taskCopy: Record<
   ChatTaskStateId,
-  { label: string; note: string; tag: ReactNode; cancel: boolean }
+  {
+    label: string;
+    note: string;
+    tag: ReactNode;
+    /** Only set when the execution location is actually known. */
+    execution?: ExecutionLocation;
+  }
 > = {
   RUNNING: {
     label: "Läuft",
     note: "Aufgabe wird lokal ausgeführt. Kein Fortschrittswert verfügbar.",
     tag: <StatusTag state="local" label="Läuft" />,
-    cancel: true,
+    execution: "LOKAL",
   },
   WAITING_FOR_REMOTE: {
     label: "Wartet auf vertraute Runtime",
     note: `Übergabe an Sleepy: ${comparisonBaseline.labels.sleepyHandoff}. Aktuell: ${comparisonBaseline.labels.sleepy}.`,
     tag: <StatusTag state="waiting_remote" label="Wartet" />,
-    cancel: true,
+    execution: "SLEEPY",
   },
   BLOCKED_BY_PRIVACY: {
     label: "Durch Privacy blockiert",
     note: "Der aktive Privacy Mode verbietet diese Ausführung. Es gibt keinen stillen Fallback.",
     tag: <StatusTag state="privacy_blocked" />,
-    cancel: false,
   },
   PERMISSION_REQUIRED: {
     label: "Berechtigung erforderlich",
     note: "Ohne Freigabe passiert nichts. Freigabe erfolgt unter System, Berechtigungen.",
     tag: <StatusTag state="permission_required" />,
-    cancel: false,
   },
   ERROR: {
     label: "Fehlgeschlagen",
     note: "Die Aufgabe konnte nicht abgeschlossen werden.",
     tag: <StatusTag state="error" />,
-    cancel: false,
   },
 };
 
 /**
  * Reusable in-conversation task state. Running shows an honest indeterminate
  * indicator and a cancel action, never a percentage.
+ * Cancellable states require onCancel, so an enabled control always does work.
  */
-export function TaskState({
-  state,
-  onCancel,
-}: {
-  state: ChatTaskStateId;
-  onCancel?: () => void;
-}) {
+export type TaskStateProps =
+  | { state: CancellableTaskStateId; onCancel: () => void }
+  | { state: Exclude<ChatTaskStateId, CancellableTaskStateId>; onCancel?: never };
+
+export function TaskState({ state, onCancel }: TaskStateProps) {
   const copy = taskCopy[state];
   return (
     <div className="mt-2 rounded-sm border border-border-soft px-2.5 py-2">
       <div className="flex items-center justify-between gap-3">
-        <ValueTransition value={state}>{copy.tag}</ValueTransition>
-        {copy.cancel ? (
+        <span className="flex items-center gap-2">
+          <ValueTransition value={state}>{copy.tag}</ValueTransition>
+          {copy.execution ? <ExecutionTag where={copy.execution} /> : null}
+        </span>
+        {onCancel ? (
           <button
             type="button"
             onClick={onCancel}
