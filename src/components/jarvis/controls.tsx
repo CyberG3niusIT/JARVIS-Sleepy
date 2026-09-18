@@ -3,6 +3,7 @@ import { AlertTriangle, Info, Inbox, Lock, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusTag } from "./primitives";
 import type { SystemState } from "@/lib/jarvis/ia";
+import { duration } from "@/lib/jarvis/tokens";
 
 /**
  * Locked interactive primitives.
