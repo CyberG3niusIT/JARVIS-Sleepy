@@ -482,18 +482,27 @@ function ChatComposer({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const canSend = value.trim().length > 0 || attachments.length > 0;
+  const reducedMotion = useReducedMotion();
 
   /**
    * Auto-grow: the field is exactly as tall as its content until the maximum,
-   * so an empty field never shows a scrollbar.
+   * so an empty field never shows a scrollbar. Measuring happens with the
+   * height transition switched off, so the eased change stays smooth and the
+   * field never collapses to zero in between.
    */
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const transition = el.style.transitionProperty;
+    el.style.transitionProperty = "none";
     el.style.height = "auto";
-    const next = Math.min(Math.max(el.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
+    const content = el.scrollHeight;
+    const next = Math.min(Math.max(content, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
+    el.style.height = `${el.offsetHeight}px`;
+    void el.offsetHeight;
+    el.style.transitionProperty = transition;
     el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+    el.style.overflowY = content > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
   }, [value, ref]);
 
   return (
