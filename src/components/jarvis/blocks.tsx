@@ -116,7 +116,7 @@ export function RoutingLadderBlock({
         <li key={step} className="flex items-center gap-3 px-4 py-2">
           <span className="value-mono w-4 shrink-0 text-right">{i + 1}</span>
           <span className="flex-1 text-[12px] leading-4 text-subtle-foreground">{step}</span>
-          {i < 6 ? <ExecutionTag where="LOKAL" /> : null}
+          {i < localSteps ? <ExecutionTag where="LOKAL" /> : null}
         </li>
       ))}
     </ol>
