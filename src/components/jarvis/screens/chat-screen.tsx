@@ -297,7 +297,12 @@ function MessageItem({
   if (message.role === "user") {
     return (
       <div className="ml-auto max-w-[78%] rounded-sm rounded-br-xs bg-surface-selected px-3 py-2">
-        <p className="text-[13px] leading-5 text-foreground">{message.text}</p>
+        {message.text ? (
+          <p className="text-[13px] leading-5 text-foreground">{message.text}</p>
+        ) : null}
+        {message.attachments ? (
+          <MessageAttachmentList attachments={message.attachments} />
+        ) : null}
       </div>
     );
   }
