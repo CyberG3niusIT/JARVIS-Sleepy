@@ -97,14 +97,11 @@ export function VariantB() {
 
       {/* Docked composer: chat is reachable from every screen. */}
       <div style={{ paddingBottom: GESTURE_BAR }} className="shrink-0 bg-background">
-        <button
-          type="button"
-          className="w-full text-left"
-          onClick={() => setScreen("chat")}
-          aria-label="Chat öffnen"
-        >
-          <Composer hint={screen === "chat" ? "Lokal fragen" : "Lokal fragen — Chat öffnen"} />
-        </button>
+        <Composer
+          hint={screen === "chat" ? "Lokal fragen" : "Lokal fragen — Chat öffnen"}
+          fieldLabel="Chat öffnen"
+          onFocusField={() => setScreen("chat")}
+        />
       </div>
 
       {drawer ? <Drawer onClose={() => setDrawer(false)} onSelect={setScreen} /> : null}
