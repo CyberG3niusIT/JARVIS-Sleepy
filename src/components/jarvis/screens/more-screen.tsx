@@ -118,7 +118,8 @@ function MoreOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) {
         <div className="flex items-center gap-2 px-4 py-4 text-muted-foreground">
           <ShieldCheck className="size-4" aria-hidden />
           <span className="text-[11px]">
-            Alle Bereiche laufen lokal, sofern nicht anders markiert.
+            Für lokale Funktionen ist LOKAL der Standard. Abweichende Ausführungsorte
+            werden ausdrücklich markiert.
           </span>
         </div>
       </SectionEnter>
