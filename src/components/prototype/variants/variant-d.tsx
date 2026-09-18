@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
 import {
-  CapabilityList,
   ChatThread,
   Composer,
   NotBoundNotice,
