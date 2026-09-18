@@ -48,7 +48,7 @@ export function RuntimesScreen({ onBack }: SystemDetailProps) {
         <ListGroup>
           <ListRow
             title="J.A.R.V.I.S Mobile"
-            subtitle="Lokale Runtime auf diesem Android-Gerät."
+            subtitle="Vorgesehene lokale Runtime auf diesem Android-Gerät."
             trailing={<StatusTag state="design_state" label={labels.runtime} dot={false} />}
           />
           <ListRow

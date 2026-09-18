@@ -80,9 +80,10 @@ export function PermissionsScreen({ onBack }: SystemDetailProps) {
         <SectionHeader>Freigabe</SectionHeader>
         <div className="px-4">
           <InlineNotice tone="info">
-            Die Freigabe erfolgt später über die Android-Systemeinstellungen. Im Entwurfszustand
-            gibt es hier keine Schaltfläche, die eine Freigabe auslösen könnte. Ein Widerruf ist
-            jederzeit über dieselbe Systemstelle möglich.
+            Die Freigabe erfolgt später über den jeweils passenden Android-Berechtigungsablauf.
+            Ein Widerruf bleibt dort, wo Android das unterstützt, über die Systemeinstellungen
+            möglich. Im Entwurfszustand gibt es hier keine Schaltfläche, die eine Freigabe
+            auslösen könnte.
           </InlineNotice>
         </div>
       </SectionEnter>

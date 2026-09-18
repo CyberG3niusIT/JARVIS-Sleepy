@@ -45,12 +45,18 @@ export function LogListItem({ entry }: { entry: LogEntry }) {
 const redactionRules = [
   { title: "Zugangsdaten redigieren", detail: "Schlüssel, Token und Passwörter werden entfernt." },
   { title: "Sensible Parameter redigieren", detail: "Inhaltliche Argumente werden gekürzt." },
-  { title: "Kommunikationsinhalte minimieren", detail: "Nachrichtentexte werden nicht abgelegt." },
+  {
+    title: "Kommunikationsinhalte minimieren",
+    detail: "Nachrichteninhalte werden reduziert und redigiert.",
+  },
   { title: "Privacy-Status berücksichtigen", detail: "Geschützte Inhalte werden nicht protokolliert." },
 ];
 
 export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
-  /** No verified log inventory exists in this phase. */
+  /**
+   * No log source is bound in this phase. The empty lists describe the missing
+   * binding, not a verified absence of entries on a real device.
+   */
   const executionHistory: LogEntry[] = [];
   const crashLogs: LogEntry[] = [];
 
@@ -65,8 +71,8 @@ export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
         {executionHistory.length === 0 ? (
           <div className="px-4">
             <EmptyState
-              title="Keine Runtime-Daten"
-              body="Spätere Einträge werden lokal gespeichert und dort redigiert, wo es erforderlich ist. Im Entwurfszustand gibt es keine Historie."
+              title="Keine Historiendaten angebunden"
+              body="Spätere Einträge werden lokal gespeichert und dort redigiert, wo es erforderlich ist. Im Entwurfszustand ist keine Historienquelle angebunden."
             />
           </div>
         ) : (
@@ -83,8 +89,8 @@ export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
         {crashLogs.length === 0 ? (
           <div className="px-4">
             <EmptyState
-              title="Keine Runtime-Daten"
-              body="Die Absturzprotokollierung ist Teil der Grundlage, im Entwurfszustand liegen jedoch keine Einträge vor."
+              title="Keine Logdaten angebunden"
+              body="Die Absturzprotokollierung ist Teil der Grundlage, im Entwurfszustand ist jedoch keine Logquelle angebunden."
             />
           </div>
         ) : (
