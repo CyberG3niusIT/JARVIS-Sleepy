@@ -227,7 +227,7 @@ export const capabilityRows: CapabilityRow[] = [
     detail: "Screen Understanding, OCR",
     execution: "LOKAL",
     decision: "MODIFY",
-    state: "privacy_blocked",
+    state: "permission_required",
   },
   {
     name: "Benachrichtigungen",

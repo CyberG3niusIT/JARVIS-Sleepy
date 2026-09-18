@@ -5,6 +5,7 @@ import {
   stateLabel,
   type PrivacyMode,
 } from "@/lib/jarvis/ia";
+import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import {
   DesignStateBlock,
   ExecutionTag,
@@ -51,7 +52,11 @@ export function RuntimeSummary({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function PrivacyBlock({ mode = "NORMAL" }: { mode?: PrivacyMode }) {
+export function PrivacyBlock({
+  mode = comparisonBaseline.privacyMode,
+}: {
+  mode?: PrivacyMode;
+}) {
   const modes: PrivacyMode[] = ["NORMAL", "PRIVACY", "PRIVACY_LOCK"];
   return (
     <div className="px-4">
@@ -130,11 +135,14 @@ export function ChatThread({ full = false }: { full?: boolean }) {
         where="LOKAL"
         actions={["Lautlos aktivieren", "Wecker 06:30"]}
       />
-      <Turn who="user" text="Fasse die PDF auf dem Bildschirm zusammen." />
+      <Turn
+        who="user"
+        text="Fasse die PDF auf dem Bildschirm zusammen."
+      />
       <Turn
         who="jarvis"
-        text="Bildschirmanalyse ist im aktuellen Privacy Mode blockiert. Keine Weitergabe, kein stiller Fallback."
-        state="privacy_blocked"
+        text="Bildschirmanalyse benötigt die Android-Berechtigung für Bildschirmzugriff. Ohne Freigabe passiert nichts, kein stiller Fallback und keine automatische Übergabe."
+        state="permission_required"
       />
     </div>
   );
@@ -150,7 +158,7 @@ function Turn({
   who: "user" | "jarvis";
   text: string;
   where?: "LOKAL" | "SLEEPY" | "CLOUD" | "EXTERN";
-  state?: "privacy_blocked";
+  state?: "permission_required";
   actions?: string[];
 }) {
   if (who === "user") {
