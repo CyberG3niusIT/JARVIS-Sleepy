@@ -196,15 +196,7 @@ function DesignSystemPage() {
         </Block>
 
         <Block title="Buttons">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="primary">Lokal ausführen</Button>
-            <Button variant="secondary">Abbrechen</Button>
-            <Button variant="destructive">Modell löschen</Button>
-            <Button disabled>Nicht verfügbar</Button>
-          </div>
-          <p className="mt-3 text-[12px] text-muted-foreground">
-            Druckfeedback: 80 ms Skalierung und Flächenwechsel, bei reduzierter Bewegung nur Fläche.
-          </p>
+          <ButtonSection />
         </Block>
 
         <Block title="Zeilen">
