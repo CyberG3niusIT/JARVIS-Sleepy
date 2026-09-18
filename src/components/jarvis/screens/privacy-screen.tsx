@@ -85,7 +85,7 @@ export function PrivacyScreen({ onBack }: SystemDetailProps) {
               selected={mode === current}
               trailing={
                 mode === current ? (
-                  <StatusTag state="design_state" label="Aktiv" dot={false} />
+                  <StatusTag state="design_state" label="Entwurfsmodus" dot={false} />
                 ) : undefined
               }
             />
