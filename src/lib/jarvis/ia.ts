@@ -272,6 +272,11 @@ export interface CapabilityRow {
   execution: ExecutionLocation;
   decision: CapabilityDecision;
   state: SystemState;
+  /**
+   * Truthful prototype label where the audited state alone would read as
+   * absence. Set here so every capability view shows the same wording.
+   */
+  statusLabel?: string;
 }
 
 export const capabilityRows: CapabilityRow[] = [
