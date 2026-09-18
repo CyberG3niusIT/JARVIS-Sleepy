@@ -64,12 +64,35 @@ const areaDisplayState: Partial<Record<AreaId, SystemState>> = {
   runtimes: "design_state",
 };
 
+/** The eight locked System destinations. */
+type SystemAreaId =
+  | "models"
+  | "agents"
+  | "tools"
+  | "permissions"
+  | "privacy"
+  | "runtimes"
+  | "device"
+  | "diagnostics";
+
 /**
- * Destinations with a real detail screen. Every other row stays informational,
- * so no row pretends to navigate. Extending this list is the only step needed
- * once Agenten, Tools, Berechtigungen, Privacy, Runtimes, Gerät or Logs follow.
+ * Single typed map from destination to detail screen. Navigation logic lives
+ * here only, never in a row, so no row can carry a dead chevron.
  */
-const navigableAreas: AreaId[] = ["models"];
+const detailScreens: Record<SystemAreaId, (props: SystemDetailProps) => ReactNode> = {
+  models: ModelsScreen,
+  agents: AgentsScreen,
+  tools: ToolsScreen,
+  permissions: PermissionsScreen,
+  privacy: PrivacyScreen,
+  runtimes: RuntimesScreen,
+  device: DeviceScreen,
+  diagnostics: DiagnosticsScreen,
+};
+
+function isSystemArea(id: AreaId): id is SystemAreaId {
+  return id in detailScreens;
+}
 
 /**
  * System tab container: control-center overview plus its detail screens.
@@ -77,7 +100,7 @@ const navigableAreas: AreaId[] = ["models"];
  * returns to the overview with the opposite direction.
  */
 export function SystemScreen() {
-  const [detail, setDetail] = useState<AreaId | null>(null);
+  const [detail, setDetail] = useState<SystemAreaId | null>(null);
   /**
    * Direction of the last nested step. The first render shows the overview
    * without a slide; the tab switch itself already carries that motion. The
@@ -87,6 +110,7 @@ export function SystemScreen() {
   const [direction, setDirection] = useState<"forward" | "back" | "none">("none");
 
   const openArea = (area: AreaId) => {
+    if (!isSystemArea(area)) return;
     setDirection("forward");
     setDetail(area);
   };
@@ -96,14 +120,16 @@ export function SystemScreen() {
     setDetail(null);
   };
 
+  const Detail = detail ? detailScreens[detail] : null;
+
   return (
     <ScreenTransition
       transitionKey={detail ?? "overview"}
       direction={direction}
       className="min-h-full"
     >
-      {detail === "models" ? (
-        <ModelsScreen onBack={closeDetail} />
+      {Detail ? (
+        <Detail onBack={closeDetail} />
       ) : (
         <SystemOverview onOpenArea={openArea} />
       )}
