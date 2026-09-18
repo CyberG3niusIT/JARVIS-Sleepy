@@ -108,7 +108,7 @@ const managementCapabilities = [
   },
   {
     title: "Download im Hintergrund",
-    detail: "Geplanter Download über WorkManager, netzbewusst.",
+    detail: "Hintergrunddownload über WorkManager mit Netzwerkprüfung.",
   },
   {
     title: "Pause / Fortsetzen",
@@ -136,7 +136,10 @@ type AddModelSource = "import" | "catalog";
 export function ModelsScreen({ onBack }: ModelsScreenProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [source, setSource] = useState<AddModelSource | null>(null);
-  /** Nothing is known about local files in this phase, so the list is empty. */
+  /**
+   * Prototype list. It stays empty because the registry is not bound yet; this
+   * is not a claim that the real device carries no model file.
+   */
   const localModels: LocalModelEntry[] = [];
 
   const closeSheet = () => {
@@ -184,8 +187,8 @@ export function ModelsScreen({ onBack }: ModelsScreenProps) {
           {localModels.length === 0 ? (
             <div className="px-4">
               <EmptyState
-                title="Keine lokalen Modelle"
-                body="Auf diesem Gerät ist keine Modelldatei registriert. Ein Modell kann lokal importiert oder aus dem Katalog geladen werden."
+                title="Keine Modelldaten verfügbar"
+                body="Die lokale Modellregistrierung ist im Prototyp noch nicht an eine Runtime gebunden. Modelle können später lokal importiert oder über den Modellkatalog verwaltet werden."
               />
             </div>
           ) : (
@@ -210,8 +213,8 @@ export function ModelsScreen({ onBack }: ModelsScreenProps) {
             ))}
           </ListGroup>
           <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-            Fähigkeiten der Modellverwaltung, keine laufenden Vorgänge. Aktuell ist kein
-            Download und kein Ladevorgang aktiv.
+            Fähigkeiten der Modellverwaltung, keine laufenden Vorgänge. Es werden hier
+            keine laufenden Runtime-Vorgänge simuliert.
           </p>
         </SectionEnter>
 
