@@ -213,8 +213,8 @@ export function ModelsScreen({ onBack }: ModelsScreenProps) {
             ))}
           </ListGroup>
           <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-            Fähigkeiten der Modellverwaltung, keine laufenden Vorgänge. Es werden hier
-            keine laufenden Runtime-Vorgänge simuliert.
+            Fähigkeiten der Modellverwaltung. Es werden hier keine laufenden
+            Runtime-Vorgänge simuliert.
           </p>
         </SectionEnter>
 
@@ -262,11 +262,11 @@ function ModelsHeader({ onBack }: { onBack: () => void }) {
 const sourceCopy: Record<AddModelSource, { title: string; body: string }> = {
   import: {
     title: "Lokale Datei importieren",
-    body: "Die Dateiauswahl ist im Prototyp nicht angebunden. Im echten Aufbau öffnet sich hier die Android-Dateiauswahl, danach folgen Kompatibilitätsprüfung und Registrierung im lokalen Modellverzeichnis.",
+    body: "Die Dateiauswahl ist im Entwurfszustand noch nicht angebunden. Auswahl, Kompatibilitätsprüfung und Registrierung erfolgen später über die Android-Dateiauswahl.",
   },
   catalog: {
     title: "Modellkatalog öffnen",
-    body: "Der Katalog ist im Prototyp nicht angebunden. Im echten Aufbau wird ein kompatibles Modell ausgewählt, im Hintergrund geladen und nach SHA-256 geprüft. Es läuft aktuell kein Download.",
+    body: "Der Modellkatalog ist im Entwurfszustand noch nicht angebunden. Auswahl, Hintergrunddownload und Integritätsprüfung werden hier später über die Modellverwaltung ausgeführt.",
   },
 };
 
