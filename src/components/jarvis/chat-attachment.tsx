@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionEnter } from "@/components/jarvis/motion";
@@ -20,7 +20,11 @@ export interface ChatAttachment {
   id: string;
   kind: ChatAttachmentKind;
   name: string;
-  /** Object URL for the local preview. Revoked when the draft is dropped. */
+  /**
+   * Object URL for the local preview. It stays valid after sending, because the
+   * sent message still shows it, and is revoked on explicit removal, on
+   * conversation reset and when the screen unmounts.
+   */
   previewUrl?: string;
 }
 
@@ -30,9 +34,10 @@ export const attachmentAccept = "image/*,application/pdf";
 export function classifyAttachment(file: File): ChatAttachmentKind | null {
   if (file.type.startsWith("image/")) return "image";
   if (file.type === "application/pdf") return "pdf";
-  // Some providers hand over an empty or unreliable MIME type, so fall back to
-  // the file ending. Nothing beyond images and PDF is accepted.
-  if (file.type === "" && file.name.toLowerCase().endsWith(".pdf")) return "pdf";
+  // Some providers hand over an empty or unreliable MIME type, for example
+  // application/octet-stream, so fall back to the file ending. Nothing beyond
+  // images and PDF is accepted, images still need a real image MIME type.
+  if (file.name.toLowerCase().endsWith(".pdf")) return "pdf";
   return null;
 }
 
@@ -66,6 +71,15 @@ export function AttachmentDraftList({
       onRemove(id);
     }, REMOVE_EXIT_MS);
   };
+
+  // Pending exit timers are dropped on unmount, without removing anything.
+  const pending = timers.current;
+  useEffect(
+    () => () => {
+      Object.values(pending).forEach(clearTimeout);
+    },
+    [pending],
+  );
 
   if (attachments.length === 0) return null;
   return (
