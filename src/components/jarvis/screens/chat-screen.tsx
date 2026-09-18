@@ -158,7 +158,7 @@ export function ChatScreen() {
         id: `u-${stamp}`,
         role: "user",
         text,
-        attachments: sent.length > 0 ? sent : undefined,
+        ...(sent.length > 0 ? { attachments: sent } : {}),
       },
       { id: `s-${stamp}`, role: "system", text: note },
     ]);
