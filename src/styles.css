@@ -172,12 +172,17 @@
 }
 
 /* ---- Prototype picker (harness chrome : spec verbatim, not themed) ---- */
+/* In flow and sticky, so the picker reserves its own space and never covers
+   the device content at the bottom. */
 .proto-picker {
-  position: fixed;
+  position: sticky;
   bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2147483647;
+  margin: 24px auto 0;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+  z-index: 40;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -202,7 +207,7 @@
   position: absolute;
   top: 4px;
   left: 0;
-  height: 28px;
+  height: 48px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
   will-change: transform;
@@ -224,8 +229,8 @@
   position: relative;
   display: flex;
   align-items: center;
-  height: 28px;
-  padding: 0 12px;
+  min-height: 48px;
+  padding: 0 16px;
   border: 0;
   border-radius: 999px;
   background: transparent;
