@@ -82,9 +82,11 @@ function ShellPrototypes() {
       <header className="border-b border-border-soft px-6 py-4">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4">
           <div>
-            <h1 className="text-[15px] font-medium text-foreground">Shell-Prototypen</h1>
+            <h1 className="text-[15px] font-medium text-foreground">
+              J.A.R.V.I.S Mobile Vorschau
+            </h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              Phase 3: Konsolidierungsentscheidung, keine Runtime-Anbindung
+              Freigegebene UI/UX-Baseline, keine Runtime-Anbindung
             </p>
           </div>
           <nav className="flex items-center gap-4">
