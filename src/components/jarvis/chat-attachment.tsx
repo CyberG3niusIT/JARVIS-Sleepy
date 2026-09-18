@@ -33,14 +33,106 @@ export interface ChatAttachment {
 /** Accepted input types. Office documents and audio are deliberately excluded. */
 export const attachmentAccept = "image/*,.pdf,application/pdf";
 
-export function classifyAttachment(file: File): ChatAttachmentKind | null {
-  if (file.type.startsWith("image/")) return "image";
-  if (file.type === "application/pdf") return "pdf";
-  // Some providers hand over an empty or unreliable MIME type, for example
-  // application/octet-stream, so fall back to the file ending. Nothing beyond
-  // images and PDF is accepted, images still need a real image MIME type.
-  if (file.name.toLowerCase().endsWith(".pdf")) return "pdf";
-  return null;
+/* ------------------------------ Local limits ------------------------------ */
+
+export const MAX_ATTACHMENTS = 8;
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
+export const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+
+export function formatMiB(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MiB`;
+}
+
+/* --------------------------- Content validation --------------------------- */
+
+/**
+ * Browser-side validation only. It reads the first header bytes and requires
+ * extension, MIME type and magic bytes to agree, so a renamed or double
+ * extension file such as "rechnung.pdf.exe" with a spoofed MIME type is
+ * rejected before any object URL is created.
+ *
+ * IMPORTANT for a future backend: this check is a usability guard, never a
+ * security boundary. Any server that later receives these files MUST validate
+ * size and content signature again on the server side and must never trust the
+ * browser supplied MIME type, file name or extension.
+ */
+
+interface SignatureRule {
+  kind: ChatAttachmentKind;
+  extensions: string[];
+  mimeTypes: string[];
+  /** Signature check against the first header bytes. */
+  matches: (bytes: Uint8Array) => boolean;
+}
+
+function startsWith(bytes: Uint8Array, expected: number[], offset = 0): boolean {
+  return expected.every((b, i) => bytes[offset + i] === b);
+}
+
+const ascii = (text: string) => Array.from(text, (ch) => ch.charCodeAt(0));
+
+const signatureRules: SignatureRule[] = [
+  {
+    kind: "pdf",
+    extensions: [".pdf"],
+    // An unreliable or empty MIME type is tolerated only because the %PDF
+    // signature is checked as well.
+    mimeTypes: ["application/pdf", "application/octet-stream", ""],
+    matches: (b) => startsWith(b, ascii("%PDF-")),
+  },
+  {
+    kind: "image",
+    extensions: [".png"],
+    mimeTypes: ["image/png"],
+    matches: (b) => startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  },
+  {
+    kind: "image",
+    extensions: [".jpg", ".jpeg"],
+    mimeTypes: ["image/jpeg"],
+    matches: (b) => startsWith(b, [0xff, 0xd8, 0xff]),
+  },
+  {
+    kind: "image",
+    extensions: [".gif"],
+    mimeTypes: ["image/gif"],
+    matches: (b) => startsWith(b, ascii("GIF87a")) || startsWith(b, ascii("GIF89a")),
+  },
+  {
+    kind: "image",
+    extensions: [".webp"],
+    mimeTypes: ["image/webp"],
+    matches: (b) => startsWith(b, ascii("RIFF")) && startsWith(b, ascii("WEBP"), 8),
+  },
+];
+
+export type AttachmentCheck =
+  | { ok: true; kind: ChatAttachmentKind }
+  | { ok: false; reason: string };
+
+export async function validateAttachment(file: File): Promise<AttachmentCheck> {
+  const name = file.name.toLowerCase();
+  const rule = signatureRules.find((r) => r.extensions.some((ext) => name.endsWith(ext)));
+  if (!rule) {
+    return {
+      ok: false,
+      reason: "Dateityp wird nicht unterstützt. Erlaubt sind PNG, JPEG, GIF, WebP und PDF.",
+    };
+  }
+  if (!rule.mimeTypes.includes(file.type)) {
+    return {
+      ok: false,
+      reason: "Dateityp und Inhaltstyp passen nicht zusammen.",
+    };
+  }
+  const header = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  if (!rule.matches(header)) {
+    return {
+      ok: false,
+      reason: "Dateiinhalt passt nicht zur Dateiendung.",
+    };
+  }
+  return { ok: true, kind: rule.kind };
 }
 
 /** Exit duration of a removed draft row, matching the fast motion token. */
