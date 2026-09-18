@@ -89,6 +89,8 @@ const examplePrompts = [
 
 export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>(demoConversation);
+  /** Static part of the transcript. Everything after it is announced live. */
+  const [baseCount, setBaseCount] = useState(demoConversation.length);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
