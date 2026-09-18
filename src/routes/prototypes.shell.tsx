@@ -10,13 +10,13 @@ import { VariantD } from "@/components/prototype/variants/variant-d";
 export const Route = createFileRoute("/prototypes/shell")({
   head: () => ({
     meta: [
-      { title: "Shell-Prototypen: J.A.R.V.I.S Mobile" },
+      { title: "J.A.R.V.I.S Mobile Vorschau" },
       {
         name: "description",
         content:
           "Android-Shell- und Navigationsvarianten für J.A.R.V.I.S Mobile: Systemleiste, Konsole, Konversation + Systemblatt, Systemleiste + Runtime.",
       },
-      { property: "og:title", content: "Shell-Prototypen: J.A.R.V.I.S Mobile" },
+      { property: "og:title", content: "J.A.R.V.I.S Mobile Vorschau" },
       {
         property: "og:description",
         content: "Navigationsvergleich für den lokalen Android-Runtime-Shell von J.A.R.V.I.S.",
@@ -32,19 +32,19 @@ const variants = [
   {
     name: "Systemleiste",
     caption: "Variante A: Bottom Navigation, 393 x 852 dp",
-    axis: "Vertraute Android-Tableiste, vier feste Ziele, mittlere Dichte.",
+    axis: "Historischer Entwicklungsvergleich: vertraute Android-Tableiste, vier feste Ziele, mittlere Dichte.",
     render: () => <VariantA />,
   },
   {
     name: "Konsole",
     caption: "Variante B: Drawer + Runtime-Leiste, 393 x 852 dp",
-    axis: "Keine Tableiste. Persistente Runtime-Leiste, Drawer für alle Bereiche, maximale Dichte.",
+    axis: "Historischer Entwicklungsvergleich: keine Tableiste, persistente Runtime-Leiste, Drawer für alle Bereiche, maximale Dichte.",
     render: () => <VariantB />,
   },
   {
     name: "Konversation",
     caption: "Variante C: Chat-Root + Systemblatt, 393 x 852 dp",
-    axis: "Chat ist die Wurzel; das gesamte System liegt in einem ausklappbaren Bottom Sheet.",
+    axis: "Historischer Entwicklungsvergleich: Chat als Wurzel, das gesamte System in einem ausklappbaren Bottom Sheet.",
     render: () => <VariantC />,
   },
   {
