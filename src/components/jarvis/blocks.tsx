@@ -133,7 +133,11 @@ export function CapabilityList({ dense = false }: { dense?: boolean }) {
           subtitle={dense ? undefined : c.detail}
           trailing={
             <span className="flex items-center gap-2">
-              <StatusTag state={c.state} dot={false} />
+              <StatusTag
+                state={c.state}
+                {...(c.statusLabel ? { label: c.statusLabel } : {})}
+                dot={false}
+              />
               <ExecutionTag where={c.execution} />
             </span>
           }
