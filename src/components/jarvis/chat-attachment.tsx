@@ -1,6 +1,8 @@
+import { useRef, useState } from "react";
 import { X, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionEnter } from "@/components/jarvis/motion";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 /**
  * Chat attachment primitives.
