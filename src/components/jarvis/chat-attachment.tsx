@@ -72,6 +72,15 @@ export function AttachmentDraftList({
     }, REMOVE_EXIT_MS);
   };
 
+  // Pending exit timers are dropped on unmount, without removing anything.
+  const pending = timers.current;
+  useEffect(
+    () => () => {
+      Object.values(pending).forEach(clearTimeout);
+    },
+    [pending],
+  );
+
   if (attachments.length === 0) return null;
   return (
     <ul className="flex flex-col divide-y divide-border-soft border-b border-border-soft">
