@@ -108,6 +108,9 @@ export function ChatScreen() {
   const [baseCount, setBaseCount] = useState(demoConversation.length);
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  /** Mirror of the draft list, so the async budget check reads current values. */
+  const attachmentsRef = useRef<ChatAttachment[]>([]);
+  attachmentsRef.current = attachments;
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
