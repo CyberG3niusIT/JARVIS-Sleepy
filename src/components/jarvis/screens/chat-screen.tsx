@@ -8,7 +8,11 @@ import {
   AttachmentDraftList,
   MessageAttachmentList,
   attachmentAccept,
-  classifyAttachment,
+  validateAttachment,
+  formatMiB,
+  MAX_ATTACHMENTS,
+  MAX_FILE_BYTES,
+  MAX_TOTAL_BYTES,
   type ChatAttachment,
 } from "@/components/jarvis/chat-attachment";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
