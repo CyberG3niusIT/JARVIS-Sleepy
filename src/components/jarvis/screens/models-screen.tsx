@@ -136,7 +136,10 @@ type AddModelSource = "import" | "catalog";
 export function ModelsScreen({ onBack }: ModelsScreenProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [source, setSource] = useState<AddModelSource | null>(null);
-  /** Nothing is known about local files in this phase, so the list is empty. */
+  /**
+   * Prototype list. It stays empty because the registry is not bound yet; this
+   * is not a claim that the real device carries no model file.
+   */
   const localModels: LocalModelEntry[] = [];
 
   const closeSheet = () => {
