@@ -7,9 +7,10 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
-import { RoutingLadderBlock, SettingsList } from "@/components/jarvis/blocks";
+import { SettingsList } from "@/components/jarvis/blocks";
 import { StartScreen } from "@/components/jarvis/screens/start-screen";
 import { ChatScreen } from "@/components/jarvis/screens/chat-screen";
+import { SystemScreen } from "@/components/jarvis/screens/system-screen";
 import {
   ListGroup,
   ListRow,
