@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Mic, Send } from "lucide-react";
+import { Mic, Paperclip, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ExecutionTag, StatusTag } from "@/components/jarvis/primitives";
 import { SectionEnter, ValueTransition } from "@/components/jarvis/motion";
+import { InlineNotice } from "@/components/jarvis/controls";
+import {
+  AttachmentDraftList,
+  MessageAttachmentList,
+  attachmentAccept,
+  classifyAttachment,
+  type ChatAttachment,
+} from "@/components/jarvis/chat-attachment";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import type { ExecutionLocation } from "@/lib/jarvis/ia";
 
