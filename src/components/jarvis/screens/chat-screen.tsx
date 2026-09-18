@@ -204,14 +204,7 @@ export function ChatScreen() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <ChatHeader
-        showReset={!isEmpty}
-        onReset={() => {
-          setMessages([]);
-          setBaseCount(0);
-          inputRef.current?.focus();
-        }}
-      />
+      <ChatHeader showReset={!isEmpty} onReset={resetConversation} />
 
       <div className="flex-1">
         {isEmpty ? (
