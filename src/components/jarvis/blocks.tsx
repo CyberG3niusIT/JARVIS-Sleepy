@@ -139,7 +139,6 @@ export function CapabilityList({ dense = false }: { dense?: boolean }) {
               <ExecutionTag where={c.execution} />
             </span>
           }
-          onClick={() => {}}
         />
       ))}
     </ListGroup>
