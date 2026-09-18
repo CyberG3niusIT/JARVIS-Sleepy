@@ -59,17 +59,20 @@ function PhaseOverview() {
             <JarvisSymbol size={18} />
             <JarvisWordmark height={12} />
           </span>
-          <span className="value-mono">Phase 4</span>
+          <span className="value-mono">UI/UX-Baseline</span>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-6 py-10">
         <section>
-          <p className="text-[13px] leading-6 text-subtle-foreground">
+          <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Entwicklungs- und Referenzseite, nicht die Produktoberfläche
+          </p>
+          <p className="mt-3 text-[13px] leading-6 text-subtle-foreground">
             J.A.R.V.I.S Mobile ist die eigenständige lokale Android-Runtime. Sleepy ist
             eine optionale vertraute Laufzeit für begrenzte Handoffs, keine Voraussetzung.
-            Die Bottom Navigation ist festgelegt: Start, Chat, System, Mehr. Jedes
-            spätere Ziel hat genau einen Platz in dieser Struktur.
+            Die Bottom Navigation ist festgelegt: Start, Chat, System, Mehr. Jedes Ziel
+            hat genau einen Platz in dieser Struktur.
           </p>
           <p className="mt-4 text-[13px] font-medium tracking-wide text-primary">
             UNSCHEINBAR. ÜBERLEGEN. MEINS.
@@ -78,7 +81,7 @@ function PhaseOverview() {
             to="/prototypes/shell"
             className="mt-6 inline-flex h-11 items-center gap-2 rounded-sm border border-primary/50 px-4 text-[13px] text-primary"
           >
-            Vier Shell-Prototypen vergleichen
+            J.A.R.V.I.S Mobile öffnen
             <ArrowRight className="size-4" aria-hidden />
           </Link>
         </section>

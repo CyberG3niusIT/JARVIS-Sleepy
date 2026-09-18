@@ -24,9 +24,9 @@ import { moreDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
- * Variant C — "Konversation + Systemblatt"
+ * Variant C: "Konversation + Systemblatt"
  * Axis: conversation is the root surface; the whole system lives in one
- * expandable bottom sheet. No tab bar, no drawer — one gesture between
+ * expandable bottom sheet. No tab bar, no drawer: one gesture between
  * talking to JARVIS and inspecting/controlling the runtime.
  */
 
@@ -176,8 +176,6 @@ function SystemSheet({
                         key={a.id}
                         title={a.label}
                         trailing={<StatusTag state={a.state} dot={false} />}
-                        chevron
-                        onClick={() => {}}
                       />
                     ))}
                 </ListGroup>
