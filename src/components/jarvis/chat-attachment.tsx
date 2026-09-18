@@ -30,8 +30,14 @@ export const attachmentAccept = "image/*,application/pdf";
 export function classifyAttachment(file: File): ChatAttachmentKind | null {
   if (file.type.startsWith("image/")) return "image";
   if (file.type === "application/pdf") return "pdf";
+  // Some providers hand over an empty or unreliable MIME type, so fall back to
+  // the file ending. Nothing beyond images and PDF is accepted.
+  if (file.type === "" && file.name.toLowerCase().endsWith(".pdf")) return "pdf";
   return null;
 }
+
+/** Exit duration of a removed draft row, matching the fast motion token. */
+const REMOVE_EXIT_MS = 120;
 
 export const attachmentKindLabel: Record<ChatAttachmentKind, string> = {
   image: "Bild",
