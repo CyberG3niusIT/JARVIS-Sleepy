@@ -191,7 +191,7 @@ function SystemOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) 
         <ListGroup>
           {systemDestinations.map((area) => {
             const display = areaDisplayState[area.id] ?? area.state;
-            const navigable = navigableAreas.includes(area.id);
+            const navigable = isSystemArea(area.id);
             return (
               <ListRow
                 key={area.id}
