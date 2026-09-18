@@ -75,7 +75,7 @@ export function SettingsScreen({ onBack }: DetailScreenProps) {
         <ListGroup>
           <ListRow
             title="Speicherort"
-            subtitle="Anwendungsdaten bleiben lokal auf dem Gerät."
+            subtitle="Lokale Anwendungsdaten werden auf dem Gerät verwaltet."
             trailing={<StatusTag state="design_state" label={UNBOUND_STATUS} dot={false} />}
           />
           <ListRow
