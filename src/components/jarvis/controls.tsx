@@ -180,15 +180,19 @@ export function BottomSheet({
   children: ReactNode;
 }) {
   useEscape(open, onClose);
-  if (!open) return null;
+  const { mounted, closing } = usePresence(open, duration.deliberate);
+  if (!mounted) return null;
   return (
     <>
-      <Scrim onClick={onClose} />
+      <Scrim onClick={onClose} closing={closing} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="j-sheet-enter absolute inset-x-0 bottom-0 rounded-t-lg border-t border-border bg-surface-raised shadow-[var(--j-elevation-raised)]"
+        className={cn(
+          "absolute inset-x-0 bottom-0 rounded-t-lg border-t border-border bg-surface-raised shadow-[var(--j-elevation-raised)]",
+          closing ? "j-sheet-exit" : "j-sheet-enter",
+        )}
         style={{ zIndex: "var(--j-z-sheet)" }}
       >
         <div className="flex justify-center py-2" aria-hidden>
