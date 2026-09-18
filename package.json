@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && rm -rf dist && cp -r .output dist",
     "build:dev": "vite build --mode development",
-    "preview": "vite preview",
+    "preview": "node .output/server/index.mjs",
+    "start": "node .output/server/index.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
