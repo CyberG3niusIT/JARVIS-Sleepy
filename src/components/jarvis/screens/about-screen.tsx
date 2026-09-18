@@ -12,7 +12,7 @@ import {
  * Über J.A.R.V.I.S: product, build and license information.
  *
  * No release version exists in the prototype baseline, so none is invented.
- * Only the verified license fact of the OpenDroid foundation is shown.
+ * Third party attribution stays limited to the license section.
  *
  * Compose mapping: AboutScreen(state, onBack).
  */
