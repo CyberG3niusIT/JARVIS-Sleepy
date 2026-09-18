@@ -141,6 +141,69 @@ function useEscape(open: boolean, onClose: () => void) {
  * Keeps an overlay mounted for its exit animation, then unmounts it.
  * Compose mapping: AnimatedVisibility with enter/exit transitions.
  */
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+function focusableIn(node: HTMLElement) {
+  return Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => el.offsetParent !== null || el === node,
+  );
+}
+
+/**
+ * Modal focus behaviour shared by BottomSheet and Dialog.
+ * Moves focus into the overlay, keeps Tab inside it and restores focus to the
+ * opener when the overlay closes. Exit animations are not affected because the
+ * effect keys on the open state, not on unmount.
+ * Compose mapping: Dialog focus handling inside JarvisBottomSheet/JarvisDialog.
+ */
+function useModalFocus(active: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const node = ref.current;
+    if (node) {
+      const first = focusableIn(node)[0];
+      (first ?? node).focus();
+    }
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const current = ref.current;
+      if (!current) return;
+      const items = focusableIn(current);
+      if (items.length === 0) {
+        e.preventDefault();
+        current.focus();
+        return;
+      }
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const activeEl = document.activeElement;
+      const inside = current.contains(activeEl);
+      if (e.shiftKey) {
+        if (!inside || activeEl === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (!inside || activeEl === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      opener?.focus?.();
+    };
+  }, [active]);
+
+  return ref;
+}
+
 function usePresence(open: boolean, exitMs: number) {
   const [mounted, setMounted] = useState(open);
 
@@ -182,11 +245,14 @@ export function BottomSheet({
 }) {
   useEscape(open, onClose);
   const { mounted, closing } = usePresence(open, duration.deliberate);
+  const ref = useModalFocus(open && mounted);
   if (!mounted) return null;
   return (
     <>
       <Scrim onClick={onClose} closing={closing} />
       <div
+        ref={ref}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -205,7 +271,7 @@ export function BottomSheet({
             type="button"
             aria-label="Schließen"
             onClick={onClose}
-            className="j-pressable flex size-10 items-center justify-center rounded-sm"
+            className="j-pressable flex size-12 items-center justify-center rounded-sm"
           >
             <X className="size-4 text-muted-foreground" aria-hidden />
           </button>
@@ -231,10 +297,7 @@ export function Dialog({
 }) {
   useEscape(open, onClose);
   const { mounted, closing } = usePresence(open, duration.fast);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (open) ref.current?.focus();
-  }, [open]);
+  const ref = useModalFocus(open && mounted);
   if (!mounted) return null;
   return (
     <>

@@ -50,7 +50,7 @@ export function DeviceScreen({ onBack }: SystemDetailProps) {
         <ListGroup>
           <ListRow
             title="Vordergrunddienst"
-            subtitle="Grundlage für dauerhafte lokale Verfügbarkeit, wird überarbeitet."
+            subtitle="Für dauerhafte lokale Verfügbarkeit vorgesehen, wird überarbeitet."
             trailing={
               <StatusTag
                 state="design_state"
