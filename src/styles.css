@@ -350,6 +350,10 @@
 @utility j-scrim-exit {
   animation: j-fade-out var(--j-duration-fast) var(--j-ease-exit) both;
 }
+/* Restrained removal of a list row: short fade with a small sideways move. */
+@utility j-row-exit {
+  animation: j-row-out var(--j-duration-fast) var(--j-ease-exit) both;
+}
 /* Subtle, fast section entrance. Stagger via --j-stagger-delay, never decorative. */
 @utility j-section-enter {
   animation: j-section-in var(--j-duration-standard) var(--j-ease-enter) both;
