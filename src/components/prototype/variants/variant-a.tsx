@@ -22,6 +22,7 @@ import {
 } from "@/components/jarvis/blocks";
 import { ListGroup, ListRow, PrivacyTag, SectionHeader, StatusTag } from "@/components/jarvis/primitives";
 import { productAreas } from "@/lib/jarvis/ia";
+import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
  * Variant A — "Systemleiste"
@@ -48,7 +49,7 @@ export function VariantA() {
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border-soft px-4">
         <JarvisWordmark height={12} />
         <div className="flex items-center gap-3">
-          <PrivacyTag mode="NORMAL" />
+          <PrivacyTag mode={comparisonBaseline.privacyMode} />
           <Settings className="size-[18px] text-muted-foreground" aria-hidden />
         </div>
       </header>
@@ -110,7 +111,7 @@ function StartScreen() {
       <SectionHeader>Runtime</SectionHeader>
       <RuntimeSummary />
       <SectionHeader>Privacy</SectionHeader>
-      <PrivacyBlock mode="NORMAL" />
+      <PrivacyBlock mode={comparisonBaseline.privacyMode} />
       <SectionHeader>Entscheidungsreihenfolge</SectionHeader>
       <RoutingLadderBlock limit={5} />
       <div className="px-4 py-2">
