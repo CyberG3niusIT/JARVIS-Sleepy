@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -38,7 +38,8 @@ export function ScreenTransition({
 
 /**
  * Crossfades a changing value instead of letting it blink.
- * Used by the runtime strip so a state change reads as a change.
+ * The element is keyed by the value itself, so the new value animates on the
+ * same render it appears, without a delayed state update.
  */
 export function ValueTransition({
   value,
@@ -49,34 +50,26 @@ export function ValueTransition({
   children: ReactNode;
   className?: string;
 }) {
-  const first = useRef(true);
-  const [key, setKey] = useState(value);
-
-  useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    setKey(value);
-  }, [value]);
-
   return (
-    <span key={key} className={cn("j-value-change inline-flex", className)}>
+    <span key={value} className={cn("j-value-change inline-flex", className)}>
       {children}
     </span>
   );
 }
 
-/** Tracks navigation order so a tab change knows whether it moves forward or back. */
+/**
+ * Tracks navigation order so a tab change knows whether it moves forward or back.
+ * The direction is computed during render, so the first render after a tab change
+ * already carries the correct slide instead of a fade that upgrades later.
+ */
 export function useDirection(index: number): "forward" | "back" | "none" {
   const previous = useRef(index);
-  const [direction, setDirection] = useState<"forward" | "back" | "none">("none");
+  const direction = useRef<"forward" | "back" | "none">("none");
 
-  useEffect(() => {
-    if (previous.current === index) return;
-    setDirection(index > previous.current ? "forward" : "back");
+  if (previous.current !== index) {
+    direction.current = index > previous.current ? "forward" : "back";
     previous.current = index;
-  }, [index]);
+  }
 
-  return direction;
+  return direction.current;
 }

@@ -402,6 +402,11 @@
   .j-dialog-enter {
     animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
   }
+  .j-sheet-exit,
+  .j-dialog-exit,
+  .j-scrim-exit {
+    animation: j-fade-out var(--j-duration-fast) var(--j-ease-standard) both;
+  }
   .j-pressable {
     transition: background-color var(--j-duration-fast) linear;
   }
