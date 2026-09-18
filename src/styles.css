@@ -434,6 +434,7 @@
   }
   .j-sheet-exit,
   .j-dialog-exit,
+  .j-row-exit,
   .j-scrim-exit {
     animation: j-fade-out var(--j-duration-fast) var(--j-ease-standard) both;
   }
