@@ -34,9 +34,9 @@ import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
  * Variant D: "Systemleiste + Runtime-Leiste"
- * Reference implementation of the locked design system. Information architecture
- * unchanged: bottom navigation from A, persistent runtime strip from B, no drawer,
- * composer only on the chat screen.
+ * Reference implementation of the locked design system and of the locked Phase 4
+ * information architecture: bottom navigation from A, persistent runtime strip
+ * from B, no drawer, composer only on the chat screen.
  */
 
 type TabId = "start" | "chat" | "system" | "more";
@@ -171,8 +171,8 @@ function MoreScreen({ focusSettings = false }: { focusSettings?: boolean }) {
 
   return (
     <ScrollBody>
-      {focusSettings ? settingsBlock : areaList}
-      {focusSettings ? areaList : settingsBlock}
+      {focusSettings ? settingsBlock : null}
+      {areaList}
       <div className="flex items-center gap-2 px-4 py-4 text-muted-foreground">
         <ShieldCheck className="size-4" aria-hidden />
         <span className="text-[11px]">Alle Bereiche laufen lokal, sofern nicht anders markiert.</span>
