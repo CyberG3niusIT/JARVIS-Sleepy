@@ -79,7 +79,7 @@ function DesignSystemPage() {
           <div>
             <h1 className="text-[15px] font-medium text-foreground">Designsystem</h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              Interne Referenz, Phase 3. Kein Produktbereich, nicht in der Navigation.
+              Interne Referenz, Phase 4. Kein Produktbereich, nicht in der Navigation.
             </p>
           </div>
           <Link to="/prototypes/shell" className="text-[12px] text-primary">
@@ -253,6 +253,10 @@ function DesignSystemPage() {
 
         <Block title="Bottom Navigation und Bildschirmwechsel">
           <NavSection />
+        </Block>
+
+        <Block title="Informationsarchitektur (festgelegt)">
+          <IaSection />
         </Block>
       </main>
     </div>
