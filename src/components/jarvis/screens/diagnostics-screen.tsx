@@ -53,7 +53,10 @@ const redactionRules = [
 ];
 
 export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
-  /** No verified log inventory exists in this phase. */
+  /**
+   * No log source is bound in this phase. The empty lists describe the missing
+   * binding, not a verified absence of entries on a real device.
+   */
   const executionHistory: LogEntry[] = [];
   const crashLogs: LogEntry[] = [];
 
