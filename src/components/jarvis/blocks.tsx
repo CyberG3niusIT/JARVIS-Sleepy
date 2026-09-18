@@ -240,16 +240,17 @@ export function Composer({
 }
 
 /**
- * Content of the Einstellungen destination. Logs & Diagnose liegt unter System,
- * Über J.A.R.V.I.S ist ein eigenes Ziel unter Mehr, deshalb hier nicht doppelt.
+ * Content of the Einstellungen destination in the historical variants A, B and C.
+ * Informational rows only: these reference shells have no settings detail screen,
+ * so no chevron and no empty handler pretends navigation exists.
  */
 export function SettingsList() {
   return (
     <ListGroup>
-      <ListRow title="Sprache & Ausgabe" subtitle="Deutsch" chevron onClick={() => {}} />
-      <ListRow title="Darstellung" subtitle="Dunkel, Systemdichte" chevron onClick={() => {}} />
-      <ListRow title="Speicher & Modelle" trailing={<StatusTag state="design_state" />} chevron onClick={() => {}} />
-      <ListRow title="Hintergrunddienst" trailing={<StatusTag state="design_state" />} chevron onClick={() => {}} />
+      <ListRow title="Sprache & Ausgabe" subtitle="Deutsch" />
+      <ListRow title="Darstellung" subtitle="Dunkel, Systemdichte" />
+      <ListRow title="Speicher & Modelle" trailing={<StatusTag state="design_state" />} />
+      <ListRow title="Hintergrunddienst" trailing={<StatusTag state="design_state" />} />
     </ListGroup>
   );
 }
