@@ -196,15 +196,7 @@ function DesignSystemPage() {
         </Block>
 
         <Block title="Buttons">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="primary">Lokal ausführen</Button>
-            <Button variant="secondary">Abbrechen</Button>
-            <Button variant="destructive">Modell löschen</Button>
-            <Button disabled>Nicht verfügbar</Button>
-          </div>
-          <p className="mt-3 text-[12px] text-muted-foreground">
-            Druckfeedback: 80 ms Skalierung und Flächenwechsel, bei reduzierter Bewegung nur Fläche.
-          </p>
+          <ButtonSection />
         </Block>
 
         <Block title="Zeilen">
@@ -340,6 +332,33 @@ function TagSection() {
 function ToggleDemo() {
   const [on, setOn] = useState(false);
   return <Toggle checked={on} onChange={setOn} label="Beispielschalter" />;
+}
+
+function ButtonSection() {
+  // Local demonstration state only. No product behavior, no runtime call.
+  const [lastAction, setLastAction] = useState<string | null>(null);
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="primary" onClick={() => setLastAction("Primär ausgelöst")}>
+          Lokal ausführen
+        </Button>
+        <Button variant="secondary" onClick={() => setLastAction("Sekundär ausgelöst")}>
+          Abbrechen
+        </Button>
+        <Button variant="destructive" onClick={() => setLastAction("Destruktiv ausgelöst")}>
+          Modell löschen
+        </Button>
+        <Button disabled>Nicht verfügbar</Button>
+      </div>
+      <p aria-live="polite" className="mt-3 text-[12px] text-muted-foreground">
+        {lastAction ? `Demonstration: ${lastAction}` : "Demonstration: noch keine Auswahl"}
+      </p>
+      <p className="mt-2 text-[12px] text-muted-foreground">
+        Druckfeedback: 80 ms Skalierung und Flächenwechsel, bei reduzierter Bewegung nur Fläche.
+      </p>
+    </div>
+  );
 }
 
 function InputSection() {
