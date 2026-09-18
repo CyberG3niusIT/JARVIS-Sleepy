@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * J.A.R.V.I.S — Local AI Assistant
+ * J.A.R.V.I.S : Local AI Assistant
  * Tokens follow JARVIS_MOBILE_UI_BRAND_SPEC.md §31 (Implementation Tokens).
  * Graphite surfaces, soft white / cool gray type, restrained JARVIS blue.
  * Never hardcode colors in components.
@@ -133,7 +133,7 @@
   }
 }
 
-/* Dense technical label — section headers, meta labels */
+/* Dense technical label : section headers, meta labels */
 @utility label-system {
   font-size: 11px;
   line-height: 16px;
@@ -168,7 +168,7 @@
   }
 }
 
-/* ---- Prototype picker (harness chrome — spec verbatim, not themed) ---- */
+/* ---- Prototype picker (harness chrome : spec verbatim, not themed) ---- */
 .proto-picker {
   position: fixed;
   bottom: 24px;
