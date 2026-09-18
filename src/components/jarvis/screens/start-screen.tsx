@@ -43,7 +43,7 @@ export function StartScreen({ onOpenChat, onOpenSystem }: StartScreenProps) {
         <ListGroup>
           <ListRow
             title="Lokales Modell"
-            subtitle="Ohne geladenes Modell bleibt die lokale Antwortfähigkeit aus."
+            subtitle="Modellgestützte lokale Antworten sind erst nach dem Laden eines Modells verfügbar."
             trailing={
               <StatusTag
                 state="design_state"
@@ -53,7 +53,7 @@ export function StartScreen({ onOpenChat, onOpenSystem }: StartScreenProps) {
           />
           <ListRow
             title="Berechtigungen"
-            subtitle="Bedienungshilfen, Benachrichtigungen, Mikrofon sind noch nicht freigegeben."
+            subtitle="Benötigte Android-Berechtigungen sind noch nicht vollständig freigegeben."
             trailing={
               <StatusTag
                 state="permission_required"
@@ -86,7 +86,7 @@ export function StartScreen({ onOpenChat, onOpenSystem }: StartScreenProps) {
           />
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
-          Optional, nicht erforderlich. J.A.R.V.I.S Mobile bleibt ohne beide nutzbar.
+          Sleepy und Cloud sind für den lokalen Betrieb nicht grundsätzlich erforderlich.
         </p>
       </SectionEnter>
 
