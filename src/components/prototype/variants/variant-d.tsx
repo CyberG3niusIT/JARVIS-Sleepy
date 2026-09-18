@@ -4,11 +4,8 @@ import {
   MessageSquare,
   LayoutGrid,
   MoreHorizontal,
-  Settings,
   ShieldCheck,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { JarvisWordmark } from "@/components/brand/jarvis-mark";
 import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
 import {
   CapabilityList,
@@ -21,27 +18,31 @@ import {
   SettingsList,
 } from "@/components/jarvis/blocks";
 import {
-  ExecutionTag,
   ListGroup,
   ListRow,
-  PrivacyTag,
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
+import {
+  BottomNav,
+  RuntimeStrip,
+  TopAppBar,
+  type NavItem,
+} from "@/components/jarvis/shell";
+import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
 import { productAreas } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
  * Variant D: "Systemleiste + Runtime-Leiste"
- * Consolidated candidate: bottom navigation from A, persistent runtime strip
- * from B. No drawer, composer only on the chat screen.
+ * Reference implementation of the locked design system. Information architecture
+ * unchanged: bottom navigation from A, persistent runtime strip from B, no drawer,
+ * composer only on the chat screen.
  */
-
-const NAV_HEIGHT = 56;
 
 type TabId = "start" | "chat" | "system" | "more";
 
-const tabs: { id: TabId; label: string; icon: typeof Home }[] = [
+const tabs: NavItem<TabId>[] = [
   { id: "start", label: "Start", icon: Home },
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "system", label: "System", icon: LayoutGrid },
@@ -50,76 +51,31 @@ const tabs: { id: TabId; label: string; icon: typeof Home }[] = [
 
 export function VariantD() {
   const [tab, setTab] = useState<TabId>("start");
+  const index = tabs.findIndex((t) => t.id === tab);
+  const direction = useDirection(index);
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border-soft px-4">
-        <JarvisWordmark height={12} />
-        <button
-          type="button"
-          aria-label="Einstellungen"
-          onClick={() => setTab("more")}
-          className="flex size-10 items-center justify-center rounded-sm"
-        >
-          <Settings className="size-[18px] text-muted-foreground" aria-hidden />
-        </button>
-      </header>
+      <TopAppBar onSettings={() => setTab("more")} />
 
       {/* Persistent runtime strip: visible on Start, Chat, System und Mehr. */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border-soft bg-surface px-4 py-1.5">
-        <StatusTag state="design_state" label={comparisonBaseline.labels.runtime} />
-        <span className="flex items-center gap-2">
-          <ExecutionTag where={comparisonBaseline.execution} />
-          <PrivacyTag mode={comparisonBaseline.privacyMode} />
-        </span>
-      </div>
+      <RuntimeStrip
+        runtimeState="design_state"
+        runtimeLabel={comparisonBaseline.labels.runtime}
+        execution={comparisonBaseline.execution}
+        privacy={comparisonBaseline.privacyMode}
+      />
 
       <div className="hide-scrollbar flex-1 overflow-y-auto">
-        {tab === "start" ? <StartScreen /> : null}
-        {tab === "chat" ? <ChatScreen /> : null}
-        {tab === "system" ? <SystemScreen /> : null}
-        {tab === "more" ? <MoreScreen /> : null}
+        <ScreenTransition transitionKey={tab} direction={direction} className="min-h-full">
+          {tab === "start" ? <StartScreen /> : null}
+          {tab === "chat" ? <ChatScreen /> : null}
+          {tab === "system" ? <SystemScreen /> : null}
+          {tab === "more" ? <MoreScreen /> : null}
+        </ScreenTransition>
       </div>
 
-      <nav
-        className="flex shrink-0 items-stretch border-t border-border-soft bg-surface"
-        style={{ height: NAV_HEIGHT + GESTURE_BAR, paddingBottom: GESTURE_BAR }}
-        aria-label="Hauptnavigation"
-      >
-        {tabs.map((t) => {
-          const active = t.id === tab;
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              aria-current={active ? "page" : undefined}
-              className="flex flex-1 flex-col items-center justify-center gap-1"
-            >
-              <span
-                className={cn(
-                  "flex h-6 w-14 items-center justify-center rounded-full transition-colors duration-[120ms]",
-                  active && "bg-surface-selected",
-                )}
-              >
-                <Icon
-                  className={cn("size-[18px]", active ? "text-primary" : "text-muted-foreground")}
-                  aria-hidden
-                />
-              </span>
-              <span
-                className={cn(
-                  "text-[11px] leading-3",
-                  active ? "text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {t.label}
-              </span>
-            </button>
-          );
-        })}
-      </nav>
+      <BottomNav items={tabs} current={tab} onSelect={setTab} safeBottom={GESTURE_BAR} />
     </div>
   );
 }
