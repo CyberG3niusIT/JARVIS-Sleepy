@@ -3,7 +3,7 @@ import type { ExecutionLocation, PrivacyMode } from "./ia";
 /**
  * Phase 2 comparison baseline.
  *
- * Single source of truth so Variant A, B and C cannot drift apart again.
+ * Single source of truth so Variant A, B, C and D cannot drift apart again.
  * Nothing here is runtime data: every value is a documented design state.
  */
 export const comparisonBaseline = {
