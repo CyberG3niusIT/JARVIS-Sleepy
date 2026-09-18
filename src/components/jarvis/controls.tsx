@@ -245,11 +245,14 @@ export function BottomSheet({
 }) {
   useEscape(open, onClose);
   const { mounted, closing } = usePresence(open, duration.deliberate);
+  const ref = useModalFocus(open && mounted);
   if (!mounted) return null;
   return (
     <>
       <Scrim onClick={onClose} closing={closing} />
       <div
+        ref={ref}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
