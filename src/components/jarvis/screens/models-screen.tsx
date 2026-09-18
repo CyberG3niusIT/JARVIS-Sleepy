@@ -130,14 +130,10 @@ const managementCapabilities = [
 
 /* -------------------------------- Screen --------------------------------- */
 
-export interface ModelsScreenProps {
-  onBack: () => void;
-}
-
 /** Sources offered by the add-model sheet. */
 type AddModelSource = "import" | "catalog";
 
-export function ModelsScreen({ onBack }: ModelsScreenProps) {
+export function ModelsScreen({ onBack }: SystemDetailProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [source, setSource] = useState<AddModelSource | null>(null);
   /**
