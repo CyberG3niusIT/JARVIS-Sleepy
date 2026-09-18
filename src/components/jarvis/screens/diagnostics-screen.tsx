@@ -2,6 +2,7 @@ import { ScrollBody } from "@/components/prototype/phone-frame";
 import { ListGroup, ListRow, SectionHeader } from "@/components/jarvis/primitives";
 import { SectionEnter } from "@/components/jarvis/motion";
 import { EmptyState, InlineNotice } from "@/components/jarvis/controls";
+import { DiagnosticsDemoSection } from "@/components/jarvis/screens/diagnostics-demo";
 import {
   DesignStateNote,
   DetailHeader,
@@ -121,7 +122,9 @@ export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
         </div>
       </SectionEnter>
 
-      <SectionEnter index={5}>
+      <DiagnosticsDemoSection />
+
+      <SectionEnter index={7}>
         <DesignStateNote />
       </SectionEnter>
     </ScrollBody>
