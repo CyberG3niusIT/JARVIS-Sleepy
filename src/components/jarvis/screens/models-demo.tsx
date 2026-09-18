@@ -32,9 +32,9 @@ import {
 
 interface DemoModelEntry extends LocalModelEntry {
   source: "import" | "katalog";
-  integrity?: "bestanden" | "fehlgeschlagen";
-  downloadProgress?: number;
-  errorKind?: "laden" | "download";
+  integrity?: "bestanden" | "fehlgeschlagen" | undefined;
+  downloadProgress?: number | undefined;
+  errorKind?: "laden" | "download" | undefined;
 }
 
 const initialDemoModels: DemoModelEntry[] = [
@@ -344,21 +344,23 @@ export function ModelsDemoSection() {
         ) : null}
       </BottomSheet>
 
-      <Dialog
-        open={!!deleteTarget}
-        onClose={() => setDeleteId(null)}
-        title="Modell loeschen"
-        description={
-          deleteTarget
-            ? `"${deleteTarget.name}" wird im Demozustand aus dieser Beispielliste entfernt.`
-            : undefined
-        }
-      >
-        <Button onClick={() => setDeleteId(null)}>Abbrechen</Button>
-        <Button variant="destructive" onClick={deleteEntry}>
-          Loeschen
-        </Button>
-      </Dialog>
+      {deleteTarget ? (
+        <Dialog
+          open={!!deleteTarget}
+          onClose={() => setDeleteId(null)}
+          title="Modell loeschen"
+          description={`"${deleteTarget.name}" wird im Demozustand aus dieser Beispielliste entfernt.`}
+        >
+          <Button onClick={() => setDeleteId(null)}>Abbrechen</Button>
+          <Button variant="destructive" onClick={deleteEntry}>
+            Loeschen
+          </Button>
+        </Dialog>
+      ) : (
+        <Dialog open={false} onClose={() => setDeleteId(null)} title="Modell loeschen">
+          <Button onClick={() => setDeleteId(null)}>Abbrechen</Button>
+        </Dialog>
+      )}
     </SectionEnter>
   );
 }
