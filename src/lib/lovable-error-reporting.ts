@@ -24,6 +24,10 @@ declare global {
   }
 }
 
+/**
+ * Optional hook of the editor preview. The project itself loads no external
+ * script, so this function is inert whenever the preview helper is absent.
+ */
 export function reportLovableError(error: unknown, context: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
   window.__lovableEvents?.captureException?.(

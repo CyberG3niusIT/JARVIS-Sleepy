@@ -19,10 +19,15 @@ export function PhoneFrame({
   caption?: string;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex w-full max-w-[393px] flex-col items-center gap-3">
+      {/*
+        393 dp stays the reference width. On narrower browser windows the frame
+        shrinks so the page never scrolls horizontally, the product UI reflows
+        at the smaller width instead of being scaled.
+      */}
       <div
-        className="relative overflow-hidden rounded-[28px] border border-border bg-background shadow-[0_24px_60px_-24px_rgba(0,0,0,0.8)]"
-        style={{ width: 393, height: 852 }}
+        className="relative w-full overflow-hidden rounded-[28px] border border-border bg-background shadow-[0_24px_60px_-24px_rgba(0,0,0,0.8)]"
+        style={{ maxWidth: 393, height: 852 }}
       >
         <StatusBar />
         <div

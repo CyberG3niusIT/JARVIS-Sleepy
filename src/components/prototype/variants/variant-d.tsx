@@ -63,8 +63,23 @@ export function VariantD() {
         privacy={comparisonBaseline.privacyMode}
       />
 
-      <div className="hide-scrollbar flex-1 overflow-y-auto">
-        <ScreenTransition transitionKey={tab} direction={direction} className="min-h-full">
+      {/*
+        Chat owns its own scrolling so the composer sits directly above the
+        bottom navigation. The other tabs keep the outer scroll container.
+      */}
+      <div
+        className={
+          tab === "chat"
+            ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+            : "hide-scrollbar min-h-0 flex-1 overflow-y-auto"
+        }
+      >
+        <ScreenTransition
+          transitionKey={tab}
+          direction={direction}
+          className={tab === "chat" ? "flex min-h-0 flex-1 flex-col" : "min-h-full"}
+        >
+
           {tab === "start" ? (
             <StartScreen
               onOpenChat={() => selectTab("chat")}
