@@ -129,7 +129,7 @@ export function BottomNav<T extends string>({
             type="button"
             onClick={() => onSelect(item.id)}
             aria-current={active ? "page" : undefined}
-            className="j-pressable relative flex flex-1 flex-col items-center justify-center gap-1 bg-transparent active:bg-transparent"
+            className="j-pressable relative flex flex-1 flex-col items-center justify-center gap-1 bg-transparent hover:bg-transparent active:bg-transparent"
           >
             <span className="flex h-7 w-14 items-center justify-center">
               <Icon
