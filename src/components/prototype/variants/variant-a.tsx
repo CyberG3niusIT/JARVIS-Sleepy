@@ -155,8 +155,6 @@ function MoreScreen() {
             title={a.label}
             subtitle={a.purpose}
             trailing={<StatusTag state={a.state} dot={false} />}
-            chevron
-            onClick={() => {}}
           />
         ))}
       </ListGroup>
