@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Info, Inbox, Lock, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusTag } from "./primitives";
@@ -15,7 +15,7 @@ import type { SystemState } from "@/lib/jarvis/ia";
 type ButtonVariant = "primary" | "secondary" | "destructive";
 
 const buttonVariant: Record<ButtonVariant, string> = {
-  primary: "bg-primary/15 border-primary/60 text-primary",
+  primary: "bg-primary border-primary text-primary-foreground",
   secondary: "bg-transparent border-border text-subtle-foreground",
   destructive: "bg-transparent border-destructive/60 text-destructive",
 };
