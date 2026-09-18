@@ -204,12 +204,13 @@ export function ChatScreen() {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex h-full min-h-full flex-col">
       {/* Persistent screen heading, also present while the conversation renders. */}
       <h1 className="sr-only">Chat</h1>
       <ChatHeader showReset={!isEmpty} onReset={resetConversation} />
 
-      <div className="flex-1">
+      {/* Transcript scrolls, the composer stays directly above the navigation. */}
+      <div className="hide-scrollbar min-h-0 flex-1 overflow-y-auto">
         {isEmpty ? (
           <EmptyConversation
             onPick={(prompt) => {
