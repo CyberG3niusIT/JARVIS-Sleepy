@@ -169,8 +169,7 @@ export function ListRow({
       onClick={onClick}
       className={cn(
         "touch-row flex w-full items-center gap-3 px-4 py-2.5 text-left",
-        onClick &&
-          "transition-colors duration-[120ms] hover:bg-surface-selected focus-visible:bg-surface-selected focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+        onClick && "j-pressable",
         selected && "bg-surface-selected",
         className,
       )}

@@ -77,10 +77,34 @@
   --j-error: #e06464;
   --j-disabled: #59636c;
 
-  /* Motion — 120…240 ms, state-communicating only (Brand Spec §22) */
-  --j-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* ---- Motion tokens (locked, see src/lib/jarvis/tokens.ts) ---- */
+  --j-duration-instant: 80ms;
   --j-duration-fast: 120ms;
-  --j-duration-base: 200ms;
+  --j-duration-standard: 180ms;
+  --j-duration-deliberate: 240ms;
+  --j-duration-sheet: 280ms;
+
+  --j-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --j-ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --j-ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --j-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --j-ease: var(--j-ease-standard);
+  --j-duration-base: var(--j-duration-standard);
+
+  /* ---- Layer order ---- */
+  --j-z-runtime-strip: 10;
+  --j-z-bottom-nav: 20;
+  --j-z-scrim: 30;
+  --j-z-sheet: 40;
+  --j-z-dialog: 50;
+
+  /* ---- Elevation: hairlines carry separation, shadows only for overlays ---- */
+  --j-elevation-raised: 0 -8px 24px -12px rgba(0, 0, 0, 0.7);
+  --j-elevation-overlay: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+
+  /* ---- Safe area (real insets on device, frame stand-ins in the harness) ---- */
+  --j-safe-top: env(safe-area-inset-top, 0px);
+  --j-safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .dark {
@@ -235,4 +259,153 @@
 .proto-picker[data-position="top"] {
   bottom: auto;
   top: 24px;
+}
+
+/* ================= Motion primitives (design system, locked) =================
+ * Purposeful only: direction communicates spatial navigation, crossfade
+ * communicates a changed value, press feedback confirms touch.
+ * Every rule below is disabled or de-translated under reduced motion.
+ * ========================================================================== */
+
+@keyframes j-screen-in-forward {
+  from { opacity: 0; transform: translate3d(16px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes j-screen-in-back {
+  from { opacity: 0; transform: translate3d(-16px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes j-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes j-value-in {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes j-sheet-in {
+  from { transform: translate3d(0, 100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes j-dialog-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes j-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes j-indeterminate {
+  from { transform: translate3d(-100%, 0, 0); }
+  to { transform: translate3d(300%, 0, 0); }
+}
+
+@utility j-screen-forward {
+  animation: j-screen-in-forward var(--j-duration-standard) var(--j-ease-enter) both;
+}
+@utility j-screen-back {
+  animation: j-screen-in-back var(--j-duration-standard) var(--j-ease-enter) both;
+}
+@utility j-fade {
+  animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
+}
+@utility j-value-change {
+  animation: j-value-in var(--j-duration-standard) var(--j-ease-enter) both;
+}
+@utility j-sheet-enter {
+  animation: j-sheet-in var(--j-duration-sheet) var(--j-ease-enter) both;
+}
+@utility j-dialog-enter {
+  animation: j-dialog-in var(--j-duration-standard) var(--j-ease-enter) both;
+}
+@utility j-scrim-enter {
+  animation: j-scrim-in var(--j-duration-fast) var(--j-ease-standard) both;
+}
+
+/* Tactile press feedback. Touch has no hover, so :active carries the response. */
+@utility j-pressable {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    background-color var(--j-duration-fast) var(--j-ease-standard),
+    transform var(--j-duration-instant) var(--j-ease-standard),
+    border-color var(--j-duration-fast) var(--j-ease-standard),
+    color var(--j-duration-fast) var(--j-ease-standard);
+
+  &:active {
+    transform: scale(0.985);
+    background-color: var(--color-surface-selected);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--color-ring);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .j-pressable:hover {
+    background-color: var(--color-surface-raised);
+  }
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .j-screen-forward,
+  .j-screen-back {
+    animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
+  }
+  .j-value-change {
+    animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
+  }
+  .j-sheet-enter,
+  .j-dialog-enter {
+    animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
+  }
+  .j-pressable {
+    transition: background-color var(--j-duration-fast) linear;
+  }
+  .j-pressable:active {
+    transform: none;
+  }
+  .j-indeterminate-track > span {
+    animation: none;
+    transform: none;
+    width: 100%;
+    opacity: 0.4;
+  }
+}
+
+/* Indeterminate progress: honest waiting, never a success implication. */
+.j-indeterminate-track {
+  position: relative;
+  overflow: hidden;
+  height: 2px;
+  background-color: var(--color-border-soft);
+}
+.j-indeterminate-track > span {
+  position: absolute;
+  inset-block: 0;
+  width: 33%;
+  background-color: var(--color-primary);
+  animation: j-indeterminate 1.4s var(--j-ease-standard) infinite;
 }

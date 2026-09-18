@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DesignSystemRouteImport } from './routes/design-system'
 import { Route as PrototypesShellRouteImport } from './routes/prototypes.shell'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignSystemRoute = DesignSystemRouteImport.update({
+  id: '/design-system',
+  path: '/design-system',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PrototypesShellRoute = PrototypesShellRouteImport.update({
@@ -25,27 +31,31 @@ const PrototypesShellRoute = PrototypesShellRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/design-system': typeof DesignSystemRoute
   '/prototypes/shell': typeof PrototypesShellRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/design-system': typeof DesignSystemRoute
   '/prototypes/shell': typeof PrototypesShellRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/design-system': typeof DesignSystemRoute
   '/prototypes/shell': typeof PrototypesShellRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/prototypes/shell'
+  fullPaths: '/' | '/design-system' | '/prototypes/shell'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/prototypes/shell'
-  id: '__root__' | '/' | '/prototypes/shell'
+  to: '/' | '/design-system' | '/prototypes/shell'
+  id: '__root__' | '/' | '/design-system' | '/prototypes/shell'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DesignSystemRoute: typeof DesignSystemRoute
   PrototypesShellRoute: typeof PrototypesShellRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design-system': {
+      id: '/design-system'
+      path: '/design-system'
+      fullPath: '/design-system'
+      preLoaderRoute: typeof DesignSystemRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/prototypes/shell': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DesignSystemRoute: DesignSystemRoute,
   PrototypesShellRoute: PrototypesShellRoute,
 }
 export const routeTree = rootRouteImport

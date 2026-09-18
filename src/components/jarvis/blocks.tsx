@@ -214,13 +214,13 @@ export function Composer({
         type="button"
         onClick={onFocusField}
         aria-label={fieldLabel}
-        className="touch-row flex flex-1 items-center rounded-sm border border-border px-3 text-left text-[13px] text-muted-foreground"
+        className="j-pressable touch-row flex flex-1 items-center rounded-sm border border-border px-3 text-left text-[13px] text-muted-foreground focus:border-primary/70"
       >
         {hint}
       </button>
       <button
         type="button"
-        className="touch-row flex min-w-12 items-center justify-center rounded-sm border border-primary/50 px-3 text-[12px] text-primary"
+        className="j-pressable touch-row flex min-w-12 items-center justify-center rounded-sm border border-primary/50 px-3 text-[12px] text-primary"
       >
         Senden
       </button>
