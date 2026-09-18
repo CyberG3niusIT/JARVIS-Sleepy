@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { ScrollBody } from "@/components/prototype/phone-frame";
 import { ModelsScreen } from "@/components/jarvis/screens/models-screen";
+import { AgentsScreen } from "@/components/jarvis/screens/agents-screen";
+import { ToolsScreen } from "@/components/jarvis/screens/tools-screen";
+import { PermissionsScreen } from "@/components/jarvis/screens/permissions-screen";
+import { PrivacyScreen } from "@/components/jarvis/screens/privacy-screen";
+import { RuntimesScreen } from "@/components/jarvis/screens/runtimes-screen";
+import { DeviceScreen } from "@/components/jarvis/screens/device-screen";
+import { DiagnosticsScreen } from "@/components/jarvis/screens/diagnostics-screen";
+import type { SystemDetailProps } from "@/components/jarvis/screens/detail-header";
 import { PrivacyBlock, RoutingLadderBlock } from "@/components/jarvis/blocks";
 import {
   ExecutionTag,
