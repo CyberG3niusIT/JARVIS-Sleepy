@@ -28,9 +28,9 @@ import {
  *
  * Titles, descriptions and order come from the locked Phase 4 information
  * architecture, states come from comparisonBaseline and the capability audit.
- * Nothing is measured: no telemetry, no counters, no health score. Detail
- * pages do not exist yet, so the destination rows stay informational and
- * deliberately carry no chevron and no dead tap target.
+ * Nothing is measured: no telemetry, no counters, no health score. Only
+ * destinations with a real detail screen are tappable, every other row stays
+ * informational without a chevron and without a dead tap target.
  *
  * Compose mapping: SystemScreen(state: SystemUiState), SystemAreaRow.
  */
