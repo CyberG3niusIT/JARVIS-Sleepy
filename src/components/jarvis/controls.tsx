@@ -271,7 +271,7 @@ export function BottomSheet({
             type="button"
             aria-label="Schließen"
             onClick={onClose}
-            className="j-pressable flex size-10 items-center justify-center rounded-sm"
+            className="j-pressable flex size-12 items-center justify-center rounded-sm"
           >
             <X className="size-4 text-muted-foreground" aria-hidden />
           </button>
@@ -297,10 +297,7 @@ export function Dialog({
 }) {
   useEscape(open, onClose);
   const { mounted, closing } = usePresence(open, duration.fast);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (open) ref.current?.focus();
-  }, [open]);
+  const ref = useModalFocus(open && mounted);
   if (!mounted) return null;
   return (
     <>
