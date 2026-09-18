@@ -182,7 +182,7 @@ export function ChatScreen() {
     const stamp = Date.now();
     const sent = attachments;
     const note = sent.length > 0
-      ? `Datei angehängt. Analyse ist erst nach Runtime-Anbindung verfügbar. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}.`
+      ? `${sent.length === 1 ? "1 Datei angehängt" : `${sent.length} Dateien angehängt`}. Analyse ist erst nach Runtime-Anbindung verfügbar. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}.`
       : `Keine Antwort erzeugt. ${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}. Der Prototyp übernimmt die Eingabe nur als Entwurfszustand.`;
     setMessages((prev) => [
       ...prev,
