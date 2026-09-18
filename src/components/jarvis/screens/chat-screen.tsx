@@ -138,11 +138,16 @@ export function ChatScreen() {
         rejected.push(file.name);
         return;
       }
+      let previewUrl: string | undefined;
+      if (kind === "image") {
+        previewUrl = URL.createObjectURL(file);
+        previewUrls.current.add(previewUrl);
+      }
       accepted.push({
         id: `a-${Date.now()}-${i}`,
         kind,
         name: file.name,
-        ...(kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
+        ...(previewUrl ? { previewUrl } : {}),
       });
     });
     if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
