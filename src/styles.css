@@ -416,6 +416,10 @@
   .j-value-change {
     animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
   }
+  .j-section-enter {
+    animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
+    animation-delay: 0ms;
+  }
   .j-sheet-enter,
   .j-dialog-enter {
     animation: j-fade-in var(--j-duration-fast) var(--j-ease-standard) both;
