@@ -89,18 +89,21 @@ function ShellPrototypes() {
               Freigegebene UI/UX-Baseline, keine Runtime-Anbindung
             </p>
           </div>
-          <nav className="flex items-center gap-4">
-            <Link to="/design-system" className="text-[12px] text-primary">
+          <nav className="flex items-center gap-2">
+            <Link
+              to="/design-system"
+              className="flex min-h-[48px] items-center px-2 text-[12px] text-primary"
+            >
               Designsystem
             </Link>
-            <Link to="/" className="text-[12px] text-primary">
+            <Link to="/" className="flex min-h-[48px] items-center px-2 text-[12px] text-primary">
               Grundlagen
             </Link>
           </nav>
         </div>
       </header>
 
-      <main className="mx-auto flex max-w-4xl flex-col items-center gap-6 px-6 py-8 pb-28">
+      <main className="mx-auto flex max-w-4xl flex-col items-center gap-6 px-4 py-8 sm:px-6">
         <p className="max-w-prose text-center text-[12px] leading-5 text-muted-foreground">
           {variant.axis}
         </p>
