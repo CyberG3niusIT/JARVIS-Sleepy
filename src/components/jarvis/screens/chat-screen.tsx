@@ -106,6 +106,24 @@ export function ChatScreen() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  /**
+   * Lifecycle of local preview URLs. A sent attachment keeps its URL, because
+   * the message still renders it, so revoking happens on reset and on unmount.
+   */
+  const previewUrls = useRef<Set<string>>(new Set());
+
+  const revokePreview = (url?: string) => {
+    if (!url || !previewUrls.current.has(url)) return;
+    previewUrls.current.delete(url);
+    URL.revokeObjectURL(url);
+  };
+
+  const revokeAllPreviews = () => {
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls.current.clear();
+  };
+
+  useEffect(() => () => revokeAllPreviews(), []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
