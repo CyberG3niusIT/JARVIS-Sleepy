@@ -71,8 +71,8 @@ export function DiagnosticsScreen({ onBack }: SystemDetailProps) {
         {executionHistory.length === 0 ? (
           <div className="px-4">
             <EmptyState
-              title="Keine Runtime-Daten"
-              body="Spätere Einträge werden lokal gespeichert und dort redigiert, wo es erforderlich ist. Im Entwurfszustand gibt es keine Historie."
+              title="Keine Historiendaten angebunden"
+              body="Spätere Einträge werden lokal gespeichert und dort redigiert, wo es erforderlich ist. Im Entwurfszustand ist keine Historienquelle angebunden."
             />
           </div>
         ) : (
