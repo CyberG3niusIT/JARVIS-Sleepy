@@ -77,10 +77,34 @@
   --j-error: #e06464;
   --j-disabled: #59636c;
 
-  /* Motion — 120…240 ms, state-communicating only (Brand Spec §22) */
-  --j-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* ---- Motion tokens (locked, see src/lib/jarvis/tokens.ts) ---- */
+  --j-duration-instant: 80ms;
   --j-duration-fast: 120ms;
-  --j-duration-base: 200ms;
+  --j-duration-standard: 180ms;
+  --j-duration-deliberate: 240ms;
+  --j-duration-sheet: 280ms;
+
+  --j-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --j-ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --j-ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --j-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --j-ease: var(--j-ease-standard);
+  --j-duration-base: var(--j-duration-standard);
+
+  /* ---- Layer order ---- */
+  --j-z-runtime-strip: 10;
+  --j-z-bottom-nav: 20;
+  --j-z-scrim: 30;
+  --j-z-sheet: 40;
+  --j-z-dialog: 50;
+
+  /* ---- Elevation: hairlines carry separation, shadows only for overlays ---- */
+  --j-elevation-raised: 0 -8px 24px -12px rgba(0, 0, 0, 0.7);
+  --j-elevation-overlay: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+
+  /* ---- Safe area (real insets on device, frame stand-ins in the harness) ---- */
+  --j-safe-top: env(safe-area-inset-top, 0px);
+  --j-safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .dark {
