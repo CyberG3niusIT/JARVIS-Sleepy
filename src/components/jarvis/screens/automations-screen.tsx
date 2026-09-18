@@ -1,25 +1,32 @@
 import { useState } from "react";
 import { ScrollBody } from "@/components/prototype/phone-frame";
-import { ListGroup, ListRow, SectionHeader } from "@/components/jarvis/primitives";
+import { ExecutionTag, ListGroup, ListRow, SectionHeader, StatusTag } from "@/components/jarvis/primitives";
 import { BottomSheet, Button, EmptyState, InlineNotice } from "@/components/jarvis/controls";
-import { SectionEnter } from "@/components/jarvis/motion";
+import { ScreenTransition, SectionEnter } from "@/components/jarvis/motion";
 import {
   DesignStateNote,
   DetailHeader,
   MORE_BACK_LABEL,
   type DetailScreenProps,
 } from "@/components/jarvis/screens/detail-header";
+import { DEMO_AREA_NOTE, DESIGN_STATE_ACTION, useActionResult, ActionResult } from "@/components/jarvis/prototype-state";
+import {
+  AutomationEditor,
+  createEmptyDraft,
+  type AutomationDraft,
+} from "@/components/jarvis/screens/automation-editor";
 import type { ExecutionLocation, PrivacyMode, SystemState } from "@/lib/jarvis/ia";
 
 /**
  * Automationen: explicit, bounded local routines.
  *
  * The Android foundation carries background scheduling, but no automation
- * inventory is bound here. Nothing is created, scheduled or stored by this
- * screen; the type chooser only explains the target flow.
+ * inventory is bound here. The editor below only edits a local, in-memory
+ * prototype list held by this screen; nothing is created, scheduled or
+ * stored on a device by this screen.
  *
  * Compose mapping: AutomationsScreen(state, onBack), AutomationListItem,
- * NewAutomationSheet.
+ * NewAutomationSheet, AutomationEditorScreen.
  */
 
 /* --------------------------- Future data contract ------------------------ */
@@ -80,106 +87,171 @@ const executionRules: { title: string; detail: string }[] = [
   },
 ];
 
+function draftSummary(draft: AutomationDraft): string {
+  if (draft.type === "schedule") {
+    return draft.scheduleMode === "datetime"
+      ? draft.scheduleDateTime || "Kein Zeitpunkt festgelegt"
+      : draft.scheduleInterval
+        ? `Alle ${draft.scheduleInterval}`
+        : "Kein Intervall festgelegt";
+  }
+  if (draft.type === "routine") {
+    return draft.conditions.length > 0
+      ? `${draft.conditions.length} Bedingung(en), ${draft.conditionLogic}`
+      : "Keine Bedingung festgelegt";
+  }
+  return draft.steps.length > 0 ? `${draft.steps.length} Aktion(en)` : "Keine Aktion festgelegt";
+}
+
 export function AutomationsScreen({ onBack }: DetailScreenProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [choice, setChoice] = useState<AutomationType | null>(null);
   /**
-   * No automation source is bound in this phase. The empty list describes the
-   * missing binding, not a verified absence on a real device.
+   * Local prototype list, held only in this component's React state. It is
+   * editor state produced inside this UI, not device data or a bound
+   * automation inventory.
    */
-  const automations: AutomationEntry[] = [];
+  const [automations, setAutomations] = useState<AutomationDraft[]>([]);
+  const [editor, setEditor] = useState<
+    { mode: "create" | "edit"; draft: AutomationDraft } | null
+  >(null);
+  const { message, report } = useActionResult();
 
   const closeSheet = () => {
     setSheetOpen(false);
     setChoice(null);
   };
 
+  const openCreateEditor = (type: AutomationType) => {
+    setSheetOpen(false);
+    setChoice(null);
+    setEditor({ mode: "create", draft: createEmptyDraft(type) });
+  };
+
+  const openEditEditor = (draft: AutomationDraft) => {
+    setEditor({ mode: "edit", draft });
+  };
+
+  const handleSave = (draft: AutomationDraft) => {
+    setAutomations((list) => {
+      const exists = list.some((a) => a.id === draft.id);
+      return exists ? list.map((a) => (a.id === draft.id ? draft : a)) : [...list, draft];
+    });
+    setEditor((current) => (current ? { ...current, mode: "edit", draft } : current));
+  };
+
+  const handleDelete = () => {
+    if (!editor) return;
+    setAutomations((list) => list.filter((a) => a.id !== editor.draft.id));
+    setEditor(null);
+    report(`Automation lokal entfernt. ${DESIGN_STATE_ACTION}`);
+  };
+
   return (
-    <>
-      <ScrollBody>
-        <SectionEnter index={0}>
-          <DetailHeader
-            title="Automationen"
-            subtitle="Makros, Zeitpläne und Routinen"
-            onBack={onBack}
-            backLabel={MORE_BACK_LABEL}
+    <ScreenTransition
+      transitionKey={editor ? "editor" : "overview"}
+      direction={editor ? "forward" : "back"}
+      className="min-h-full"
+    >
+      {editor ? (
+        <AutomationEditor
+          mode={editor.mode}
+          initial={editor.draft}
+          onSave={handleSave}
+          {...(editor.mode === "edit" ? { onDelete: handleDelete } : {})}
+          onClose={() => setEditor(null)}
+        />
+      ) : (
+        <>
+          <ScrollBody>
+            <SectionEnter index={0}>
+              <DetailHeader
+                title="Automationen"
+                subtitle="Makros, Zeitpläne und Routinen"
+                onBack={onBack}
+                backLabel={MORE_BACK_LABEL}
+              />
+            </SectionEnter>
+
+            <SectionEnter index={1}>
+              <SectionHeader>Automationen</SectionHeader>
+              {automations.length === 0 ? (
+                <div className="px-4">
+                  <EmptyState
+                    title="Keine Automationsdaten angebunden"
+                    body="Die Automationsverwaltung ist im Entwurfszustand noch nicht an eine Runtime gebunden. Der Editor unten legt Einträge nur lokal in dieser Sitzung an."
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="px-4 pb-2">
+                    <InlineNotice tone="info">{DEMO_AREA_NOTE} Liste unten ist lokaler Editor-Zustand.</InlineNotice>
+                  </div>
+                  <ListGroup>
+                    {automations.map((a) => (
+                      <ListRow
+                        key={a.id}
+                        title={a.name || "Ohne Namen"}
+                        subtitle={`${automationTypeLabel[a.type]}, ${draftSummary(a)}`}
+                        leading={<StatusTag state={a.enabled ? "ready" : "offline"} label={a.enabled ? "Aktiviert" : "Deaktiviert"} />}
+                        trailing={<ExecutionTag where={a.runtime} />}
+                        chevron
+                        onClick={() => openEditEditor(a)}
+                      />
+                    ))}
+                  </ListGroup>
+                </>
+              )}
+              <div className="px-4 pt-3">
+                <Button variant="primary" full onClick={() => setSheetOpen(true)}>
+                  Neue Automation
+                </Button>
+              </div>
+              <ActionResult message={message} />
+            </SectionEnter>
+
+            <SectionEnter index={2}>
+              <SectionHeader>Typen</SectionHeader>
+              <ListGroup>
+                {typeRows.map((t) => (
+                  <ListRow
+                    key={t.type}
+                    title={automationTypeLabel[t.type]}
+                    subtitle={t.detail}
+                  />
+                ))}
+              </ListGroup>
+            </SectionEnter>
+
+            <SectionEnter index={3}>
+              <SectionHeader>Ausführungsregeln</SectionHeader>
+              <ListGroup>
+                {executionRules.map((r) => (
+                  <ListRow key={r.title} title={r.title} subtitle={r.detail} />
+                ))}
+              </ListGroup>
+            </SectionEnter>
+
+            <SectionEnter index={4}>
+              <DesignStateNote />
+            </SectionEnter>
+          </ScrollBody>
+
+          <NewAutomationSheet
+            open={sheetOpen}
+            choice={choice}
+            onSelect={setChoice}
+            onBackToChoice={() => setChoice(null)}
+            onClose={closeSheet}
+            onOpenEditor={openCreateEditor}
           />
-        </SectionEnter>
-
-        <SectionEnter index={1}>
-          <SectionHeader>Automationen</SectionHeader>
-          {automations.length === 0 ? (
-            <div className="px-4">
-              <EmptyState
-                title="Keine Automationsdaten angebunden"
-                body="Die Automationsverwaltung ist im Entwurfszustand noch nicht an eine Runtime gebunden. Makros, Zeitpläne und Routinen werden später hier verwaltet."
-              />
-            </div>
-          ) : (
-            <ListGroup>
-              {automations.map((a) => (
-                <ListRow
-                  key={a.id}
-                  title={a.name}
-                  subtitle={automationTypeLabel[a.type]}
-                />
-              ))}
-            </ListGroup>
-          )}
-          <div className="px-4 pt-3">
-            <Button variant="primary" full onClick={() => setSheetOpen(true)}>
-              Neue Automation
-            </Button>
-          </div>
-        </SectionEnter>
-
-        <SectionEnter index={2}>
-          <SectionHeader>Typen</SectionHeader>
-          <ListGroup>
-            {typeRows.map((t) => (
-              <ListRow
-                key={t.type}
-                title={automationTypeLabel[t.type]}
-                subtitle={t.detail}
-              />
-            ))}
-          </ListGroup>
-        </SectionEnter>
-
-        <SectionEnter index={3}>
-          <SectionHeader>Ausführungsregeln</SectionHeader>
-          <ListGroup>
-            {executionRules.map((r) => (
-              <ListRow key={r.title} title={r.title} subtitle={r.detail} />
-            ))}
-          </ListGroup>
-        </SectionEnter>
-
-        <SectionEnter index={4}>
-          <DesignStateNote />
-        </SectionEnter>
-      </ScrollBody>
-
-      <NewAutomationSheet
-        open={sheetOpen}
-        choice={choice}
-        onSelect={setChoice}
-        onBackToChoice={() => setChoice(null)}
-        onClose={closeSheet}
-      />
-    </>
+        </>
+      )}
+    </ScreenTransition>
   );
 }
 
 /* ---------------------------- New automation ----------------------------- */
-
-const choiceCopy: Record<AutomationType, string> = {
-  macro: "Editor noch nicht angebunden. Aktionen, Reihenfolge und Grenzen eines Makros werden später hier festgelegt.",
-  schedule:
-    "Editor noch nicht angebunden. Zeitpunkt, Intervall und Ausführungsbedingungen werden später hier festgelegt.",
-  routine:
-    "Editor noch nicht angebunden. Bedingungen, Schritte und Grenzen einer Routine werden später hier festgelegt.",
-};
 
 function NewAutomationSheet({
   open,
@@ -187,12 +259,14 @@ function NewAutomationSheet({
   onSelect,
   onBackToChoice,
   onClose,
+  onOpenEditor,
 }: {
   open: boolean;
   choice: AutomationType | null;
   onSelect: (next: AutomationType) => void;
   onBackToChoice: () => void;
   onClose: () => void;
+  onOpenEditor: (type: AutomationType) => void;
 }) {
   return (
     <BottomSheet
@@ -202,10 +276,15 @@ function NewAutomationSheet({
     >
       {choice ? (
         <div className="flex flex-col gap-3 px-4 pt-3">
-          <InlineNotice tone="info">{choiceCopy[choice]}</InlineNotice>
+          <InlineNotice tone="info">
+            Der Editor legt diese Automation nur lokal in dieser Sitzung an, ohne Android-Scheduler
+            und ohne Runtime-Bindung.
+          </InlineNotice>
           <div className="flex gap-2">
             <Button onClick={onBackToChoice}>Zurück</Button>
-            <Button onClick={onClose}>Schließen</Button>
+            <Button variant="primary" full onClick={() => onOpenEditor(choice)}>
+              Editor öffnen
+            </Button>
           </div>
         </div>
       ) : (
