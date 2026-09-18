@@ -21,7 +21,7 @@ import {
   SettingsList,
 } from "@/components/jarvis/blocks";
 import { ListGroup, ListRow, PrivacyTag, SectionHeader, StatusTag } from "@/components/jarvis/primitives";
-import { productAreas } from "@/lib/jarvis/ia";
+import { moreDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
@@ -144,7 +144,7 @@ function SystemScreen() {
 }
 
 function MoreScreen() {
-  const secondary = productAreas.filter((a) => a.tier === "secondary");
+  const secondary = moreDestinations;
   return (
     <ScrollBody>
       <SectionHeader>Bereiche</SectionHeader>
