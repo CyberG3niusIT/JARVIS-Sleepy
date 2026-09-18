@@ -518,9 +518,11 @@ function ChatComposer({
       ) : null}
 
       <span className="sr-only" aria-live="polite">
-        {attachments.length > 0
-          ? `${attachments.length} Anhang bzw. Anhänge ausgewählt`
-          : "Keine Anhänge ausgewählt"}
+        {attachments.length === 0
+          ? "Keine Anhänge ausgewählt"
+          : attachments.length === 1
+            ? "1 Anhang ausgewählt"
+            : `${attachments.length} Anhänge ausgewählt`}
       </span>
 
       <div className="flex items-end gap-2 px-3 py-2">
