@@ -13,6 +13,11 @@ import {
   type SystemDetailProps,
 } from "@/components/jarvis/screens/detail-header";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
+import {
+  HandoffReviewSection,
+  SleepyPairingSection,
+  TrustInspectionSection,
+} from "@/components/jarvis/screens/runtimes-demo";
 
 /**
  * Runtimes: trusted execution locations, not remote monitoring.
@@ -103,7 +108,11 @@ export function RuntimesScreen({ onBack }: SystemDetailProps) {
         </p>
       </SectionEnter>
 
-      <SectionEnter index={5}>
+      <SleepyPairingSection />
+      <TrustInspectionSection />
+      <HandoffReviewSection />
+
+      <SectionEnter index={9}>
         <DesignStateNote />
       </SectionEnter>
     </ScrollBody>
