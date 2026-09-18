@@ -32,12 +32,17 @@ const tabs: NavItem<TabId>[] = [
 
 export function VariantD() {
   const [tab, setTab] = useState<TabId>("start");
-  const [focusSettings, setFocusSettings] = useState(false);
+  /**
+   * Counter instead of a flag: every gear tap raises it, so Einstellungen also
+   * opens when the Mehr tab is already active. Leaving Mehr resets it, so a
+   * later return starts on the Mehr overview.
+   */
+  const [settingsIntent, setSettingsIntent] = useState(0);
   const index = tabs.findIndex((t) => t.id === tab);
   const direction = useDirection(index);
 
   const selectTab = (next: TabId) => {
-    setFocusSettings(false);
+    setSettingsIntent(0);
     setTab(next);
   };
 
@@ -45,7 +50,7 @@ export function VariantD() {
     <div className="flex h-full flex-col">
       <TopAppBar
         onSettings={() => {
-          setFocusSettings(true);
+          setSettingsIntent((n) => n + 1);
           setTab("more");
         }}
       />
@@ -68,7 +73,7 @@ export function VariantD() {
           ) : null}
           {tab === "chat" ? <ChatScreen /> : null}
           {tab === "system" ? <SystemScreen /> : null}
-          {tab === "more" ? <MoreScreen focusSettings={focusSettings} /> : null}
+          {tab === "more" ? <MoreScreen settingsIntent={settingsIntent} /> : null}
         </ScreenTransition>
       </div>
 
