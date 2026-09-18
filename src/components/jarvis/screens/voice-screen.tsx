@@ -28,7 +28,7 @@ export function VoiceScreen({ onBack }: DetailScreenProps) {
       <SectionEnter index={0}>
         <DetailHeader
           title="Voice"
-          subtitle="Sprachein- und ausgabe"
+          subtitle="Spracheingabe und Sprachausgabe"
           onBack={onBack}
           backLabel={MORE_BACK_LABEL}
         />
