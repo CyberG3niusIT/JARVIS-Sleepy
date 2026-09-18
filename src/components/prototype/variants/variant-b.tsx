@@ -98,7 +98,7 @@ export function VariantB() {
       {/* Docked composer: chat is reachable from every screen. */}
       <div style={{ paddingBottom: GESTURE_BAR }} className="shrink-0 bg-background">
         <Composer
-          hint={screen === "chat" ? "Lokal fragen" : "Lokal fragen — Chat öffnen"}
+          hint={screen === "chat" ? "Lokal fragen" : "Lokal fragen, Chat öffnen"}
           fieldLabel="Chat öffnen"
           onFocusField={() => setScreen("chat")}
         />

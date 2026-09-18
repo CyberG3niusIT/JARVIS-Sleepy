@@ -63,7 +63,7 @@ export function VariantC() {
         className="absolute inset-x-0 z-10"
         style={{ bottom: 44 + GESTURE_BAR }}
       >
-        <Composer hint="Lokal fragen — Antwort bleibt auf dem Gerät" />
+        <Composer hint="Lokal fragen, Antwort bleibt auf dem Gerät" />
       </div>
 
       <SystemSheet

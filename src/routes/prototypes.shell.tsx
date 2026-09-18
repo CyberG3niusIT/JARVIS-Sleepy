@@ -9,13 +9,13 @@ import { VariantC } from "@/components/prototype/variants/variant-c";
 export const Route = createFileRoute("/prototypes/shell")({
   head: () => ({
     meta: [
-      { title: "Shell-Prototypen — J.A.R.V.I.S Mobile" },
+      { title: "Shell-Prototypen: J.A.R.V.I.S Mobile" },
       {
         name: "description",
         content:
           "Drei Android-Shell- und Navigationsvarianten für J.A.R.V.I.S Mobile: Systemleiste, Konsole, Konversation + Systemblatt.",
       },
-      { property: "og:title", content: "Shell-Prototypen — J.A.R.V.I.S Mobile" },
+      { property: "og:title", content: "Shell-Prototypen: J.A.R.V.I.S Mobile" },
       {
         property: "og:description",
         content: "Navigationsvergleich für den lokalen Android-Runtime-Shell von J.A.R.V.I.S.",

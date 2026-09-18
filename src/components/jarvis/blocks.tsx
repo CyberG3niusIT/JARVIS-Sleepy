@@ -215,7 +215,7 @@ export function SettingsList() {
       <ListRow title="Speicher & Modelle" trailing={<StatusTag state="design_state" />} chevron onClick={() => {}} />
       <ListRow title="Hintergrunddienst" trailing={<StatusTag state="design_state" />} chevron onClick={() => {}} />
       <ListRow title="Logs & Diagnose" subtitle="Redigiert, lokal" chevron onClick={() => {}} />
-      <ListRow title="Über J.A.R.V.I.S" subtitle="Prototyp — Phase 1" chevron onClick={() => {}} />
+      <ListRow title="Über J.A.R.V.I.S" subtitle="Prototyp, Phase 1" chevron onClick={() => {}} />
     </ListGroup>
   );
 }
