@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { ScrollBody } from "@/components/prototype/phone-frame";
+import { ModelsScreen } from "@/components/jarvis/screens/models-screen";
 import { PrivacyBlock, RoutingLadderBlock } from "@/components/jarvis/blocks";
 import {
   ExecutionTag,
@@ -8,7 +10,7 @@ import {
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
-import { SectionEnter, ValueTransition } from "@/components/jarvis/motion";
+import { ScreenTransition, SectionEnter, ValueTransition } from "@/components/jarvis/motion";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import {
   stateLabel,
@@ -26,9 +28,9 @@ import {
  *
  * Titles, descriptions and order come from the locked Phase 4 information
  * architecture, states come from comparisonBaseline and the capability audit.
- * Nothing is measured: no telemetry, no counters, no health score. Detail
- * pages do not exist yet, so the destination rows stay informational and
- * deliberately carry no chevron and no dead tap target.
+ * Nothing is measured: no telemetry, no counters, no health score. Only
+ * destinations with a real detail screen are tappable, every other row stays
+ * informational without a chevron and without a dead tap target.
  *
  * Compose mapping: SystemScreen(state: SystemUiState), SystemAreaRow.
  */
@@ -54,7 +56,37 @@ const areaDisplayState: Partial<Record<AreaId, SystemState>> = {
   runtimes: "design_state",
 };
 
+/**
+ * Destinations with a real detail screen. Every other row stays informational,
+ * so no row pretends to navigate. Extending this list is the only step needed
+ * once Agenten, Tools, Berechtigungen, Privacy, Runtimes, Gerät or Logs follow.
+ */
+const navigableAreas: AreaId[] = ["models"];
+
+/**
+ * System tab container: control-center overview plus its detail screens.
+ * The bottom navigation keeps System selected while a detail is open, and back
+ * returns to the overview with the opposite direction.
+ */
 export function SystemScreen() {
+  const [detail, setDetail] = useState<AreaId | null>(null);
+
+  return (
+    <ScreenTransition
+      transitionKey={detail ?? "overview"}
+      direction={detail ? "forward" : "back"}
+      className="min-h-full"
+    >
+      {detail === "models" ? (
+        <ModelsScreen onBack={() => setDetail(null)} />
+      ) : (
+        <SystemOverview onOpenArea={setDetail} />
+      )}
+    </ScreenTransition>
+  );
+}
+
+function SystemOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) {
   return (
     <ScrollBody>
       <SectionEnter index={0}>
@@ -108,6 +140,7 @@ export function SystemScreen() {
         <ListGroup>
           {systemDestinations.map((area) => {
             const display = areaDisplayState[area.id] ?? area.state;
+            const navigable = navigableAreas.includes(area.id);
             return (
               <ListRow
                 key={area.id}
@@ -120,13 +153,15 @@ export function SystemScreen() {
                     dot={false}
                   />
                 }
+                chevron={navigable}
+                {...(navigable ? { onClick: () => onOpenArea(area.id) } : {})}
               />
             );
           })}
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
           Teile der Tools und Android-Aktionen hängen von freigegebenen Berechtigungen
-          ab. Detailansichten sind in dieser Phase noch nicht geöffnet.
+          ab. In dieser Phase ist nur „Modelle“ als Detailansicht geöffnet.
         </p>
       </SectionEnter>
 
