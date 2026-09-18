@@ -179,12 +179,25 @@ function Turn({
   );
 }
 
-export function Composer({ hint = "Lokal fragen oder Aktion nennen" }: { hint?: string }) {
+export function Composer({
+  hint = "Lokal fragen oder Aktion nennen",
+  onFocusField,
+  fieldLabel,
+}: {
+  hint?: string;
+  onFocusField?: () => void;
+  fieldLabel?: string;
+}) {
   return (
     <div className="flex items-center gap-2 border-t border-border-soft bg-surface px-3 py-2">
-      <div className="touch-row flex flex-1 items-center rounded-sm border border-border px-3 text-[13px] text-muted-foreground">
+      <button
+        type="button"
+        onClick={onFocusField}
+        aria-label={fieldLabel}
+        className="touch-row flex flex-1 items-center rounded-sm border border-border px-3 text-left text-[13px] text-muted-foreground"
+      >
         {hint}
-      </div>
+      </button>
       <button
         type="button"
         className="touch-row flex min-w-12 items-center justify-center rounded-sm border border-primary/50 px-3 text-[12px] text-primary"
