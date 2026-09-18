@@ -43,8 +43,9 @@ export function Button({
       onClick={onClick}
       data-filled={variant === "primary" && !disabled ? "true" : undefined}
       className={cn(
-        "j-pressable inline-flex min-h-12 items-center justify-center rounded-sm border px-4 text-[13px] leading-5",
-        buttonVariant[variant],
+        "inline-flex min-h-12 items-center justify-center rounded-sm border px-4 text-[13px] leading-5",
+        !disabled && "j-pressable",
+        disabled ? "bg-transparent" : buttonVariant[variant],
         full && "w-full",
         disabled && "border-border-soft text-disabled",
         className,

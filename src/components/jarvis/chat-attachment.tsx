@@ -29,7 +29,7 @@ export interface ChatAttachment {
 }
 
 /** Accepted input types. Office documents and audio are deliberately excluded. */
-export const attachmentAccept = "image/*,application/pdf";
+export const attachmentAccept = "image/*,.pdf,application/pdf";
 
 export function classifyAttachment(file: File): ChatAttachmentKind | null {
   if (file.type.startsWith("image/")) return "image";
