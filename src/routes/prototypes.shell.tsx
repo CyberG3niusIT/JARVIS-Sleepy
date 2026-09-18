@@ -5,6 +5,7 @@ import { PhoneFrame } from "@/components/prototype/phone-frame";
 import { VariantA } from "@/components/prototype/variants/variant-a";
 import { VariantB } from "@/components/prototype/variants/variant-b";
 import { VariantC } from "@/components/prototype/variants/variant-c";
+import { VariantD } from "@/components/prototype/variants/variant-d";
 
 export const Route = createFileRoute("/prototypes/shell")({
   head: () => ({
@@ -45,6 +46,12 @@ const variants = [
     caption: "Variante C · Chat-Root + Systemblatt · 393 × 852 dp",
     axis: "Chat ist die Wurzel; das gesamte System liegt in einem ausklappbaren Bottom Sheet.",
     render: () => <VariantC />,
+  },
+  {
+    name: "Systemleiste + Runtime",
+    caption: "Variante D · Bottom Navigation + Runtime-Leiste · 393 × 852 dp",
+    axis: "Konsolidierter Kandidat: Tableiste aus A, persistente Runtime-Leiste aus B, Composer nur im Chat.",
+    render: () => <VariantD />,
   },
 ];
 
