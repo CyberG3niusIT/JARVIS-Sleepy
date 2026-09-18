@@ -184,8 +184,8 @@ export function ModelsScreen({ onBack }: ModelsScreenProps) {
           {localModels.length === 0 ? (
             <div className="px-4">
               <EmptyState
-                title="Keine lokalen Modelle"
-                body="Auf diesem Gerät ist keine Modelldatei registriert. Ein Modell kann lokal importiert oder aus dem Katalog geladen werden."
+                title="Keine Modelldaten verfügbar"
+                body="Die lokale Modellregistrierung ist im Prototyp noch nicht an eine Runtime gebunden. Modelle können später lokal importiert oder über den Modellkatalog verwaltet werden."
               />
             </div>
           ) : (
