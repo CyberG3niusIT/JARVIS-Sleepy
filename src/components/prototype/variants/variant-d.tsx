@@ -1,22 +1,10 @@
 import { useState } from "react";
-import {
-  Home,
-  MessageSquare,
-  LayoutGrid,
-  MoreHorizontal,
-  ShieldCheck,
-} from "lucide-react";
-import { GESTURE_BAR, ScrollBody } from "@/components/prototype/phone-frame";
-import { SettingsList } from "@/components/jarvis/blocks";
+import { Home, MessageSquare, LayoutGrid, MoreHorizontal } from "lucide-react";
+import { GESTURE_BAR } from "@/components/prototype/phone-frame";
 import { StartScreen } from "@/components/jarvis/screens/start-screen";
 import { ChatScreen } from "@/components/jarvis/screens/chat-screen";
 import { SystemScreen } from "@/components/jarvis/screens/system-screen";
-import {
-  ListGroup,
-  ListRow,
-  SectionHeader,
-  StatusTag,
-} from "@/components/jarvis/primitives";
+import { MoreScreen } from "@/components/jarvis/screens/more-screen";
 import {
   BottomNav,
   RuntimeStrip,
@@ -24,7 +12,6 @@ import {
   type NavItem,
 } from "@/components/jarvis/shell";
 import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
-import { moreDestinations } from "@/lib/jarvis/ia";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 
 /**
@@ -45,12 +32,17 @@ const tabs: NavItem<TabId>[] = [
 
 export function VariantD() {
   const [tab, setTab] = useState<TabId>("start");
-  const [focusSettings, setFocusSettings] = useState(false);
+  /**
+   * Counter instead of a flag: every gear tap raises it, so Einstellungen also
+   * opens when the Mehr tab is already active. Leaving Mehr resets it, so a
+   * later return starts on the Mehr overview.
+   */
+  const [settingsIntent, setSettingsIntent] = useState(0);
   const index = tabs.findIndex((t) => t.id === tab);
   const direction = useDirection(index);
 
   const selectTab = (next: TabId) => {
-    setFocusSettings(false);
+    setSettingsIntent(0);
     setTab(next);
   };
 
@@ -58,7 +50,7 @@ export function VariantD() {
     <div className="flex h-full flex-col">
       <TopAppBar
         onSettings={() => {
-          setFocusSettings(true);
+          setSettingsIntent((n) => n + 1);
           setTab("more");
         }}
       />
@@ -81,52 +73,11 @@ export function VariantD() {
           ) : null}
           {tab === "chat" ? <ChatScreen /> : null}
           {tab === "system" ? <SystemScreen /> : null}
-          {tab === "more" ? <MoreScreen focusSettings={focusSettings} /> : null}
+          {tab === "more" ? <MoreScreen settingsIntent={settingsIntent} /> : null}
         </ScreenTransition>
       </div>
 
       <BottomNav items={tabs} current={tab} onSelect={selectTab} safeBottom={GESTURE_BAR} />
     </div>
-  );
-}
-
-
-/** Mehr: sekundäre Nutzerbereiche und Produkteinstellungen, feste Reihenfolge. */
-function MoreScreen({ focusSettings = false }: { focusSettings?: boolean }) {
-  const areaList = (
-    <>
-      <SectionHeader>Bereiche</SectionHeader>
-      <ListGroup>
-        {moreDestinations.map((a) => (
-          <ListRow
-            key={a.id}
-            title={a.label}
-            subtitle={a.purpose}
-            trailing={<StatusTag state={a.state} dot={false} />}
-            selected={focusSettings && a.id === "settings"}
-            chevron
-            onClick={() => {}}
-          />
-        ))}
-      </ListGroup>
-    </>
-  );
-
-  const settingsBlock = (
-    <>
-      <SectionHeader>Einstellungen</SectionHeader>
-      <SettingsList />
-    </>
-  );
-
-  return (
-    <ScrollBody>
-      {focusSettings ? settingsBlock : null}
-      {areaList}
-      <div className="flex items-center gap-2 px-4 py-4 text-muted-foreground">
-        <ShieldCheck className="size-4" aria-hidden />
-        <span className="text-[11px]">Alle Bereiche laufen lokal, sofern nicht anders markiert.</span>
-      </div>
-    </ScrollBody>
   );
 }

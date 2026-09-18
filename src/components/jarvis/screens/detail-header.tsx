@@ -1,7 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 
 /**
- * Shared compact header for System detail screens.
+ * Shared compact header for detail screens under System and under Mehr.
  * Back affordance, title and one technical secondary line. No hero treatment.
  *
  * Compose mapping: JarvisDetailTopBar(title, subtitle, onBack).
@@ -35,10 +35,16 @@ export function DetailHeader({
   );
 }
 
-/** Every System detail screen takes the same back contract. */
-export interface SystemDetailProps {
+/** Every detail screen, under System and under Mehr, takes the same contract. */
+export interface DetailScreenProps {
   onBack: () => void;
 }
+
+/** Kept name for the System detail screens, same contract. */
+export type SystemDetailProps = DetailScreenProps;
+
+/** Back label for detail screens that live under the Mehr tab. */
+export const MORE_BACK_LABEL = "Zurück zu Mehr";
 
 /** Shared closing note: states come from the project base, not from telemetry. */
 export function DesignStateNote() {
