@@ -557,7 +557,9 @@ function ChatComposer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            const composing =
+              e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+            if (e.key === "Enter" && !e.shiftKey && !composing) {
               e.preventDefault();
               onSend();
             }
