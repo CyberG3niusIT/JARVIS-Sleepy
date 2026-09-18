@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -64,12 +64,19 @@ export function ValueTransition({
  */
 export function useDirection(index: number): "forward" | "back" | "none" {
   const previous = useRef(index);
-  const direction = useRef<"forward" | "back" | "none">("none");
+  const lastDirection = useRef<"forward" | "back" | "none">("none");
 
-  if (previous.current !== index) {
-    direction.current = index > previous.current ? "forward" : "back";
+  const direction =
+    index === previous.current
+      ? lastDirection.current
+      : index > previous.current
+        ? "forward"
+        : "back";
+
+  useEffect(() => {
     previous.current = index;
-  }
+    lastDirection.current = direction;
+  }, [index, direction]);
 
-  return direction.current;
+  return direction;
 }
