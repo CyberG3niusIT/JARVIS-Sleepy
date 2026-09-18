@@ -142,7 +142,7 @@ export function SectionHeader({
   );
 }
 
-/** Dense functional row — the core list unit. 48 dp minimum touch target. */
+/** Dense functional row - the core list unit. 48 dp minimum touch target. */
 export function ListRow({
   title,
   subtitle,
@@ -215,7 +215,7 @@ export function ListGroup({
 }
 
 /**
- * Explicit design-state placeholder. Used wherever a runtime value would be —
+ * Explicit design-state placeholder. Used wherever a runtime value would be -
  * never a fabricated number.
  */
 export function DesignStateBlock({
