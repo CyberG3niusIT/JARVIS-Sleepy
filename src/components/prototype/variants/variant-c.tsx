@@ -176,8 +176,6 @@ function SystemSheet({
                         key={a.id}
                         title={a.label}
                         trailing={<StatusTag state={a.state} dot={false} />}
-                        chevron
-                        onClick={() => {}}
                       />
                     ))}
                 </ListGroup>
