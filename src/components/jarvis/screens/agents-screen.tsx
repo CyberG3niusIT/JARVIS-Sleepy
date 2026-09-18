@@ -104,7 +104,7 @@ export function AgentListItem({
       subtitle={subtitle}
       trailing={<StatusTag state={agent.state} dot={false} />}
       chevron={!!onClick}
-      onClick={onClick}
+      {...(onClick ? { onClick } : {})}
     />
   );
 }
@@ -142,8 +142,6 @@ const demoAgent: AgentEntry = {
   timeoutSeconds: 90,
   approvedContext: ["Aktueller Chat-Verlauf", "Kalendereinträge der laufenden Woche"],
   expectedResult: "Liste mit drei Terminvorschlägen inklusive Begründung.",
-  lastResult: undefined,
-  errorReason: undefined,
   toolActivity: [
     { tool: "Kalenderlesezugriff", summary: "Verfügbare Zeitfenster der Woche gelesen." },
     { tool: "Textantwort verfassen", summary: "Entwurf für Terminvorschlag erstellt." },
@@ -160,18 +158,21 @@ export function AgentsScreen({ onBack }: SystemDetailProps) {
   const { message, report } = useActionResult();
 
   const cancelTask = () => {
-    setDemo((prev) => ({ ...prev, taskState: "cancelled", currentTask: prev.currentTask }));
+    setDemo((prev) => {
+      const next: AgentEntry = { ...prev, taskState: "cancelled" };
+      delete next.errorReason;
+      return next;
+    });
     report(`Demo-Aufgabe abgebrochen. ${DESIGN_STATE_ACTION}`);
   };
 
   const retryTask = () => {
-    setDemo((prev) => ({
-      ...prev,
-      taskState: "running",
-      currentStep: 1,
-      errorReason: undefined,
-      lastResult: undefined,
-    }));
+    setDemo((prev) => {
+      const next: AgentEntry = { ...prev, taskState: "running", currentStep: 1 };
+      delete next.errorReason;
+      delete next.lastResult;
+      return next;
+    });
     report(`Demo-Aufgabe erneut gestartet. ${DESIGN_STATE_ACTION}`);
   };
 
