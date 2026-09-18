@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ScrollBody } from "@/components/prototype/phone-frame";
 import { ModelsScreen } from "@/components/jarvis/screens/models-screen";
 import { AgentsScreen } from "@/components/jarvis/screens/agents-screen";
