@@ -52,7 +52,7 @@ export function VariantPicker({
   }, [current, names.length, onSelect]);
 
   return (
-    <nav className="proto-picker" aria-label="Prototype variants" ref={pickerRef}>
+    <nav className="proto-picker" aria-label="Prototypvarianten" ref={pickerRef}>
       <span
         className="proto-picker-highlight"
         aria-hidden="true"
