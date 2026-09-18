@@ -160,11 +160,20 @@ export function ChatScreen() {
 
   const removeAttachment = (id: string) => {
     setAttachments((prev) => {
-      const gone = prev.find((a) => a.id === id);
-      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      revokePreview(prev.find((a) => a.id === id)?.previewUrl);
       return prev.filter((a) => a.id !== id);
     });
     setAttachmentError(null);
+  };
+
+  const resetConversation = () => {
+    revokeAllPreviews();
+    setMessages([]);
+    setBaseCount(0);
+    setDraft("");
+    setAttachments([]);
+    setAttachmentError(null);
+    inputRef.current?.focus();
   };
 
   const send = () => {
