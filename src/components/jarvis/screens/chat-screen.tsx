@@ -562,7 +562,12 @@ function ChatComposer({
           }}
           placeholder="Lokal fragen oder Aktion nennen"
           style={{ height: COMPOSER_MIN_HEIGHT, maxHeight: COMPOSER_MAX_HEIGHT }}
-          className="flex-1 resize-none overflow-hidden rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground transition-[border-color,box-shadow] duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none"
+          className={cn(
+            "flex-1 resize-none overflow-hidden rounded-sm border border-border bg-surface px-3 py-3 leading-5 text-foreground duration-[var(--j-duration-fast)] ease-[var(--j-ease-standard)] outline-none placeholder:text-muted-foreground focus:border-primary/70 focus:shadow-[inset_0_0_0_1px_var(--color-primary)] motion-reduce:transition-none",
+            reducedMotion
+              ? "transition-[border-color,box-shadow]"
+              : "transition-[border-color,box-shadow,height]",
+          )}
         />
         <button
           type="button"
