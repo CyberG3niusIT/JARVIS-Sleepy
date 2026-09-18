@@ -4,12 +4,18 @@ import {
   ExecutionTag,
   ListGroup,
   ListRow,
+  PrivacyTag,
   SectionHeader,
   StatusTag,
 } from "@/components/jarvis/primitives";
 import { SectionEnter, ValueTransition } from "@/components/jarvis/motion";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
-import { stateLabel, systemDestinations, type AreaId } from "@/lib/jarvis/ia";
+import {
+  stateLabel,
+  systemDestinations,
+  type AreaId,
+  type SystemState,
+} from "@/lib/jarvis/ia";
 
 /**
  * System: technical control center of JARVIS Mobile (Phase 5, page 3).
@@ -39,6 +45,15 @@ const areaStatusLabel: Partial<Record<AreaId, string>> = {
   diagnostics: "Keine Runtime-Daten",
 };
 
+/**
+ * Display state for this overview only. Runtimes reports the unbound local
+ * runtime here, so tone and label match. The locked IA state and the fact that
+ * the Sleepy handoff is not implemented stay untouched.
+ */
+const areaDisplayState: Partial<Record<AreaId, SystemState>> = {
+  runtimes: "design_state",
+};
+
 export function SystemScreen() {
   return (
     <ScrollBody>
@@ -63,7 +78,7 @@ export function SystemScreen() {
             title="Privacy"
             trailing={
               <ValueTransition value={comparisonBaseline.privacyMode}>
-                <StatusTag state="design_state" label={comparisonBaseline.privacyMode} />
+                <PrivacyTag mode={comparisonBaseline.privacyMode} />
               </ValueTransition>
             }
           />
@@ -91,20 +106,23 @@ export function SystemScreen() {
       <SectionEnter index={2}>
         <SectionHeader>Kontrollbereiche</SectionHeader>
         <ListGroup>
-          {systemDestinations.map((area) => (
-            <ListRow
-              key={area.id}
-              title={area.label}
-              subtitle={area.purpose}
-              trailing={
-                <StatusTag
-                  state={area.state}
-                  label={areaStatusLabel[area.id] ?? stateLabel[area.state]}
-                  dot={false}
-                />
-              }
-            />
-          ))}
+          {systemDestinations.map((area) => {
+            const display = areaDisplayState[area.id] ?? area.state;
+            return (
+              <ListRow
+                key={area.id}
+                title={area.label}
+                subtitle={area.purpose}
+                trailing={
+                  <StatusTag
+                    state={display}
+                    label={areaStatusLabel[area.id] ?? stateLabel[display]}
+                    dot={false}
+                  />
+                }
+              />
+            );
+          })}
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
           Teile der Tools und Android-Aktionen hängen von freigegebenen Berechtigungen
