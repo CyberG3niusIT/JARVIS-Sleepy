@@ -213,7 +213,14 @@ function EmptyConversation({ onPick }: { onPick: (prompt: string) => void }) {
 
 /* ----------------------------- Messages ------------------------------ */
 
-function MessageItem({ message }: { message: ChatMessage }) {
+function MessageItem({
+  message,
+  onCancelTask,
+}: {
+  message: ChatMessage;
+  /** Required before a cancellable task state may render its control. */
+  onCancelTask?: () => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="ml-auto max-w-[78%] rounded-sm rounded-br-xs bg-surface-selected px-3 py-2">
