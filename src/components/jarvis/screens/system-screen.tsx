@@ -212,7 +212,7 @@ function SystemOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) 
         </ListGroup>
         <p className="px-4 pt-2 text-[11px] leading-4 text-muted-foreground">
           Teile der Tools und Android-Aktionen hängen von freigegebenen Berechtigungen
-          ab. Weitere Detailansichten sind noch nicht verfügbar.
+          ab.
         </p>
       </SectionEnter>
 
