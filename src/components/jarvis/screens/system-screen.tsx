@@ -156,7 +156,7 @@ export function SystemScreen() {
         </p>
       </SectionEnter>
 
-      <SectionEnter index={5}>
+      <SectionEnter index={6}>
         <p className="px-4 pt-5 pb-1 text-[11px] leading-4 text-muted-foreground">
           {stateLabel.design_state}. Angezeigte Zustände stammen aus der aktuellen
           Projektbasis, nicht aus gemessener Laufzeittelemetrie.
