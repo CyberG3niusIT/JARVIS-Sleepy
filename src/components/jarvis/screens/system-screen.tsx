@@ -56,7 +56,37 @@ const areaDisplayState: Partial<Record<AreaId, SystemState>> = {
   runtimes: "design_state",
 };
 
+/**
+ * Destinations with a real detail screen. Every other row stays informational,
+ * so no row pretends to navigate. Extending this list is the only step needed
+ * once Agenten, Tools, Berechtigungen, Privacy, Runtimes, Gerät or Logs follow.
+ */
+const navigableAreas: AreaId[] = ["models"];
+
+/**
+ * System tab container: control-center overview plus its detail screens.
+ * The bottom navigation keeps System selected while a detail is open, and back
+ * returns to the overview with the opposite direction.
+ */
 export function SystemScreen() {
+  const [detail, setDetail] = useState<AreaId | null>(null);
+
+  return (
+    <ScreenTransition
+      transitionKey={detail ?? "overview"}
+      direction={detail ? "forward" : "back"}
+      className="min-h-full"
+    >
+      {detail === "models" ? (
+        <ModelsScreen onBack={() => setDetail(null)} />
+      ) : (
+        <SystemOverview onOpenArea={setDetail} />
+      )}
+    </ScreenTransition>
+  );
+}
+
+function SystemOverview({ onOpenArea }: { onOpenArea: (area: AreaId) => void }) {
   return (
     <ScrollBody>
       <SectionEnter index={0}>
