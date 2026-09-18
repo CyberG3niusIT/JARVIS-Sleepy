@@ -40,6 +40,7 @@ import {
 import { BottomNav, RuntimeStrip, TopAppBar, type NavItem } from "@/components/jarvis/shell";
 import { ScreenTransition, useDirection } from "@/components/jarvis/motion";
 import { JarvisSymbol, JarvisWordmark } from "@/components/brand/jarvis-mark";
+import { cn } from "@/lib/utils";
 import { Composer } from "@/components/jarvis/blocks";
 import { comparisonBaseline } from "@/lib/jarvis/comparison";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
