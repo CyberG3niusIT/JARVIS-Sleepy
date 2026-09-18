@@ -195,10 +195,9 @@ function EmptyConversation({ onPick }: { onPick: (prompt: string) => void }) {
               <button
                 type="button"
                 onClick={() => onPick(p)}
-                className="j-pressable touch-row flex w-full items-center justify-between gap-3 py-2.5 text-left"
+                className="j-pressable touch-row flex w-full items-center py-2.5 text-left"
               >
                 <span className="text-[13px] leading-5 text-subtle-foreground">{p}</span>
-                <ExecutionTag where="LOKAL" />
               </button>
             </li>
           ))}
