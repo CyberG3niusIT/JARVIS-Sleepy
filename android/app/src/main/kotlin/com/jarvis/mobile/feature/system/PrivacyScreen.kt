@@ -3,6 +3,7 @@ package com.jarvis.mobile.feature.system
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -96,7 +97,7 @@ fun PrivacyScreen(onBack: () -> Unit) {
         )
 
         JarvisSectionHeader("Modus auswählen")
-        JarvisListGroup {
+        JarvisListGroup(modifier = Modifier.selectableGroup()) {
             privacyModes.forEach { mode ->
                 JarvisListRow(
                     title = mode.name,

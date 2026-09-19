@@ -135,7 +135,7 @@ fun VoiceScreen(onBack: () -> Unit) {
         JarvisActionResultText(message = actionResult.message)
 
         JarvisSectionHeader("Zustand wählen")
-        JarvisListGroup {
+        JarvisListGroup(modifier = Modifier.selectableGroup()) {
             voiceStateOrder.forEach { id ->
                 val cfg = voiceStateConfig.getValue(id)
                 JarvisListRow(
@@ -237,7 +237,7 @@ fun VoiceScreen(onBack: () -> Unit) {
     JarvisBottomSheet(open = ttsSheetOpen, onClose = { ttsSheetOpen = false }, title = "TTS-Stimmenauswahl") {
         Column(modifier = Modifier.fillMaxWidth()) {
             FootNote("Neutrale Platzhalter, reine Oberflächen-Beispiele. Es ist noch kein Sprachausgabe-Anbieter ausgewählt.")
-            JarvisListGroup {
+            JarvisListGroup(modifier = Modifier.selectableGroup()) {
                 ttsVoiceOptions.forEach { option ->
                     JarvisListRow(title = option, selected = option == ttsVoice, onClick = { ttsVoice = option })
                 }

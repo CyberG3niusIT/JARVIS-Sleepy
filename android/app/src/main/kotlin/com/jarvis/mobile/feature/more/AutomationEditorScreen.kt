@@ -178,7 +178,7 @@ fun AutomationEditorScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 text = "CLOUD und SLEEPY sind hier nur auswählbare Entwurfsoptionen. Die Auswahl macht diese Runtimes nicht verfügbar oder autorisiert.",
             )
-            JarvisListGroup {
+            JarvisListGroup(modifier = Modifier.selectableGroup()) {
                 automationRuntimeDetails.forEach { opt ->
                     JarvisListRow(
                         title = opt.value.name,
@@ -191,7 +191,7 @@ fun AutomationEditorScreen(
             }
 
             JarvisSectionHeader("Privacy-Kontext")
-            JarvisListGroup {
+            JarvisListGroup(modifier = Modifier.selectableGroup()) {
                 automationPrivacyOptions.forEach { opt ->
                     JarvisListRow(
                         title = opt.value.name,
