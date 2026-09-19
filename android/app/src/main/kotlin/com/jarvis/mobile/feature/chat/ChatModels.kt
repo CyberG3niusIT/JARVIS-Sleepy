@@ -20,6 +20,8 @@ data class ChatMessage(
     val execution: ExecutionLocation? = null,
     val actions: List<ChatActionItem> = emptyList(),
     val task: ChatTaskState? = null,
+    /** Files carried with the message. Never analysed in the prototype. */
+    val attachments: List<ChatAttachment> = emptyList(),
 )
 
 /**
