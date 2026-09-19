@@ -112,6 +112,32 @@ Three explicit Kotlin layers, none of them a placeholder for the others:
    are `DesignStateOnly` fakes that return the same fixed design-state values
    as the web baseline, never fabricated numbers.
 
+## Lifecycle / process-death robustness
+
+Every screen-local prototype state (drafts, open sheets, filters, demo
+entries) uses `rememberSaveable`, not `remember`, so it survives both a
+configuration change and full activity recreation (process death), not
+rotation alone. The Automationen feature is the deepest case: the open
+editor's draft, the local automation list and the open editor session
+(`AutomationsScreen.kt`, `AutomationEditorScreen.kt`) all persist through a
+single shared string codec (`AutomationModels.kt: encodeAutomationDraft` /
+`decodeAutomationDraft`), because a plain `String` is unconditionally
+Bundle-safe while a nested `List<List<Any>>` is not. Covered by
+`app/src/test/kotlin/.../AutomationDraftCodecTest.kt` (round-trip for every
+field, including nested steps/conditions and the list/session separators).
+
+## Chat attachment size resolution
+
+`ChatAttachment.kt: resolveAttachmentSize` never accepts an unknown file
+size as `0`, since that would let an oversized file slip past the 25 MiB
+per-file / 50 MiB total budget checks in `ChatViewModel.onAddFiles`. It
+tries, in order: the `OpenableColumns.SIZE` cursor column, then
+`AssetFileDescriptor.length`, then counts bytes read from the content
+stream capped at `MAX_FILE_BYTES + 1` (exact size if the file is at or under
+the limit; a value that already fails the per-file check if the cap is
+hit). Preview URIs are only attached to a `ChatAttachment` after this
+resolved size has passed both budget checks.
+
 ## Privacy
 
 `PrivacyGate` (`core/privacy/PrivacyGate.kt`) is the single interface every
