@@ -75,8 +75,8 @@ fun AutomationEditorScreen(
     var draft by rememberSaveable(initial.id, stateSaver = AutomationDraftSaver) { mutableStateOf(initial) }
     var discardOpen by rememberSaveable { mutableStateOf(false) }
     var deleteOpen by rememberSaveable { mutableStateOf(false) }
-    var stepSheet by remember { mutableStateOf<StepSheetState?>(null) }
-    var conditionSheet by remember { mutableStateOf<ConditionSheetState?>(null) }
+    var stepSheet by rememberSaveable(stateSaver = StepSheetSaver) { mutableStateOf<StepSheetState?>(null) }
+    var conditionSheet by rememberSaveable(stateSaver = ConditionSheetSaver) { mutableStateOf<ConditionSheetState?>(null) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
 
@@ -410,51 +410,35 @@ private data class StepSheetState(val id: String?, val label: String)
 private data class ConditionSheetState(val id: String?, val text: String)
 
 /**
- * Field-by-field Saver so a configuration change (rotation) does not
- * silently drop the in-progress draft, matching the Codex review fix
- * already applied to this screen's earlier name-only version. Lists are
- * flattened to delimited strings since [androidx.compose.runtime.saveable.listSaver]
- * needs a flat, Bundle-safe value list.
+ * Encodes the draft as a single [String] via [encodeAutomationDraft], the
+ * shared representation also used by [AutomationsScreen] for the automation
+ * list and the editor session - so a draft survives both a configuration
+ * change and full activity recreation (process death), not just rotation.
  */
-private const val ITEM_SEP = "\u0001"
-private const val FIELD_SEP = "\u0002"
+private val AutomationDraftSaver = androidx.compose.runtime.saveable.Saver<AutomationDraft, String>(
+    save = { encodeAutomationDraft(it) },
+    restore = { decodeAutomationDraft(it) },
+)
 
-private fun encodeSteps(steps: List<AutomationStep>) = steps.joinToString(ITEM_SEP) { "${it.id}$FIELD_SEP${it.label}" }
-private fun decodeSteps(raw: String) = if (raw.isEmpty()) emptyList() else raw.split(ITEM_SEP).map {
-    val (id, label) = it.split(FIELD_SEP, limit = 2)
-    AutomationStep(id, label)
+private const val SHEET_NONE = "\u0000none"
+private fun encodeStepSheet(s: StepSheetState?): String = s?.let { "${it.id ?: ""}\u0001${it.label}" } ?: SHEET_NONE
+private fun decodeStepSheet(raw: String): StepSheetState? {
+    if (raw == SHEET_NONE) return null
+    val (id, label) = raw.split("\u0001", limit = 2)
+    return StepSheetState(id.ifEmpty { null }, label)
 }
+private val StepSheetSaver = androidx.compose.runtime.saveable.Saver<StepSheetState?, String>(
+    save = { encodeStepSheet(it) },
+    restore = { decodeStepSheet(it) },
+)
 
-private fun encodeConditions(conditions: List<AutomationCondition>) = conditions.joinToString(ITEM_SEP) { "${it.id}$FIELD_SEP${it.text}" }
-private fun decodeConditions(raw: String) = if (raw.isEmpty()) emptyList() else raw.split(ITEM_SEP).map {
-    val (id, text) = it.split(FIELD_SEP, limit = 2)
-    AutomationCondition(id, text)
+private fun encodeConditionSheet(s: ConditionSheetState?): String = s?.let { "${it.id ?: ""}\u0001${it.text}" } ?: SHEET_NONE
+private fun decodeConditionSheet(raw: String): ConditionSheetState? {
+    if (raw == SHEET_NONE) return null
+    val (id, text) = raw.split("\u0001", limit = 2)
+    return ConditionSheetState(id.ifEmpty { null }, text)
 }
-
-private val AutomationDraftSaver = androidx.compose.runtime.saveable.listSaver<AutomationDraft, Any>(
-    save = {
-        listOf(
-            it.id, it.type.name, it.name, it.purpose, it.enabled, it.runtime.name, it.privacy.name,
-            it.permissions.joinToString(ITEM_SEP), encodeSteps(it.steps), it.scheduleMode.name,
-            it.scheduleDateTime, it.scheduleInterval, it.conditionLogic.name, encodeConditions(it.conditions),
-        )
-    },
-    restore = { saved ->
-        AutomationDraft(
-            id = saved[0] as String,
-            type = AutomationType.valueOf(saved[1] as String),
-            name = saved[2] as String,
-            purpose = saved[3] as String,
-            enabled = saved[4] as Boolean,
-            runtime = com.jarvis.mobile.core.model.ExecutionLocation.valueOf(saved[5] as String),
-            privacy = com.jarvis.mobile.core.model.PrivacyMode.valueOf(saved[6] as String),
-            permissions = (saved[7] as String).let { if (it.isEmpty()) emptyList() else it.split(ITEM_SEP) },
-            steps = decodeSteps(saved[8] as String),
-            scheduleMode = ScheduleMode.valueOf(saved[9] as String),
-            scheduleDateTime = saved[10] as String,
-            scheduleInterval = saved[11] as String,
-            conditionLogic = ConditionLogic.valueOf(saved[12] as String),
-            conditions = decodeConditions(saved[13] as String),
-        )
-    },
+private val ConditionSheetSaver = androidx.compose.runtime.saveable.Saver<ConditionSheetState?, String>(
+    save = { encodeConditionSheet(it) },
+    restore = { decodeConditionSheet(it) },
 )

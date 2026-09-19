@@ -55,6 +55,36 @@ val automationExecutionRules: List<Pair<String, String>> = listOf(
 private data class EditorSession(val mode: AutomationEditorMode, val draft: AutomationDraft)
 
 /**
+ * String-encoded so both the automation list and the open editor session
+ * survive not just rotation but full activity recreation (process death):
+ * a plain [String] is unconditionally Bundle-safe, matching the approach
+ * [AutomationEditorScreen] already uses for its own draft state. Without
+ * this, an in-progress "neue Automation" or a locally saved automation
+ * would silently vanish on recreation - the same class of bug the Codex
+ * review already flagged for the editor's draft field.
+ */
+private val AutomationsListSaver = androidx.compose.runtime.saveable.Saver<List<AutomationDraft>, String>(
+    save = { list -> list.joinToString(AUTOMATION_DRAFT_LIST_SEP) { encodeAutomationDraft(it) } },
+    restore = { raw -> if (raw.isEmpty()) emptyList() else raw.split(AUTOMATION_DRAFT_LIST_SEP).map { decodeAutomationDraft(it) } },
+)
+
+private const val NO_SESSION = "\u0000none"
+private val EditorSessionSaver = androidx.compose.runtime.saveable.Saver<EditorSession?, String>(
+    save = { session -> session?.let { "${it.mode.name}$AUTOMATION_SESSION_SEP${encodeAutomationDraft(it.draft)}" } ?: NO_SESSION },
+    restore = { raw ->
+        if (raw == NO_SESSION) {
+            null
+        } else {
+            val separatorIndex = raw.indexOf(AUTOMATION_SESSION_SEP)
+            EditorSession(
+                mode = AutomationEditorMode.valueOf(raw.substring(0, separatorIndex)),
+                draft = decodeAutomationDraft(raw.substring(separatorIndex + AUTOMATION_SESSION_SEP.length)),
+            )
+        }
+    },
+)
+
+/**
  * Ported 1:1 from src/components/jarvis/screens/automations-screen.tsx,
  * including the full [AutomationEditorScreen]. Mirrors the web reference's
  * own architecture: the editor is not a separate navigation route but a
@@ -65,8 +95,8 @@ private data class EditorSession(val mode: AutomationEditorMode, val draft: Auto
  */
 @Composable
 fun AutomationsScreen(onBack: () -> Unit) {
-    var automations by remember { mutableStateOf<List<AutomationDraft>>(emptyList()) }
-    var editorSession by remember { mutableStateOf<EditorSession?>(null) }
+    var automations by rememberSaveable(stateSaver = AutomationsListSaver) { mutableStateOf(emptyList()) }
+    var editorSession by rememberSaveable(stateSaver = EditorSessionSaver) { mutableStateOf(null) }
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
