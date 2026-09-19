@@ -27,6 +27,7 @@ import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
 import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
 import com.jarvis.mobile.core.designsystem.component.rememberJarvisActionResult
 import com.jarvis.mobile.core.model.SystemState
+import com.jarvis.mobile.core.util.StringFieldCodec
 import com.jarvis.mobile.feature.common.DetailScaffold
 import kotlinx.coroutines.launch
 
@@ -61,25 +62,31 @@ private data class EditorSession(val mode: AutomationEditorMode, val draft: Auto
  * [AutomationEditorScreen] already uses for its own draft state. Without
  * this, an in-progress "neue Automation" or a locally saved automation
  * would silently vanish on recreation - the same class of bug the Codex
- * review already flagged for the editor's draft field.
+ * review already flagged for the editor's draft field. Built on
+ * [StringFieldCodec], so no field of any automation (name, purpose, step
+ * or condition text) can ever be misread as a list boundary.
  */
 private val AutomationsListSaver = androidx.compose.runtime.saveable.Saver<List<AutomationDraft>, String>(
-    save = { list -> list.joinToString(AUTOMATION_DRAFT_LIST_SEP) { encodeAutomationDraft(it) } },
-    restore = { raw -> if (raw.isEmpty()) emptyList() else raw.split(AUTOMATION_DRAFT_LIST_SEP).map { decodeAutomationDraft(it) } },
+    save = { list -> encodeAutomationDraftList(list) },
+    restore = { raw -> decodeAutomationDraftList(raw) },
 )
 
-private const val NO_SESSION = "\u0000none"
 private val EditorSessionSaver = androidx.compose.runtime.saveable.Saver<EditorSession?, String>(
-    save = { session -> session?.let { "${it.mode.name}$AUTOMATION_SESSION_SEP${encodeAutomationDraft(it.draft)}" } ?: NO_SESSION },
+    save = { session ->
+        val writer = StringFieldCodec.writer()
+        writer.write((session != null).toString())
+        if (session != null) {
+            writer.write(session.mode.name)
+            writer.write(encodeAutomationDraft(session.draft))
+        }
+        writer.build()
+    },
     restore = { raw ->
-        if (raw == NO_SESSION) {
+        val reader = StringFieldCodec.reader(raw)
+        if (!reader.read().toBoolean()) {
             null
         } else {
-            val separatorIndex = raw.indexOf(AUTOMATION_SESSION_SEP)
-            EditorSession(
-                mode = AutomationEditorMode.valueOf(raw.substring(0, separatorIndex)),
-                draft = decodeAutomationDraft(raw.substring(separatorIndex + AUTOMATION_SESSION_SEP.length)),
-            )
+            EditorSession(mode = AutomationEditorMode.valueOf(reader.read()), draft = decodeAutomationDraft(reader.read()))
         }
     },
 )
