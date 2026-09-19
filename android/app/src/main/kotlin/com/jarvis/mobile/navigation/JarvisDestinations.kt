@@ -30,8 +30,13 @@ object JarvisRoute {
     const val MORE = "more"
     const val MORE_VOICE = "more/voice"
     const val MORE_MEMORY = "more/memory"
+    /**
+     * Hosts both the automations list and its editor: the editor is a local
+     * Compose state swap inside AutomationsScreen (matching the web
+     * reference), not a separate back-stack entry, so the in-progress draft
+     * never needs to cross a navigation boundary.
+     */
     const val MORE_AUTOMATIONS = "more/automations"
-    const val MORE_AUTOMATIONS_EDITOR = "more/automations/editor"
     const val MORE_SETTINGS = "more/settings"
     const val MORE_ABOUT = "more/about"
 

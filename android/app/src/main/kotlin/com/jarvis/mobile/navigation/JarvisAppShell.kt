@@ -25,7 +25,6 @@ import com.jarvis.mobile.core.designsystem.component.JarvisTopBar
 import com.jarvis.mobile.core.model.NavTabId
 import com.jarvis.mobile.feature.chat.ChatScreen
 import com.jarvis.mobile.feature.more.AboutScreen
-import com.jarvis.mobile.feature.more.AutomationEditorScreen
 import com.jarvis.mobile.feature.more.AutomationsScreen
 import com.jarvis.mobile.feature.more.MemoryScreen
 import com.jarvis.mobile.feature.more.MoreOverviewScreen
@@ -105,13 +104,7 @@ fun JarvisAppShell(navController: NavHostController = rememberNavController()) {
             composable(JarvisRoute.MORE_VOICE) { VoiceScreen(onBack = navController::popBackStack) }
             composable(JarvisRoute.MORE_MEMORY) { MemoryScreen(onBack = navController::popBackStack) }
             composable(JarvisRoute.MORE_AUTOMATIONS) {
-                AutomationsScreen(
-                    onBack = navController::popBackStack,
-                    onCreateAutomation = { navController.navigate(JarvisRoute.MORE_AUTOMATIONS_EDITOR) },
-                )
-            }
-            composable(JarvisRoute.MORE_AUTOMATIONS_EDITOR) {
-                AutomationEditorScreen(onBack = navController::popBackStack)
+                AutomationsScreen(onBack = navController::popBackStack)
             }
             composable(JarvisRoute.MORE_SETTINGS) { SettingsScreen(onBack = navController::popBackStack) }
             composable(JarvisRoute.MORE_ABOUT) { AboutScreen(onBack = navController::popBackStack) }
