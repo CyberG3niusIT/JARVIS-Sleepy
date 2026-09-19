@@ -40,8 +40,8 @@ Voraussetzung: Bun (alternativ npm mit denselben Skripten).
 bun install
 bun run dev        # Entwicklungsserver auf http://localhost:8080
 bun run build      # Produktionsbuild
-bun run preview    # startet dist/server/index.mjs
-bun run start      # startet dist/server/index.mjs
+bun run preview    # startet .output/server/index.mjs
+bun run start      # startet .output/server/index.mjs
 bun run lint
 bun run format
 ```
