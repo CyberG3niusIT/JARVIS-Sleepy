@@ -32,13 +32,7 @@ export default defineConfig(async ({ command }) => {
 
   if (command === "build") {
     const { nitro } = await import("nitro/vite");
-    plugins.push(
-      nitro({
-        preset: process.env["NITRO_PRESET"] || "node-server",
-        // Der Produktionsbuild wird nach dist/ geschrieben.
-        output: { dir: "dist" },
-      }),
-    );
+    plugins.push(nitro({ preset: process.env["NITRO_PRESET"] || "node-server" }));
   }
 
   plugins.push(viteReact());
