@@ -3,7 +3,7 @@ package com.jarvis.mobile.feature.more
 import com.jarvis.mobile.core.model.ExecutionLocation
 import com.jarvis.mobile.core.model.PrivacyMode
 import com.jarvis.mobile.core.util.StringFieldCodec
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.UUID
 
 /**
  * Ported 1:1 from src/components/jarvis/screens/automation-editor.tsx. Local,
@@ -41,8 +41,7 @@ data class AutomationDraft(
     val conditions: List<AutomationCondition> = emptyList(),
 )
 
-private val localIdSeq = AtomicInteger(0)
-fun nextLocalId(prefix: String): String = "$prefix-${localIdSeq.incrementAndGet()}"
+fun nextLocalId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
 
 fun createEmptyDraft(type: AutomationType): AutomationDraft = AutomationDraft(id = nextLocalId("automation"), type = type)
 

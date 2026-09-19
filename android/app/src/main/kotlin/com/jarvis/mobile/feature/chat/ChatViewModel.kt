@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 data class ChatUiState(
@@ -37,6 +39,8 @@ class ChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
     private var attachmentIdSeq = 0
+    private var draftGeneration = 0L
+    private val attachmentValidationMutex = Mutex()
 
     fun onDraftChange(next: String) {
         _uiState.value = _uiState.value.copy(draft = next)
@@ -47,6 +51,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun onReset() {
+        draftGeneration += 1
         _uiState.value = ChatUiState(messages = emptyList(), baseCount = 0, draft = "")
     }
 
@@ -63,48 +68,53 @@ class ChatViewModel @Inject constructor(
      * completely, never truncated - matching the web reference's addFiles.
      */
     fun onAddFiles(uris: List<Uri>) {
+        val requestedGeneration = draftGeneration
         viewModelScope.launch {
-            val current = _uiState.value.attachments
-            val accepted = mutableListOf<ChatAttachment>()
-            val errors = mutableListOf<String>()
-            var count = current.size
-            var total = current.sumOf { it.size }
+            attachmentValidationMutex.withLock {
+                if (requestedGeneration != draftGeneration) return@withLock
+                val current = _uiState.value.attachments
+                val accepted = mutableListOf<ChatAttachment>()
+                val errors = mutableListOf<String>()
+                var count = current.size
+                var total = current.sumOf { it.size }
 
-            for (uri in uris) {
-                val label = uri.lastPathSegment ?: "Datei"
-                if (count >= MAX_ATTACHMENTS) {
-                    errors += "$label: maximal $MAX_ATTACHMENTS Anhänge pro Nachricht."
-                    continue
-                }
-                when (val check = validateAttachment(context, uri)) {
-                    is AttachmentCheck.Failed -> errors += "$label: ${check.reason}"
-                    is AttachmentCheck.Ok -> {
-                        if (check.size > MAX_FILE_BYTES) {
-                            errors += "${check.name}: ${formatMiB(check.size)} überschreitet das Limit von ${formatMiB(MAX_FILE_BYTES)} pro Datei."
-                            continue
+                for (uri in uris) {
+                    val label = uri.lastPathSegment ?: "Datei"
+                    if (count >= MAX_ATTACHMENTS) {
+                        errors += "$label: maximal $MAX_ATTACHMENTS Anhänge pro Nachricht."
+                        continue
+                    }
+                    when (val check = validateAttachment(context, uri)) {
+                        is AttachmentCheck.Failed -> errors += "$label: ${check.reason}"
+                        is AttachmentCheck.Ok -> {
+                            if (check.size > MAX_FILE_BYTES) {
+                                errors += "${check.name}: ${formatMiB(check.size)} überschreitet das Limit von ${formatMiB(MAX_FILE_BYTES)} pro Datei."
+                                continue
+                            }
+                            if (total + check.size > MAX_TOTAL_BYTES) {
+                                errors += "${check.name}: Gesamtgröße überschreitet das Limit von ${formatMiB(MAX_TOTAL_BYTES)}."
+                                continue
+                            }
+                            attachmentIdSeq += 1
+                            accepted += ChatAttachment(
+                                id = "a-${System.currentTimeMillis()}-$attachmentIdSeq",
+                                kind = check.kind,
+                                name = check.name,
+                                size = check.size,
+                                previewUri = if (check.kind == ChatAttachmentKind.IMAGE) uri else null,
+                            )
+                            count += 1
+                            total += check.size
                         }
-                        if (total + check.size > MAX_TOTAL_BYTES) {
-                            errors += "${check.name}: Gesamtgröße überschreitet das Limit von ${formatMiB(MAX_TOTAL_BYTES)}."
-                            continue
-                        }
-                        attachmentIdSeq += 1
-                        accepted += ChatAttachment(
-                            id = "a-${System.currentTimeMillis()}-$attachmentIdSeq",
-                            kind = check.kind,
-                            name = check.name,
-                            size = check.size,
-                            previewUri = if (check.kind == ChatAttachmentKind.IMAGE) uri else null,
-                        )
-                        count += 1
-                        total += check.size
                     }
                 }
-            }
 
-            _uiState.value = _uiState.value.copy(
-                attachments = _uiState.value.attachments + accepted,
-                attachmentError = errors.takeIf { it.isNotEmpty() }?.joinToString(" "),
-            )
+                if (requestedGeneration != draftGeneration) return@withLock
+                _uiState.value = _uiState.value.copy(
+                    attachments = _uiState.value.attachments + accepted,
+                    attachmentError = errors.takeIf { it.isNotEmpty() }?.joinToString(" "),
+                )
+            }
         }
     }
 
@@ -113,6 +123,7 @@ class ChatViewModel @Inject constructor(
         val text = state.draft.trim()
         val sent = state.attachments
         if (text.isEmpty() && sent.isEmpty()) return
+        draftGeneration += 1
         val stamp = System.currentTimeMillis()
         val note = if (sent.isNotEmpty()) {
             val countLabel = if (sent.size == 1) "1 Datei angehängt" else "${sent.size} Dateien angehängt"

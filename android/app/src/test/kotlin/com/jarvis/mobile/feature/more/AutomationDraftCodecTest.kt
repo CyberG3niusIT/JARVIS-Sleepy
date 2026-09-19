@@ -3,6 +3,7 @@ package com.jarvis.mobile.feature.more
 import com.jarvis.mobile.core.model.ExecutionLocation
 import com.jarvis.mobile.core.model.PrivacyMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -12,6 +13,14 @@ import org.junit.Test
  * activity recreation - exactly the class of bug this codec exists to fix.
  */
 class AutomationDraftCodecTest {
+
+    @Test
+    fun `local IDs remain distinct without a process-local sequence`() {
+        val ids = List(100) { nextLocalId("step") }
+
+        assertEquals(ids.size, ids.toSet().size)
+        assertTrue(ids.all { it.startsWith("step-") })
+    }
 
     @Test
     fun `round trip preserves an empty macro draft`() {
