@@ -15,6 +15,9 @@ import java.util.concurrent.atomic.AtomicInteger
 data class AutomationStep(val id: String, val label: String)
 data class AutomationCondition(val id: String, val text: String)
 
+internal data class StepSheetState(val id: String?, val label: String)
+internal data class ConditionSheetState(val id: String?, val text: String)
+
 /** Extract<ExecutionLocation, "LOKAL" | "SLEEPY" | "CLOUD"> from the web type. */
 val automationRuntimeOptions: List<ExecutionLocation> = listOf(ExecutionLocation.LOKAL, ExecutionLocation.SLEEPY, ExecutionLocation.CLOUD)
 
@@ -201,3 +204,43 @@ fun encodeAutomationDraftList(drafts: List<AutomationDraft>): String =
 /** Decodes a field value previously produced by [encodeAutomationDraftList]. */
 fun decodeAutomationDraftList(raw: String): List<AutomationDraft> =
     StringFieldCodec.decodeStringList(raw).map { decodeAutomationDraft(it) }
+
+internal fun encodeStepSheet(s: StepSheetState?): String {
+    val writer = StringFieldCodec.writer()
+    writer.write((s != null).toString())
+    if (s != null) {
+        writer.write((s.id != null).toString())
+        writer.write(s.id ?: "")
+        writer.write(s.label)
+    }
+    return writer.build()
+}
+
+internal fun decodeStepSheet(raw: String): StepSheetState? {
+    val reader = StringFieldCodec.reader(raw)
+    if (!reader.read().toBoolean()) return null
+    val hasId = reader.read().toBoolean()
+    val id = reader.read()
+    val label = reader.read()
+    return StepSheetState(if (hasId) id else null, label)
+}
+
+internal fun encodeConditionSheet(s: ConditionSheetState?): String {
+    val writer = StringFieldCodec.writer()
+    writer.write((s != null).toString())
+    if (s != null) {
+        writer.write((s.id != null).toString())
+        writer.write(s.id ?: "")
+        writer.write(s.text)
+    }
+    return writer.build()
+}
+
+internal fun decodeConditionSheet(raw: String): ConditionSheetState? {
+    val reader = StringFieldCodec.reader(raw)
+    if (!reader.read().toBoolean()) return null
+    val hasId = reader.read().toBoolean()
+    val id = reader.read()
+    val text = reader.read()
+    return ConditionSheetState(if (hasId) id else null, text)
+}
