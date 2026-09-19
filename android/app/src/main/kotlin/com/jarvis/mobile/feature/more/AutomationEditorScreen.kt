@@ -50,6 +50,7 @@ import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
 import com.jarvis.mobile.core.designsystem.component.JarvisTextField
 import com.jarvis.mobile.core.designsystem.component.JarvisToggle
 import com.jarvis.mobile.core.designsystem.component.rememberJarvisActionResult
+import com.jarvis.mobile.core.util.StringFieldCodec
 import kotlinx.coroutines.launch
 
 /**
@@ -427,7 +428,7 @@ private val AutomationDraftSaver = androidx.compose.runtime.saveable.Saver<Autom
  * with "no sheet open".
  */
 private fun encodeStepSheet(s: StepSheetState?): String {
-    val writer = com.jarvis.mobile.core.util.StringFieldCodec.writer()
+    val writer = StringFieldCodec.writer()
     writer.write((s != null).toString())
     if (s != null) {
         writer.write((s.id != null).toString())
@@ -437,7 +438,7 @@ private fun encodeStepSheet(s: StepSheetState?): String {
     return writer.build()
 }
 private fun decodeStepSheet(raw: String): StepSheetState? {
-    val reader = com.jarvis.mobile.core.util.StringFieldCodec.reader(raw)
+    val reader = StringFieldCodec.reader(raw)
     if (!reader.read().toBoolean()) return null
     val hasId = reader.read().toBoolean()
     val id = reader.read()
@@ -450,7 +451,7 @@ private val StepSheetSaver = androidx.compose.runtime.saveable.Saver<StepSheetSt
 )
 
 private fun encodeConditionSheet(s: ConditionSheetState?): String {
-    val writer = com.jarvis.mobile.core.util.StringFieldCodec.writer()
+    val writer = StringFieldCodec.writer()
     writer.write((s != null).toString())
     if (s != null) {
         writer.write((s.id != null).toString())
@@ -460,7 +461,7 @@ private fun encodeConditionSheet(s: ConditionSheetState?): String {
     return writer.build()
 }
 private fun decodeConditionSheet(raw: String): ConditionSheetState? {
-    val reader = com.jarvis.mobile.core.util.StringFieldCodec.reader(raw)
+    val reader = StringFieldCodec.reader(raw)
     if (!reader.read().toBoolean()) return null
     val hasId = reader.read().toBoolean()
     val id = reader.read()

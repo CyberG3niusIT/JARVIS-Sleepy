@@ -1,6 +1,7 @@
 package com.jarvis.mobile.feature.system
 
 import com.jarvis.mobile.core.model.PrivacyMode
+import com.jarvis.mobile.core.util.StringFieldCodec
 
 /** Ported 1:1 from src/components/jarvis/screens/privacy-screen.tsx. */
 
@@ -67,23 +68,29 @@ sealed interface PrivacyOverlay {
  * String encoding for [PrivacyOverlay], since it is not itself Bundle-safe
  * (a sealed interface's `data object`/`data class` implementations are not
  * [java.io.Serializable] by default), so [PrivacyScreen]'s `overlay` state
- * needs a custom `Saver` to survive activity recreation.
+ * needs a custom `Saver` to survive activity recreation. Built on
+ * [StringFieldCodec] rather than a hand-rolled `"KIND:target"` split, so it
+ * stays safe-by-construction even if this overlay ever grows a free-text
+ * field, not just because an enum name happens to never contain a colon.
  */
-fun encodePrivacyOverlay(overlay: PrivacyOverlay): String = when (overlay) {
-    is PrivacyOverlay.None -> "NONE"
-    is PrivacyOverlay.Explain -> "EXPLAIN:${overlay.target.name}"
-    is PrivacyOverlay.ConfirmLock -> "CONFIRM_LOCK:${overlay.target.name}"
-    is PrivacyOverlay.ConfirmRelax -> "CONFIRM_RELAX:${overlay.target.name}"
+fun encodePrivacyOverlay(overlay: PrivacyOverlay): String {
+    val writer = StringFieldCodec.writer()
+    when (overlay) {
+        is PrivacyOverlay.None -> writer.write("NONE")
+        is PrivacyOverlay.Explain -> writer.write("EXPLAIN").write(overlay.target.name)
+        is PrivacyOverlay.ConfirmLock -> writer.write("CONFIRM_LOCK").write(overlay.target.name)
+        is PrivacyOverlay.ConfirmRelax -> writer.write("CONFIRM_RELAX").write(overlay.target.name)
+    }
+    return writer.build()
 }
 
 fun decodePrivacyOverlay(raw: String): PrivacyOverlay {
-    if (raw == "NONE") return PrivacyOverlay.None
-    val (kind, target) = raw.split(":", limit = 2)
-    val mode = PrivacyMode.valueOf(target)
-    return when (kind) {
-        "EXPLAIN" -> PrivacyOverlay.Explain(mode)
-        "CONFIRM_LOCK" -> PrivacyOverlay.ConfirmLock(mode)
-        "CONFIRM_RELAX" -> PrivacyOverlay.ConfirmRelax(mode)
+    val reader = StringFieldCodec.reader(raw)
+    return when (val kind = reader.read()) {
+        "NONE" -> PrivacyOverlay.None
+        "EXPLAIN" -> PrivacyOverlay.Explain(PrivacyMode.valueOf(reader.read()))
+        "CONFIRM_LOCK" -> PrivacyOverlay.ConfirmLock(PrivacyMode.valueOf(reader.read()))
+        "CONFIRM_RELAX" -> PrivacyOverlay.ConfirmRelax(PrivacyMode.valueOf(reader.read()))
         else -> throw IllegalArgumentException("Unknown PrivacyOverlay kind: $kind")
     }
 }
