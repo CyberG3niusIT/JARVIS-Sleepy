@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,11 +81,12 @@ fun DiagnosticsDemoSection() {
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
         Text(text = "NACH SCHWEREGRAD FILTERN", color = JarvisSemanticColor.mutedForeground, fontSize = 11.sp)
-        FlowRow(modifier = Modifier.padding(top = JarvisSpacing.sm), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
+        FlowRow(modifier = Modifier.padding(top = JarvisSpacing.sm).selectableGroup(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
             SeverityFilter.entries.forEach { s ->
                 JarvisButton(
                     text = if (s == SeverityFilter.ALLE) "Alle" else logSeverityLabel.getValue(LogSeverity.valueOf(s.name)),
                     variant = if (severity == s) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY,
+                    selected = severity == s,
                     onClick = { severity = s },
                 )
             }
@@ -93,10 +95,10 @@ fun DiagnosticsDemoSection() {
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
         Text(text = "NACH RUNTIME FILTERN", color = JarvisSemanticColor.mutedForeground, fontSize = 11.sp)
-        FlowRow(modifier = Modifier.padding(top = JarvisSpacing.sm), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
-            JarvisButton(text = "Alle", variant = if (runtimeFilter == null) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, onClick = { runtimeFilter = null })
+        FlowRow(modifier = Modifier.padding(top = JarvisSpacing.sm).selectableGroup(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
+            JarvisButton(text = "Alle", variant = if (runtimeFilter == null) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, selected = runtimeFilter == null, onClick = { runtimeFilter = null })
             runtimes.forEach { r ->
-                JarvisButton(text = r.name, variant = if (runtimeFilter == r) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, onClick = { runtimeFilter = r })
+                JarvisButton(text = r.name, variant = if (runtimeFilter == r) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, selected = runtimeFilter == r, onClick = { runtimeFilter = r })
             }
         }
     }
