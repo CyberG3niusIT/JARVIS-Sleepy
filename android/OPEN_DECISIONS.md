@@ -23,9 +23,13 @@ specified anywhere in `src/components/jarvis/` or `src/lib/jarvis/`.
 
 **What was built instead.** `core/runtime/SleepyRuntimeGateway` describes
 only the connection *state* (`SystemState`, paired: Boolean) that the UI
-needs. No transport, discovery or crypto code exists yet; `RuntimesScreen`
-and the Sleepy rows on Start/System render `UNAVAILABLE` /
-`NOT_IMPLEMENTED`, matching the web baseline exactly.
+needs. `RuntimesDemoSections.kt` ports the web reference's full abstract
+pairing state machine (`SleepyPairingSection`), trust inspection and handoff
+review as a clearly labelled Zustandsdemonstration - deliberately without a
+pairing code, QR payload, IP address or certificate fingerprint anywhere, per
+the web reference itself. No transport, discovery or crypto code exists;
+`RuntimesScreen`'s baseline rows and the Sleepy rows on Start/System still
+render `UNAVAILABLE` / `NOT_IMPLEMENTED`, matching the web baseline exactly.
 
 ## 2. Privacy enforcement rules per capability
 
@@ -45,18 +49,24 @@ be authored from the real Privacy screen content, not invented here.
 
 ## 3. Real Android permission set and request flow
 
-**Question.** The web Permissions screen names four capability areas
-(Bedienungshilfen, Bildschirmzugriff, Benachrichtigungszugriff, Mikrofon).
-Which exact Android permission strings / special-access settings
-(`AccessibilityService`, `MediaProjection`, `NotificationListenerService`,
-`RECORD_AUDIO`, and so on) back each row, and what is the request sequence
-when several are needed for one action?
+**Question.** The web Permissions screen names eight capability areas
+(Bedienungshilfen, Benachrichtigungen, Mikrofon, Bildschirmzugriff, Kamera,
+Dateien, Kontakte/Kommunikation, Standort - see
+`PermissionModels.kt: permissionGroups`). Which exact Android permission
+strings / special-access settings (`AccessibilityService`,
+`MediaProjection`, `NotificationListenerService`, `RECORD_AUDIO`,
+`READ_CONTACTS`, location permissions, and so on) back each row, and what is
+the request sequence when several are needed for one action?
 
 **What was built instead.** `core/runtime/PermissionGateway` exposes only
 `isGranted(permission: String): Boolean`; `DesignStatePermissionGateway`
-always returns `false`. `PermissionsScreen` shows the four named areas as
-`PERMISSION_REQUIRED`, matching the web reference, without wiring a real
-`ActivityResultContracts.RequestPermission` flow yet.
+always returns `false`. `PermissionsScreen` shows the overall "Android-
+Berechtigungen" status as `PERMISSION_REQUIRED` and each of the eight
+individual access areas as an unbound design state ("Status nicht
+gebunden"), matching the web reference exactly, without wiring a real
+`ActivityResultContracts.RequestPermission` flow yet. The per-group detail
+sheet's demo-state selector is a local Compose preview only, per the web
+reference's own `DEMO_AREA_NOTE`.
 
 ## 4. Local model runtime binding (LiteRT-LM)
 
