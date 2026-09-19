@@ -7,14 +7,25 @@ way, and what's known to be broken or half-done*. Keep it current: when you
 make an architectural decision or find a real bug, write it here, not just
 in a commit message.
 
-Last major update: 2026-09-16 (Claude active-refactor session #4, branch
-`claude/jarvis-architecture`, on top of `e918d80`; safepoint `3a58c9e` / tag
-`sleepy-pre-claude-20260915`). Session #4 scope: backend-only (no UI —
-`web/hud.*` and the `jarvis-ui` branch are explicitly out of scope and
-untouched), goal is Sleepy-ready: memory system completion, three
-specialized reviews (Memory/Concurrency/German-runtime), real latency
-instrumentation, TTS startup contention fix, and a startup preflight
-script. See §5c/§5d, §3.5, §8, §9.
+Last major update: 2026-09-19 (Claude session #5, branch
+`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `0c92653` — which
+`main` and `claude/jarvis-architecture` both also pointed at when this
+session started; verified via `git fetch --all --prune` + `git log`
+before any change, not assumed). Session #5 scope: backend-only, same
+constraint as session #4 (no UI/Android work). Ran with **no shell access
+to the real Sleepy machine** — every "NEEDS HW VERIFY" tag in this
+document below means exactly that: written and unit-tested in a sandbox,
+never run against real hardware/models, not to be reported as validated
+until someone with Sleepy access actually does so. Delivered this
+session: a central `PrivacyGate` (P0, new — see §11), the memory
+polarity-reversal bug fix (§5d, item 6 from the old open-work list),
+bounded contextual-ack synthesis (§3.4, item 3 from the old open-work
+list), two lifecycle/shutdown gaps closed (§12), and corrected-but-
+unverified Sleepy systemd units (§13, item 12 from the old open-work
+list). Still open from session #4's list and not attempted this session:
+the German-first string backlog, memory consolidation/decay/autonomy
+budget, and the full speech_end→...→response_done latency chain — see
+the updated §14.
 
 **Persona note (clarified explicitly by the user this session, don't
 "fix" this again):** German-first does NOT mean removing "Sir"/"Ma'am".
@@ -316,15 +327,30 @@ chop prosody. German abbreviations added in the previous session.
 
 ### 3.4 Known TTS issues not yet fixed
 
-- **Contextual ack latency on Chatterbox**: `Pipeline._play_ack_if_still_thinking()`
-  can speak a dynamically LLM-generated (4B model) contextual ack via
-  `self.tts.speak()`. This text is novel per-command, so it can't be
-  pre-cached. On Chatterbox this means a real GPU round-trip inside the
-  ack timer thread, which holds `TextToSpeech._tts_lock` — the main
-  response's first real chunk then queues behind it. Still open (would
-  need a cancellable/async HTTP request or a hard time budget on
-  contextual-ack generation — the health-check throttle added this
-  session doesn't help here since the server *is* up, just slow).
+- ~~Contextual ack latency on Chatterbox~~ **Fixed (session #5)**:
+  `Pipeline._play_ack_if_still_thinking()` speaks a dynamically LLM-
+  generated (4B model) contextual ack via `self.tts.speak()` — novel
+  per-command text, can't be pre-cached, so on Chatterbox this is a real
+  GPU round-trip inside the ack timer thread, holding
+  `TextToSpeech._tts_lock` while it runs. `speak()` gained two optional
+  params: `cancel_check` (re-checked immediately after the lock is
+  acquired — same pattern `speak_ack()` already used — so a response
+  that arrived while waiting for the lock stops a now-stale ack before
+  synthesis starts) and `timeout_override` (forwarded to the Chatterbox
+  request timeout, capping the call at `Coordinator._CONTEXTUAL_ACK_TIMEOUT_S`
+  = 2.5s instead of the full response-length `chatterbox_timeout`, 60s
+  by default). The call site now passes both; `_ack_played` is only set
+  when `speak()` actually returns True (previously set unconditionally).
+  This bounds the worst case a contextual ack can add ahead of the real
+  response to ~2.5s instead of up to 60s, without new concurrency
+  machinery — it does not eliminate the window entirely (a request that
+  passes `cancel_check` and is already in flight when the real response
+  becomes ready still blocks up to the timeout budget), which is the
+  explicitly accepted trade-off of the "hard time budget" approach over
+  building a cancellable-HTTP-request architecture. Tests:
+  `tests/unit/test_contextual_ack_blocking.py` (bare-object pattern, no
+  real Chatterbox needed). **Not yet observed against a real Chatterbox
+  server** — see item 2 in §14.
 - ~~Single shared timeout...~~ **Fixed** (previous + this session):
   `_chatterbox_available()` probes `/health` with a short (1.5s) timeout,
   throttled (5s re-check when healthy, 1s when down), before every
@@ -700,7 +726,7 @@ often language-neutral technical terms — "editor: VS Code") instead of
 interpolating the full stored English sentence into German wrapper text.
 `handle_forget()`, `handle_transparency()`, `list_facts_by_category()` now
 use it and are fully German. `handle_transparency()` additionally
-separates confirmed facts from candidates in its own response (§10 in the
+separates confirmed facts from candidates in its own response (§14 in the
 task: "muss unterscheiden zwischen bestätigt, beobachtet, vermutet") —
 if only candidates exist, it says so explicitly rather than presenting an
 inference with the confidence of a stated fact. New `is_why_query()`/
@@ -764,15 +790,38 @@ fixed** (see §5e for the full review — this lists only what got fixed):
    (`test_concurrent_identical_facts_produce_no_duplicate`) — all 8
    observations correctly counted via `evidence_count`, no duplicate row.
 
-Not fixed this session (documented, see §5e for the reviewer's full
-writeup and reasoning): a same-subject-same-value-but-opposite-sentiment
-case ("ich liebe X" → later "ich hasse X", same extracted `value="X"`)
-would currently reinforce instead of registering as a real reversal —
-sentiment isn't part of the value comparison. Fixing this would need the
-extractor to also emit a polarity/sentiment field compared alongside
-`value`, which weakens the "value must be a short canonical answer"
-design the reinforcement logic relies on — flagged as a real gap, not
-attempted speculatively in the time available.
+~~Not fixed this session...~~ **Fixed in session #5**: the
+same-subject-same-value-but-opposite-sentiment case ("ich liebe X" →
+later "ich hasse X", same extracted `value="X"`) previously reinforced
+instead of registering as a real reversal, since sentiment wasn't part
+of the value comparison. Rather than reworking the extractor's `value`
+field (which the note above worried would weaken its "short canonical
+answer" design), session #5 added a separate, narrower fix: an
+idempotent migration adds a nullable `polarity` column (-1/0/+1) to
+`facts`, and `MemoryManager._detect_polarity()` is a small explicit
+German+English sentiment-keyword lexicon scoped to the
+`preference`/`opinion` categories only. In `_store_fact_locked()`, when
+both the existing and new fact have a determinable polarity and they
+disagree, that forces `SUPERSEDE` regardless of what the value
+comparison alone would have decided. A miss (no recognized sentiment
+word, or a category outside preference/opinion) falls back to the
+pre-existing value/content comparison unchanged — this is deliberately
+not a general sentiment classifier, just enough to close the specific
+reversal bug without regressing anything the value-comparison logic
+already handled correctly. Also closed in the same change: a single
+inferred/per-turn extraction could previously supersede (overwrite) a
+fact the user stated explicitly — `existing.source == "explicit"` and
+`new.source != "explicit"` now stores the conflicting inference as its
+own non-superseding, confidence-capped candidate instead, leaving the
+explicit fact intact until an explicit correction (or the user
+restating it) actually supersedes it. Tests:
+`tests/unit/test_memory_polarity.py` — polarity detection (DE/EN,
+split negation like "mag ... nicht"), reversal-supersedes-not-
+reinforces in both directions, paraphrase-with-same-polarity still
+reinforces (regression guard), no-polarity-data falls back unchanged,
+explicit-wins-over-inference in both directions, and a 10-thread
+concurrent-writes race test asserting no false reinforcement survives
+mixed-polarity concurrent `store_fact()` calls on the same subject.
 
 ## 5e. Session #4 specialized reviews (Memory, Concurrency, German runtime)
 
@@ -921,7 +970,7 @@ templates** (`/home/user/jarvis`, `/mnt/models/...`, unexpanded `$USER`,
 llama-server port matches `core/llm_router.py`'s hardcoded `:8080` but no
 Chatterbox service exists at all). Not rewritten this session — guessing
 at the real Sleepy paths/username for a systemd unit that can't be tested
-here felt riskier than useful; flagged in §10 as real Sleepy-side work
+here felt riskier than useful; flagged in §14 as real Sleepy-side work
 instead.
 
 ### Shutdown fix (found while checking startup/shutdown together)
@@ -942,12 +991,197 @@ catch it, but the enclosing `finally:` still runs regardless of exception
 type, so this cleanup path was already reachable; it just didn't do
 enough.
 
-## 10. Open work / recommended next steps
+## 11. Privacy Gate (`core/privacy_gate.py`, session #5, P0, new)
+
+**Status: IMPLEMENTED and wired into the ingestion/egress chokepoints
+identified by reading the real code; NOT exhaustively wired — see
+"Deferred" below.**
+
+Before this session, no privacy concept existed anywhere in the backend —
+only unrelated booleans that happen to also be called "paused"/"muted":
+`continuous_listener`'s mic pause during TTS playback (echo prevention,
+not privacy), `desktop_manager.toggle_mute()` (speaker volume via
+`pactl`), `readback_session`/`task_planner` pause (document readback /
+multi-step plan state). Confirmed via a full-repo grep for
+`privacy|mute|paused|PRIVACY` before writing anything, per the task's
+"nicht raten" instruction.
+
+`PrivacyGate` is a process-wide singleton (`get_privacy_gate(config)`,
+same pattern as `core/event_logger.py`'s `get_event_logger`) that is the
+single technical authority every ingestion/memory/logging/cloud call
+site consults — not a collection of independent flags. Three modes
+(`PrivacyMode.NORMAL/PRIVACY/PRIVACY_LOCK`), fifteen `Capability` values
+(`MIC_INGEST`, `STT`, `SCREEN_CAPTURE`, `WEBCAM_CAPTURE`,
+`CLIPBOARD_READ`, `FILESYSTEM_OBSERVATION`, `MEMORY_EXTRACT`,
+`MEMORY_WRITE`, `EMBEDDING_GENERATE`, `SESSION_SUMMARY`,
+`AGENT_CONTEXT_INGEST`, `CLOUD_LLM`, `REMOTE_TOOL`, `CONTENT_LOGGING`,
+`PROACTIVE_OBSERVATION`), gated via `gate.allow(capability)` /
+`gate.assert_allowed(capability)`. `PRIVACY` blocks every capability
+except `REMOTE_TOOL`; `PRIVACY_LOCK` blocks that too.
+
+**Race safety** (the part of the spec most likely to be gotten wrong):
+`enter()`/`exit()` both run registered flush callbacks under the gate's
+own lock *before* changing the mode, and mint a new opaque `epoch()`
+token on every transition (enter *and* exit). Background work that
+defers a write to another thread (memory's batch/per-turn extraction)
+captures `gate.epoch()` at trigger time and re-checks
+`gate.is_current_epoch(captured)` immediately before persisting anything
+— this is what stops content whose extraction started before a privacy
+transition from landing after it, including the case where privacy is
+entered *and exited again* while the background thread is still running
+(a plain "is privacy active right now" re-check at write time would
+wrongly allow that, since `mode()` would read `NORMAL` again by then).
+See the module docstring in `core/privacy_gate.py` for the full
+reasoning.
+
+**Wired this session** (chosen by reading the actual call sites, per the
+research this session ran first — not assumed):
+
+| Site | Capability | Effect when denied |
+|---|---|---|
+| `continuous_listener._on_speech_start()` / `_process_speech()` | `MIC_INGEST`, `STT` | Speech isn't even buffered; a flush callback (`register_flush_callback`) drops any in-flight `speech_buffer`/`_pre_speech_audio` on enter/exit |
+| `memory_manager.on_message()` | `MEMORY_EXTRACT` | Entire per-message handling (indexing + extraction + batch/per-turn triggers) skipped |
+| `memory_manager.index_message()` | `EMBEDDING_GENERATE` | No FAISS embed/add |
+| `memory_manager.store_fact()` | `MEMORY_WRITE` | Returns `None`, no SQLite write — this is the second line of defense behind the epoch checks in the two background extraction runners |
+| `desktop_manager.take_screenshot()` | `SCREEN_CAPTURE` | Returns `None`, **no file written** |
+| `desktop_manager.get_clipboard()` | `CLIPBOARD_READ` | Returns `None` |
+| `webcam_manager.start()` | `WEBCAM_CAPTURE` | Raises `PermissionError` before the `ffmpeg` capture process is ever launched |
+| `debug_logger.ConversationDebugLogger._write()` | `CONTENT_LOGGING` | No JSONL line written (single chokepoint every `log_*` method funnels through) |
+| `llm_router._generate_api()` | `CLOUD_LLM` | Returns `""`, no request sent |
+| `claude_consultation._call_claude()` | `CLOUD_LLM` | Raises `PermissionError` before the `anthropic` client is even constructed |
+
+**Audit logging**: `enter()`/`exit()` log only `mode`, `actor`,
+`timestamp`, `duration` via `core/logger.py` — never the `reason` text
+passed to `enter()`, never content. Matches the requirement explicitly.
+
+**Local control path**: `skills/system/privacy/skill.py` — German voice
+intents ("Privatsphäre aktivieren", "Privacy Lock aktivieren",
+"Privatsphäre beenden", status query) call `enter()`/`exit()` directly
+on the in-process singleton. No separate control-plane/IPC needed since
+every wired call site above shares the same process; this is the "local
+CLI/control path is acceptable for now" fallback the task allowed,
+implemented as a voice skill instead of a literal CLI since that was
+just as simple given the existing skill-registration pattern.
+
+**Deferred — not yet wired, do not assume covered**:
+`FILESYSTEM_OBSERVATION`, `SESSION_SUMMARY`, and `AGENT_CONTEXT_INGEST`
+capabilities exist in the enum (so call sites can start using them
+immediately) but no call site was actually gated with them this
+session — the research pass that grounded this section's other rows
+didn't read those subsystems in depth, and gating them without reading
+the real code first would have been exactly the "raten" the task
+explicitly forbids. Also not attempted: a true remote/networked control
+plane (the task explicitly said a local path is acceptable for now).
+
+**Tests**: `tests/unit/test_privacy_gate.py` (49 tests — mode/capability
+matrix, flush/enter/exit callbacks, epoch-based race guarantees,
+concurrent enter/exit stress test) and
+`tests/unit/test_privacy_memory_integration.py` (real temp-file SQLite
+`MemoryManager`, not mocked — `store_fact`/`on_message`/`index_message`
+denied during PRIVACY and PRIVACY_LOCK, epoch rejection of a
+background-extraction write that started before a privacy transition).
+Maps to the acceptance criteria named in the task: PRIV-001 (audio) —
+covered at the gate+continuous_listener level, not yet observed against
+real mic hardware; PRIV-002 (screen) — covered, `take_screenshot`
+returns `None`/no file; PRIV-003 (memory) — covered by the integration
+tests; PRIV-004 (cloud) — covered at the gate level for both cloud call
+sites; PRIV-005 (exit/no catch-up) — covered by the epoch race tests.
+
+## 12. Lifecycle / shutdown audit (session #5)
+
+Session #5 re-read `jarvis_continuous.py`'s shutdown `finally:` block
+against everything it starts (continuing session #4's shutdown fix
+above) and found two concrete gaps, both now fixed:
+
+- **`Watchdog.stop()` was never called.** `core/watchdog.py`'s
+  `Watchdog` is a daemon thread, started in `jarvis_continuous.py` when
+  `watchdog.enabled` (config, default `True`), and exposes `stop()`
+  (sets a `threading.Event`) — but grepping the shutdown block found
+  zero calls to it. Being a daemon thread it wouldn't have blocked
+  process exit, but its health-check loop and any in-flight recovery
+  action never got a clean stop signal. Fixed: `self.watchdog.stop()`
+  added to the `finally:` block, guarded by `hasattr`/truthiness so it's
+  safe regardless of whether the watchdog was actually started.
+- **`TextToSpeech._chatterbox_session` (a `requests.Session()` with its
+  own connection pool, created once in `TextToSpeech.__init__`) was
+  never closed.** Confirmed via a full-repo grep for
+  `_chatterbox_session.close()` returning zero matches before this
+  change. Fixed: closed right after `self.tts.kill_active()` in the same
+  `finally:` block.
+
+**Checked and found already adequate, not changed**: `MemoryManager`
+has no persistent SQLite connection to close (each read/write already
+opens a short-lived `sqlite3.connect()` per call — confirmed by reading
+`_get_conn()`/`store_fact()`), so `memory_manager.save()` (already
+called per the session #4 fix above) covers what actually needs
+flushing (FAISS). Signal handlers' `sys.exit(0)` still reaches the
+`finally:` block correctly (`SystemExit` unwinds through it regardless
+of the `except KeyboardInterrupt` clause not catching that specific
+exception type) — re-verified, not just assumed, by tracing the call
+stack.
+
+**Not audited this session, flagged as open**: background extraction
+threads spawned by `memory_manager._trigger_batch_extraction()`/
+`_trigger_per_turn_extraction()` are daemon threads with no explicit
+join/cancel on shutdown — they'll die with the process, which is
+probably fine (no partial-write risk, since `store_fact()` either
+completes a full SQLite transaction or doesn't run), but wasn't
+specifically verified this session. Consolidation/decay worker
+lifecycle is moot since that mechanism doesn't exist yet (§14 item 12).
+
+**Not testable in this sandbox**: `jarvis_continuous.py` is the
+monolithic entrypoint and imports `core.continuous_listener` at module
+scope, which requires the `sounddevice`/PortAudio native library — not
+installable here (confirmed: `pip install sounddevice` succeeds but
+`import sounddevice` raises `OSError: PortAudio library not found`).
+Verified by code inspection and `python3 -m py_compile` only.
+
+## 13. Sleepy systemd units (session #5, NEEDS HW VERIFY)
+
+`systemd/llama-server.service`, `systemd/chatterbox.service` (new — no
+Chatterbox unit existed anywhere in the repo before this session,
+confirmed by grep), and `systemd/jarvis.service` were written this
+session using the real `/home/alex/...` paths already present in
+`config.yaml` (which `core/config.py` actually loads at runtime — not a
+placeholder file), replacing the stale `/home/user/...` and
+`/mnt/models/...` paths in the old root-level `jarvis.service`/
+`llama-server.service` (left in place, not deleted, each with a
+one-line header pointing at the replacement). Also fixed:
+`--ctx-size 32768` (was `8192`, now matches `config.yaml`'s
+`llm.local.context_size`), `EnvironmentFile=-/home/alex/jarvis/.env` for
+secrets instead of an inline placeholder value, `Restart=on-failure` +
+sensible `TimeoutStopSec`, `ExecStartPre` existence checks, and
+`jarvis.service` soft-depending (`Wants=`/`After=`, not `Requires=`) on
+the other two — matching the fallback logic that already exists in code
+(`llm_router.py`'s cloud fallback, `tts.py`'s Piper fallback), so a down
+llama-server/Chatterbox doesn't block JARVIS starting in degraded mode.
+
+**This session had no shell access to Sleepy** — no `whoami`, no
+`realpath`, no way to confirm the venv, the `llama-server` binary, or
+any model file actually exists at these paths, and no `systemctl`/
+`journalctl` was run. `systemd/README.md` states this plainly, gives the
+exact verification checklist (in order) and install steps for whoever
+has real Sleepy access, and explicitly flags the one path that's a
+genuine unknown rather than a documented target: whether Chatterbox
+needs its own separate venv from the main `jarvis-venv` (its GPU/torch
+dependency set may conflict with the main venv's pins — this couldn't
+be checked without running on Sleepy). **Do not report this workstream
+as validated until someone actually runs that checklist and records
+real output** — that's the explicit instruction this section is
+following, not an oversight.
+
+Deliberately not included: `small-llm.service` — `config.yaml` names
+`127.0.0.1:8081` as the small model's endpoint, but nothing in this
+repo says what process/binary/model actually serves that port, and the
+task said only add this unit "wenn der reale Small-LLM-Pfad zweifelsfrei
+bestimmt werden kann."
+
+## 14. Open work / recommended next steps
 
 Roughly in priority order — see §3.4/§3.5 for TTS specifics, §5a-e for
 German-first/memory specifics, §8/§9 for instrumentation/preflight.
 
-**Resolved across sessions #3-4 (previously listed here, no longer open):**
+**Resolved across sessions #3-5 (previously listed here, no longer open):**
 honorific-default question (Sir/Ma'am confirmed wanted) · Chatterbox
 connection reuse/circuit breaker/connect-timeout · streaming queue
 backpressure · sentence-final numbers not normalized (real bug, fixed) ·
@@ -957,52 +1191,63 @@ tiers + reinforcement · value-based reinforcement-vs-supersede (the
 commands/why-query · TTS startup warmup contention · 3 CRITICAL bugs from
 the memory/concurrency reviews (§5d/§5e) · real latency instrumentation
 (§8, implemented — was previously the single biggest documented gap) ·
-startup preflight script (§9).
+startup preflight script (§9) · **cancellable/bounded contextual-ack
+synthesis (§3.4, session #5)** · **polarity-reversal memory bug (§5d,
+session #5)** · **central PrivacyGate, P0 (§11, session #5, new)** ·
+**watchdog.stop()/Chatterbox session-close shutdown gaps (§12, session
+#5)**.
 
 1. **German-first backlog — ~330-340 strings across ~12 files, see the
-   table in §5a.** The single largest remaining piece of work.
-   `skills/personal/conversation/skill.py` (~90, confirmed active) is the
-   best first target — it's a near-duplicate of `core/persona.py`'s
+   table in §5a.** The single largest remaining piece of work. Not
+   attempted in session #5 (P0/P1 items took priority — see §11/§5d/§3.4/
+   §13). `skills/personal/conversation/skill.py` (~90, confirmed active)
+   is the best first target — it's a near-duplicate of `core/persona.py`'s
    already-German pools, so equivalent phrasing already exists to adapt.
+   Per session #5's own pass over `skills/system/*`: `app_launcher/skill.py`
+   is the most English-heavy of the system skills (~64 remaining
+   user-facing strings by a heuristic grep), `file_editor/skill.py` is a
+   partial migration in progress (~20 remaining, some already German),
+   `conversation/skill.py` itself has only ~2 stray English strings left.
 2. Live GPU run of the Chatterbox streaming path (`_ChatterboxAudioWriter`
-   producer/consumer, bounded queue, circuit breaker, throttled warmup) —
-   this environment has no CUDA, so all of it is verified with fakes/
-   mocks but not yet observed against the real server. Do this before
-   relying on any of it in production.
-3. Cancellable/bounded contextual-ack synthesis so a slow Chatterbox ack
-   can't delay the real response's first audio chunk (§3.4) — still open.
-4. Kokoro/Chatterbox `_tts_lock` scope inconsistency found by the
+   producer/consumer, bounded queue, circuit breaker, throttled warmup,
+   and session #5's new `cancel_check`/`timeout_override` bound on
+   contextual-ack synthesis) — this environment has no CUDA, so all of it
+   is verified with fakes/mocks but not yet observed against the real
+   server. Do this before relying on any of it in production.
+3. Kokoro/Chatterbox `_tts_lock` scope inconsistency found by the
    Concurrency reviewer (§5e) — Kokoro holds the lock through playback
    backpressure, Chatterbox releases it earlier, so `speak_ack()`
    starvation risk differs by engine. Not fixed (Kokoro is inactive,
    judged lower priority than the Chatterbox-side fixes actually made).
-5. Redesign fact storage/extraction to not be English-sentence-shaped
+4. Redesign fact storage/extraction to not be English-sentence-shaped
    (§5b) — `render_fact_de()` (§5d) works around this for facts with a
    structured `value`, but older/one-group-extracted facts still fall
    back to raw English content.
-6. Sentiment/polarity-aware value comparison for memory reinforcement
-   (§5d) — "ich liebe X" → "ich hasse X" currently reinforces instead of
-   registering as a reversal, since both extract the same `value="X"`.
-7. Embedding-based contradiction detection for memory facts (§5c/§5d
+5. Embedding-based contradiction detection for memory facts (§5c/§5d
    document why the text-similarity approach that was tried doesn't
-   work — don't repeat that attempt).
-8. Vocal-behavior layer: now that `chatterbox_server.py` accepts
+   work — don't repeat that attempt). Session #5's keyword-lexicon
+   polarity check (§5d) is a narrower, cheaper fix for the specific
+   "liebe X" → "hasse X" case, not a replacement for this.
+6. Vocal-behavior layer: now that `chatterbox_server.py` accepts
    per-request `exaggeration`/`cfg_weight`/etc. overrides, design the
    policy that decides when to use them (e.g. per persona mood, per
    response category).
-9. Decide the fate of `core/tts_normalizer.py` (unused English normalizer)
+7. Decide the fate of `core/tts_normalizer.py` (unused English normalizer)
    and `core/health_check.py`'s `format_voice_summary()` (confirmed dead
    code this session) — delete, or document as intentionally kept.
-10. Delete `legacy_backups_20260915/` once confirmed unneeded.
-11. `tests/unit/test_edge_cases.py` phase 7C-03 (`"Dr. Smith..."`) asserts
+8. Delete `legacy_backups_20260915/` once confirmed unneeded.
+9. `tests/unit/test_edge_cases.py` phase 7C-03 (`"Dr. Smith..."`) asserts
     pre-abbreviation-guard chunking behavior — stale test expectation,
     not a pipeline bug.
-12. Rewrite the stale `jarvis.service`/`llama-server.service`/
-    `flux-server.service` templates (§9) with real Sleepy paths/username
-    — needs to happen ON Sleepy, where the real paths/username are known
-    and the result can actually be tested; guessing them here would just
-    be a different flavor of wrong.
-13. STT hot-path (persistent model residency, adaptive endpointing), LLM
+10. **Sleepy systemd units — written and corrected this session
+    (`systemd/llama-server.service`, `systemd/chatterbox.service`,
+    `systemd/jarvis.service`), but NEEDS HW VERIFY — see §13 and
+    `systemd/README.md`.** Not installed, not started, no `systemctl`/
+    `journalctl` output exists yet. This was previously listed as
+    "needs to happen ON Sleepy" — it still does, for the install/
+    verify/enable step; the unit files themselves are now ready for
+    that.
+11. STT hot-path (persistent model residency, adaptive endpointing), LLM
     TTFT (prompt/context size, prewarm, KV-cache reuse), and fast-paths
     for deterministic local commands (open app, set volume, etc. without
     the 35B model) — all explicitly requested, all require either live
@@ -1010,9 +1255,26 @@ startup preflight script (§9).
     §8's instrumentation exists, the very next step on Sleepy should be:
     run real turns, read the `JARVIS LATENCY` lines, and let the actual
     bottleneck (not a guess) decide which of these to tackle first.**
-14. Memory: no autonomy budget (max candidates/promotions per session),
-    no explicit consolidation job (session-end/idle-triggered review of
-    short-term → long-term), no decay (candidates with low confidence
-    that age out un-reinforced). All explicitly requested; not built —
-    the additive tier/reinforcement/risk-gate work (§5c/§5d) was judged
-    the highest-value, lowest-risk slice to ship across these sessions.
+    §8's checkpoint set was NOT extended this session (still
+    `command_received` → `response_done`, not the fuller
+    `speech_end`→...→`response_done` chain that was requested) — the
+    research done this session found the reason: no turn-id/tracker
+    handoff exists yet between `continuous_listener.py`'s callback
+    thread (where speech_end/VAD/STT would be marked) and
+    `core/pipeline.py` (where the tracker is currently created,
+    at `command_received`). Building that handoff is real, separate
+    work, not attempted this session — see §12 note.
+12. Memory: no explicit consolidation job (session-end/idle-triggered
+    review of short-term → long-term), no decay (candidates with low
+    confidence that age out un-reinforced), no configurable autonomy
+    budget (max candidates/promotions/consolidation runs per session).
+    All explicitly requested across sessions #4 and #5; still not
+    built — session #5 prioritized the polarity-reversal correctness
+    bug (§5d) over these, since a wrong REINFORCE is a worse failure
+    mode than a missing decay/budget mechanism. Next session's highest-
+    value memory work.
+13. Privacy: filesystem observation, session summarization, and
+    agent-context-ingest call sites were not part of session #5's
+    verified research (the research agent's own report flagged these
+    as not read in depth) and are **not yet wired to PrivacyGate** —
+    see §11's "Deferred" note. Don't assume they're covered.
