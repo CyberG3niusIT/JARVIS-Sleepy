@@ -67,25 +67,28 @@ dokumentiert nur die technische Uebersetzung, keine neuen Entscheidungen.
 | `screens/chat-screen.tsx` | `feature/chat/ChatScreen.kt` | ported (core layout, message list, composer, execution tags; attachment picker UI deferred, see OPEN_DECISIONS) |
 | `screens/system-screen.tsx` (overview) | `feature/system/SystemOverviewScreen.kt` | ported |
 | `screens/more-screen.tsx` (overview) | `feature/more/MoreOverviewScreen.kt` | ported |
-| `screens/models-screen.tsx` | `feature/system/ModelsScreen.kt` | scaffolded (`JarvisDetailHeader` + real IA copy + `JarvisNotImplementedState`/list skeleton), full row-level port next |
-| `screens/agents-screen.tsx` | `feature/system/AgentsScreen.kt` | scaffolded |
-| `screens/tools-screen.tsx` | `feature/system/ToolsScreen.kt` | scaffolded |
-| `screens/permissions-screen.tsx` | `feature/system/PermissionsScreen.kt` | scaffolded |
-| `screens/privacy-screen.tsx` | `feature/system/PrivacyScreen.kt` | scaffolded |
-| `screens/runtimes-screen.tsx` | `feature/system/RuntimesScreen.kt` | scaffolded |
-| `screens/device-screen.tsx` | `feature/system/DeviceScreen.kt` | scaffolded |
-| `screens/diagnostics-screen.tsx` | `feature/system/DiagnosticsScreen.kt` | scaffolded |
-| `screens/voice-screen.tsx` | `feature/more/VoiceScreen.kt` | scaffolded |
-| `screens/memory-screen.tsx` | `feature/more/MemoryScreen.kt` | scaffolded |
-| `screens/automations-screen.tsx` + `automation-editor.tsx` | `feature/more/AutomationsScreen.kt` | scaffolded |
-| `screens/settings-screen.tsx` | `feature/more/SettingsScreen.kt` | scaffolded |
-| `screens/about-screen.tsx` | `feature/more/AboutScreen.kt` | scaffolded |
+| `screens/models-screen.tsx` | `feature/system/ModelsScreen.kt` | ported (current-state rows, empty local-model list, management capabilities, add-model sheet entry point); catalog browser / local-file import flows (`models-demo.tsx`) deferred |
+| `screens/agents-screen.tsx` | `feature/system/AgentsScreen.kt` | ported (agent model, safety bounds, empty running-tasks state, full demo-agent detail sheet with cancel/retry/fail-demo/error/tool-activity) |
+| `screens/tools-screen.tsx` | `feature/system/ToolsScreen.kt` | ported (full `capabilityRows` capability audit list) |
+| `screens/permissions-screen.tsx` | `feature/system/PermissionsScreen.kt` | ported (eight access-area groups, detail sheet with why-needed/capabilities/demo-state selector) |
+| `screens/privacy-screen.tsx` | `feature/system/PrivacyScreen.kt` | ported (mode selector, explain sheet, PRIVACY_LOCK/relax confirm dialogs, protected groups, guarantees) |
+| `screens/runtimes-screen.tsx` | `feature/system/RuntimesScreen.kt` | ported (this-device/trusted-runtime/cloud rows, handoff-package structure); pairing/trust/handoff demo sections (`runtimes-demo.tsx`) deferred, see OPEN_DECISIONS Sec.1 |
+| `screens/device-screen.tsx` | `feature/system/DeviceScreen.kt` | ported (real `android.os.Build` fields) |
+| `screens/diagnostics-screen.tsx` | `feature/system/DiagnosticsScreen.kt` | ported (empty history/crash states, redaction rules, export notice) |
+| `screens/voice-screen.tsx` | `feature/more/VoiceScreen.kt` | ported (full labelled state machine + transition controls, Wake Word/STT/TTS configuration sheets) |
+| `screens/memory-screen.tsx` | `feature/more/MemoryScreen.kt` | ported (layers/provenance/rules lists, empty baseline, full demo-entry detail sheet with confirm/correct/discard/supersede/provenance) |
+| `screens/automations-screen.tsx` | `feature/more/AutomationsScreen.kt` | ported (types, execution rules, empty baseline state); full step/condition/schedule editor (`automation-editor.tsx`, 685 lines) and the local in-session automation list deferred |
+| `screens/settings-screen.tsx` | `feature/more/SettingsScreen.kt` | ported |
+| `screens/about-screen.tsx` | `feature/more/AboutScreen.kt` | ported |
 
-"Scaffolded" = real route, real title/subtitle/purpose text taken verbatim
-from `src/lib/jarvis/ia.ts`, uses the shared design-system components and the
-correct `SystemState`, but does not yet reproduce every row of the web
-reference. Row-level parity for these follows in the same branch; each is
-tracked as its own small commit so review stays possible.
+All thirteen System/Mehr detail destinations now render their full static
+content and locked German copy from the web reference. What remains
+deferred everywhere is *interactive* content that needs a real backing
+system to mean anything: attachment picking (Chat), the model
+catalog/import flows (Modelle), Sleepy pairing/trust (Runtimes), and the
+automation editor's step/condition/schedule builder (Automationen). Each is
+called out in its screen's doc comment and, where it touches an open
+architecture question, in OPEN_DECISIONS.md.
 
 ## State layering (goal spec Sec. 13)
 
