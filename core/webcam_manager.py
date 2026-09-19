@@ -48,6 +48,8 @@ class WebcamManager:
         vision_cfg = config.get("vision", {})
         self._device = vision_cfg.get("webcam_device", "/dev/video0")
         self._fps = vision_cfg.get("webcam_fps", 15)
+        from core.privacy_gate import get_privacy_gate
+        self._privacy_gate = get_privacy_gate(config)
 
         self._process: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task | None = None
@@ -68,6 +70,10 @@ class WebcamManager:
         """Start the ffmpeg subprocess and frame reader."""
         if self._running:
             return
+
+        from core.privacy_gate import Capability
+        if not self._privacy_gate.allow(Capability.WEBCAM_CAPTURE):
+            raise PermissionError("webcam capture denied by privacy gate")
 
         if not os.path.exists(self._device):
             raise FileNotFoundError(f"Webcam device not found: {self._device}")

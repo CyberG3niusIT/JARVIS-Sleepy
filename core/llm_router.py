@@ -23,6 +23,7 @@ from pathlib import Path
 from datetime import date, datetime
 from core.logger import get_logger
 from core.honorific import get_honorific, get_formal_address
+from core.privacy_gate import get_privacy_gate, Capability
 import requests
 import json
 
@@ -60,6 +61,7 @@ class LLMRouter:
         """
         self.config = config
         self.logger = get_logger(__name__, config)
+        self._privacy_gate = get_privacy_gate(config)
 
         # User location (injected into system prompt)
         self.home_location = config.get("location.home_address")
@@ -436,6 +438,10 @@ class LLMRouter:
         Returns:
             Generated text
         """
+        if not self._privacy_gate.allow(Capability.CLOUD_LLM):
+            self.logger.info("_generate_api denied by privacy gate — no cloud request sent")
+            return ""
+
         start = time.time()
         try:
             # Import anthropic SDK

@@ -13,6 +13,7 @@ import time
 import logging
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 logger = get_logger("jarvis.debug_logger")
 
 _SENTINEL_PATH = "/tmp/.jarvis_debug_active"
@@ -31,6 +32,8 @@ class ConversationDebugLogger:
 
     def _write(self, event_type: str, data: dict):
         """Write one JSONL event line."""
+        if not get_privacy_gate().allow(Capability.CONTENT_LOGGING):
+            return
         record = {
             "ts": time.time(),
             "type": event_type,

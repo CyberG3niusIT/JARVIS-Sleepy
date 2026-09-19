@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 
 
 # Singleton instance
@@ -183,6 +184,7 @@ class MemoryManager:
         # each also acquire this same lock internally. A plain Lock would
         # self-deadlock on that nested acquisition.
         self._db_lock = threading.RLock()
+        self._privacy_gate = get_privacy_gate(config)
         self._message_count_since_batch = 0
         self._surfaced_this_window = set()  # fact_ids surfaced in current conversation window
         self._pending_forget = None  # Phase 6: pending forget confirmation
@@ -437,6 +439,8 @@ class MemoryManager:
 
     def index_message(self, message: dict):
         """Embed and add a single message to FAISS index. ~1-2ms."""
+        if not self._privacy_gate.allow(Capability.EMBEDDING_GENERATE):
+            return
         if self.faiss_index is None or not self.embedding_model:
             return
 
@@ -1317,6 +1321,13 @@ class MemoryManager:
 
     def on_message(self, message: dict):
         """Called on every message. Handles FAISS indexing + fact extraction + batch trigger + per-turn extraction."""
+        # PRIV-003/PRIV-001: while privacy is active, this message's
+        # content must never be indexed, extracted, or queued for
+        # background extraction. No candidate/short-term/long-term write
+        # of any kind starts here.
+        if not self._privacy_gate.allow(Capability.MEMORY_EXTRACT):
+            return
+
         # Index all messages (user + assistant) in FAISS
         self.index_message(message)
 
@@ -1375,11 +1386,21 @@ class MemoryManager:
     def _trigger_batch_extraction(self):
         """Launch background thread for LLM batch extraction."""
         self._message_count_since_batch = 0
-        thread = threading.Thread(target=self._run_batch_extraction, daemon=True)
+        captured_epoch = self._privacy_gate.epoch()
+        thread = threading.Thread(target=self._run_batch_extraction, args=(captured_epoch,), daemon=True)
         thread.start()
 
-    def _run_batch_extraction(self):
-        """Background: extract implicit facts from last N messages via Qwen."""
+    def _run_batch_extraction(self, captured_epoch: str = None):
+        """Background: extract implicit facts from last N messages via Qwen.
+
+        `captured_epoch` is the privacy epoch at trigger time. If privacy
+        has transitioned (enter OR exit) by the time this runs, the epoch
+        no longer matches and extraction is aborted — this is what stops
+        content that started extracting before a privacy transition from
+        being written after it (see core/privacy_gate.py docstring).
+        """
+        if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+            return
         try:
             from datetime import datetime
 
@@ -1420,6 +1441,8 @@ class MemoryManager:
                     if not content.lower().startswith(user_name.lower()):
                         self.logger.warning("Batch extraction rejected (no name prefix): %s", content[:80])
                         continue
+                    if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+                        return
                     fact_id = self.store_fact({
                         "user_id": user_id,
                         "category": fact_data.get("category", "general"),
@@ -1469,9 +1492,10 @@ class MemoryManager:
     def _trigger_per_turn_extraction(self, user_msg: str, assistant_msg: str, user_id: str):
         """Launch background thread for per-turn LLM extraction."""
         self._per_turn_in_progress = True
+        captured_epoch = self._privacy_gate.epoch()
         thread = threading.Thread(
             target=self._run_per_turn_extraction,
-            args=(user_msg, assistant_msg, user_id),
+            args=(user_msg, assistant_msg, user_id, captured_epoch),
             daemon=True,
         )
         thread.start()
@@ -1490,8 +1514,14 @@ class MemoryManager:
         # Fallback: capitalize the user_id itself
         return user_id.capitalize() if user_id and user_id != "__guest__" else "User"
 
-    def _run_per_turn_extraction(self, user_msg: str, assistant_msg: str, user_id: str):
-        """Background: extract facts from a single exchange via Qwen."""
+    def _run_per_turn_extraction(self, user_msg: str, assistant_msg: str, user_id: str, captured_epoch: str = None):
+        """Background: extract facts from a single exchange via Qwen.
+
+        See _run_batch_extraction's docstring for why captured_epoch matters.
+        """
+        if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+            self._per_turn_in_progress = False
+            return
         try:
             # Truncate to avoid excessive token usage
             user_msg = user_msg[:500]
@@ -1525,6 +1555,8 @@ class MemoryManager:
                     if not content.lower().startswith(user_name.lower()):
                         self.logger.warning("Per-turn extraction rejected (no name prefix): %s", content[:80])
                         continue
+                    if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+                        return
                     fact_id = self.store_fact({
                         "user_id": user_id,
                         "category": fact_data.get("category", "general"),
@@ -1565,6 +1597,14 @@ class MemoryManager:
         rows, or both reinforce from the same stale snapshot and lose one
         of two observations (TOCTOU race).
         """
+        if not self._privacy_gate.allow(Capability.MEMORY_WRITE):
+            # PRIV-003: no candidate/confirmed write of any kind while
+            # privacy is active — including from a background extraction
+            # thread that started before privacy was entered (see the
+            # epoch checks in _run_batch_extraction/_run_per_turn_extraction,
+            # this is the second line of defense for anything that slips
+            # past those).
+            return None
         with self._db_lock:
             return self._store_fact_locked(fact)
 

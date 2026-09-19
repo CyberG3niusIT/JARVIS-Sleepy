@@ -14,6 +14,7 @@ import subprocess
 from typing import Optional
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 
 # ---------------------------------------------------------------------------
 # Singleton
@@ -53,6 +54,7 @@ class DesktopManager:
         self.logger = get_logger("desktop_manager", config)
         self._extension_uuid = config.get("desktop.extension_uuid", "jarvis-desktop@jarvis")
         self._fallback_wmctrl = config.get("desktop.fallback_wmctrl", True)
+        self._privacy_gate = get_privacy_gate(config)
 
         # Lazy D-Bus proxy — don't block startup
         self._proxy = None
@@ -353,6 +355,9 @@ class DesktopManager:
 
     def get_clipboard(self) -> Optional[str]:
         """Get clipboard contents. Requires wl-clipboard."""
+        if not self._privacy_gate.allow(Capability.CLIPBOARD_READ):
+            self.logger.info("get_clipboard denied by privacy gate")
+            return None
         try:
             result = subprocess.run(
                 ["wl-paste", "--no-newline"],
@@ -395,6 +400,10 @@ class DesktopManager:
         Returns:
             File path on success, None on failure.
         """
+        if not self._privacy_gate.allow(Capability.SCREEN_CAPTURE):
+            self.logger.info("take_screenshot denied by privacy gate — no artifact created")
+            return None
+
         import time as _time
         if output_path is None:
             output_path = f"/tmp/jarvis_screenshot_{int(_time.time())}.png"

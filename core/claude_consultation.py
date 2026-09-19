@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 
 logger = get_logger(__name__)
 
@@ -122,6 +123,7 @@ class ClaudeConsultation:
             "claude-opus-4-20250514",
         )
         self.max_tokens = config.get("consultation.max_tokens", 4096)
+        self._privacy_gate = get_privacy_gate(config)
         self._history: list[dict] = []
         logger.info(
             "ClaudeConsultation initialized: model=%s, max_tokens=%d",
@@ -237,6 +239,9 @@ class ClaudeConsultation:
 
     def _call_claude(self, message: str) -> str:
         """Call the Claude API and return the response text."""
+        if not self._privacy_gate.allow(Capability.CLOUD_LLM):
+            raise PermissionError("Claude consultation denied by privacy gate")
+
         import anthropic
 
         api_key = self.config.get_env(self.api_key_env)

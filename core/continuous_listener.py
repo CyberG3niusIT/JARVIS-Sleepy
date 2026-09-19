@@ -17,6 +17,7 @@ from typing import Optional, Callable
 from core.logger import get_logger
 from core.vad import VoiceActivityDetector
 from core.stt import SpeechToText
+from core.privacy_gate import get_privacy_gate, Capability
 
 # Try to import RNNoise for noise suppression
 try:
@@ -99,6 +100,13 @@ class ContinuousListener:
         self.speech_buffer = []
         self._buffer_lock = threading.Lock()  # protects speech_buffer access across threads
         self._vad_timestamps = []  # rate-limit VAD triggers (noise burst detection)
+
+        # Privacy gate: MIC_INGEST/STT are checked before speech is handed
+        # off (see _on_speech_start/_process_speech). register_flush_callback
+        # ensures any already-collected frames are dropped synchronously the
+        # moment privacy is entered, so they can never reach STT after.
+        self._privacy_gate = get_privacy_gate(config)
+        self._privacy_gate.register_flush_callback(self._privacy_flush_speech_buffer)
         self._last_vad_activity_ts = 0.0  # monotonic timestamp of last VAD speech detection
         
         # Conversation window - allow responses without wake word during conversation
@@ -159,10 +167,27 @@ class ContinuousListener:
         
         self.logger.info("Continuous listener initialized")
     
+    def _privacy_flush_speech_buffer(self):
+        """PrivacyGate flush callback: drop any in-flight speech collection.
+
+        Called synchronously (under the gate's lock) on both enter() and
+        exit(), so a speech snippet that started collecting just before a
+        privacy transition can never be concatenated and handed to STT.
+        """
+        with self._buffer_lock:
+            self.speech_buffer = []
+        self.collecting_speech = False
+        self._pre_speech_audio = np.array([], dtype=np.float32)
+
     def _on_speech_start(self):
         """Callback when VAD detects speech start"""
         # Don't start collecting if we're paused for TTS playback
         if self._speaking_event.is_set() or self.speaking:
+            return
+
+        # Privacy: do not even begin buffering speech while mic ingestion
+        # is denied. PRIV-001.
+        if not self._privacy_gate.allow(Capability.MIC_INGEST):
             return
 
         # Rate-limit VAD triggers to avoid wasting CPU on ambient noise floods
@@ -316,6 +341,16 @@ class ContinuousListener:
     
     def _process_speech(self):
         """Process collected speech"""
+        # Defense in depth: privacy may have been entered mid-collection
+        # (after _on_speech_start's check but before this runs). Drop
+        # rather than forward to STT/audio_queue. PRIV-001.
+        if not self._privacy_gate.allow(Capability.MIC_INGEST) or not self._privacy_gate.allow(Capability.STT):
+            with self._buffer_lock:
+                self.collecting_speech = False
+                self.speech_buffer = []
+            self._pre_speech_audio = np.array([], dtype=np.float32)
+            return
+
         self.logger.info(f"💬 Processing speech ({len(self.speech_buffer)} frames)")
         print(f"💬 Processing speech...")
 
