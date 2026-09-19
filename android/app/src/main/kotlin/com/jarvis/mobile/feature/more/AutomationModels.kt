@@ -2,6 +2,7 @@ package com.jarvis.mobile.feature.more
 
 import com.jarvis.mobile.core.model.ExecutionLocation
 import com.jarvis.mobile.core.model.PrivacyMode
+import com.jarvis.mobile.core.util.StringFieldCodec
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -116,7 +117,7 @@ fun draftSummary(draft: AutomationDraft): String = when (draft.type) {
 }
 
 /**
- * Flat string encoding for [AutomationDraft], used by every `rememberSaveable`
+ * String encoding for [AutomationDraft], used by every `rememberSaveable`
  * that needs to survive configuration changes AND process death (rotation,
  * activity recreation): a single [String] is unconditionally Bundle-safe,
  * unlike a nested `List<List<Any>>`. Shared by the editor's own draft state
@@ -124,55 +125,79 @@ fun draftSummary(draft: AutomationDraft): String = when (draft.type) {
  * [AutomationsScreen], so a draft is always encoded exactly once, the same
  * way, everywhere.
  *
- * Separator hierarchy (all non-printable control characters, never typable
- * via an IME, so they cannot collide with real user input in name/purpose/
- * step or condition text):
- * - [STEP_FIELD_SEP] between a step or condition's id and its label/text.
- * - [STEP_ITEM_SEP] between entries of the steps or conditions list.
- * - [DRAFT_FIELD_SEP] between a draft's top-level fields.
- * - [DRAFT_SEP] between drafts in an encoded automations list.
- * - [SESSION_SEP] between an editor session's mode and its encoded draft.
+ * Built on [StringFieldCodec]'s length-prefixed fields, so no field - a
+ * name, purpose, step label or condition text - can ever be misread as a
+ * separator or a list boundary, whatever characters it contains.
  */
-private const val STEP_FIELD_SEP = "\u0001"
-private const val STEP_ITEM_SEP = "\u0002"
-private const val DRAFT_FIELD_SEP = "\u0003"
-const val AUTOMATION_DRAFT_LIST_SEP = "\u0004"
-const val AUTOMATION_SESSION_SEP = "\u0005"
-
-private fun encodeSteps(steps: List<AutomationStep>) = steps.joinToString(STEP_ITEM_SEP) { "${it.id}$STEP_FIELD_SEP${it.label}" }
-private fun decodeSteps(raw: String): List<AutomationStep> = if (raw.isEmpty()) emptyList() else raw.split(STEP_ITEM_SEP).map {
-    val (id, label) = it.split(STEP_FIELD_SEP, limit = 2)
-    AutomationStep(id, label)
+private fun encodeSteps(steps: List<AutomationStep>): String {
+    val writer = StringFieldCodec.writer()
+    writer.write(steps.size.toString())
+    steps.forEach { writer.write(it.id); writer.write(it.label) }
+    return writer.build()
 }
 
-private fun encodeConditions(conditions: List<AutomationCondition>) = conditions.joinToString(STEP_ITEM_SEP) { "${it.id}$STEP_FIELD_SEP${it.text}" }
-private fun decodeConditions(raw: String): List<AutomationCondition> = if (raw.isEmpty()) emptyList() else raw.split(STEP_ITEM_SEP).map {
-    val (id, text) = it.split(STEP_FIELD_SEP, limit = 2)
-    AutomationCondition(id, text)
+private fun decodeSteps(raw: String): List<AutomationStep> {
+    val reader = StringFieldCodec.reader(raw)
+    val size = reader.read().toInt()
+    return List(size) { AutomationStep(id = reader.read(), label = reader.read()) }
 }
 
-fun encodeAutomationDraft(d: AutomationDraft): String = listOf(
-    d.id, d.type.name, d.name, d.purpose, d.enabled.toString(), d.runtime.name, d.privacy.name,
-    d.permissions.joinToString(STEP_ITEM_SEP), encodeSteps(d.steps), d.scheduleMode.name,
-    d.scheduleDateTime, d.scheduleInterval, d.conditionLogic.name, encodeConditions(d.conditions),
-).joinToString(DRAFT_FIELD_SEP)
+private fun encodeConditions(conditions: List<AutomationCondition>): String {
+    val writer = StringFieldCodec.writer()
+    writer.write(conditions.size.toString())
+    conditions.forEach { writer.write(it.id); writer.write(it.text) }
+    return writer.build()
+}
+
+private fun decodeConditions(raw: String): List<AutomationCondition> {
+    val reader = StringFieldCodec.reader(raw)
+    val size = reader.read().toInt()
+    return List(size) { AutomationCondition(id = reader.read(), text = reader.read()) }
+}
+
+fun encodeAutomationDraft(d: AutomationDraft): String {
+    val writer = StringFieldCodec.writer()
+    writer.write(d.id)
+    writer.write(d.type.name)
+    writer.write(d.name)
+    writer.write(d.purpose)
+    writer.write(d.enabled.toString())
+    writer.write(d.runtime.name)
+    writer.write(d.privacy.name)
+    writer.write(StringFieldCodec.encodeStringList(d.permissions))
+    writer.write(encodeSteps(d.steps))
+    writer.write(d.scheduleMode.name)
+    writer.write(d.scheduleDateTime)
+    writer.write(d.scheduleInterval)
+    writer.write(d.conditionLogic.name)
+    writer.write(encodeConditions(d.conditions))
+    return writer.build()
+}
 
 fun decodeAutomationDraft(raw: String): AutomationDraft {
-    val f = raw.split(DRAFT_FIELD_SEP)
+    val reader = StringFieldCodec.reader(raw)
     return AutomationDraft(
-        id = f[0],
-        type = AutomationType.valueOf(f[1]),
-        name = f[2],
-        purpose = f[3],
-        enabled = f[4].toBoolean(),
-        runtime = ExecutionLocation.valueOf(f[5]),
-        privacy = PrivacyMode.valueOf(f[6]),
-        permissions = if (f[7].isEmpty()) emptyList() else f[7].split(STEP_ITEM_SEP),
-        steps = decodeSteps(f[8]),
-        scheduleMode = ScheduleMode.valueOf(f[9]),
-        scheduleDateTime = f[10],
-        scheduleInterval = f[11],
-        conditionLogic = ConditionLogic.valueOf(f[12]),
-        conditions = decodeConditions(f[13]),
+        id = reader.read(),
+        type = AutomationType.valueOf(reader.read()),
+        name = reader.read(),
+        purpose = reader.read(),
+        enabled = reader.read().toBoolean(),
+        runtime = ExecutionLocation.valueOf(reader.read()),
+        privacy = PrivacyMode.valueOf(reader.read()),
+        permissions = StringFieldCodec.decodeStringList(reader.read()),
+        steps = decodeSteps(reader.read()),
+        scheduleMode = ScheduleMode.valueOf(reader.read()),
+        scheduleDateTime = reader.read(),
+        scheduleInterval = reader.read(),
+        conditionLogic = ConditionLogic.valueOf(reader.read()),
+        conditions = decodeConditions(reader.read()),
     )
 }
+
+/** Encodes a variable-length list of already-encoded [AutomationDraft] strings as one opaque field. */
+fun encodeAutomationDraftList(drafts: List<AutomationDraft>): String =
+    StringFieldCodec.encodeStringList(drafts.map { encodeAutomationDraft(it) })
+
+/** Decodes a field value previously produced by [encodeAutomationDraftList]. */
+fun decodeAutomationDraftList(raw: String): List<AutomationDraft> =
+    StringFieldCodec.decodeStringList(raw).map { decodeAutomationDraft(it) }

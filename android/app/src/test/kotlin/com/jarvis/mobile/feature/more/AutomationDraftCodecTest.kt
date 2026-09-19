@@ -71,24 +71,67 @@ class AutomationDraftCodecTest {
     }
 
     @Test
-    fun `automations list round trips through the shared list separator`() {
+    fun `automations list round trips through the shared codec`() {
         val drafts = listOf(
             createEmptyDraft(AutomationType.MACRO).copy(name = "Erste"),
             createEmptyDraft(AutomationType.SCHEDULE).copy(name = "Zweite", scheduleInterval = "1 Tag"),
         )
 
-        val encoded = drafts.joinToString(AUTOMATION_DRAFT_LIST_SEP) { encodeAutomationDraft(it) }
-        val restored = encoded.split(AUTOMATION_DRAFT_LIST_SEP).map { decodeAutomationDraft(it) }
+        val restored = decodeAutomationDraftList(encodeAutomationDraftList(drafts))
 
         assertEquals(drafts, restored)
     }
 
     @Test
-    fun `empty automations list encodes to an empty string`() {
-        val drafts = emptyList<AutomationDraft>()
+    fun `empty automations list round trips`() {
+        assertEquals(emptyList<AutomationDraft>(), decodeAutomationDraftList(encodeAutomationDraftList(emptyList())))
+    }
 
-        val encoded = drafts.joinToString(AUTOMATION_DRAFT_LIST_SEP) { encodeAutomationDraft(it) }
+    @Test
+    fun `draft fields containing the previous ad hoc separator characters do not corrupt the round trip`() {
+        val draft = createEmptyDraft(AutomationType.MACRO).copy(
+            name = "a\u0001b\u0002c\u0003d",
+            purpose = "\u0004\u0005 gemischt",
+            steps = listOf(AutomationStep("step\u0001-1", "Label\u0002mit\u0003Steuerzeichen")),
+        )
 
-        assertEquals("", encoded)
+        assertEquals(draft, decodeAutomationDraft(encodeAutomationDraft(draft)))
+    }
+
+    @Test
+    fun `draft fields containing unicode, newlines and colon-digit content do not shift fields`() {
+        val draft = createEmptyDraft(AutomationType.ROUTINE).copy(
+            name = "Nächte 😀 日本語",
+            purpose = "Zeile eins\nZeile zwei\tmit Tab",
+            scheduleDateTime = "12:34:56",
+            conditions = listOf(AutomationCondition("cond-1", "5:hello 0: 12:not-a-header")),
+        )
+
+        assertEquals(draft, decodeAutomationDraft(encodeAutomationDraft(draft)))
+    }
+
+    @Test
+    fun `empty string fields round trip without collapsing steps or conditions`() {
+        val draft = createEmptyDraft(AutomationType.ROUTINE).copy(
+            name = "",
+            purpose = "",
+            scheduleDateTime = "",
+            scheduleInterval = "",
+            permissions = listOf("", "Standort", ""),
+            steps = listOf(AutomationStep("", ""), AutomationStep("step-2", "Zweiter Schritt")),
+            conditions = listOf(AutomationCondition("", "")),
+        )
+
+        assertEquals(draft, decodeAutomationDraft(encodeAutomationDraft(draft)))
+    }
+
+    @Test
+    fun `a list containing drafts whose fields embed encoded-list-like content does not collide with sibling drafts`() {
+        val drafts = listOf(
+            createEmptyDraft(AutomationType.MACRO).copy(name = "5:hello", purpose = "0:"),
+            createEmptyDraft(AutomationType.SCHEDULE).copy(name = "Zweite", scheduleInterval = "1 Tag"),
+        )
+
+        assertEquals(drafts, decodeAutomationDraftList(encodeAutomationDraftList(drafts)))
     }
 }

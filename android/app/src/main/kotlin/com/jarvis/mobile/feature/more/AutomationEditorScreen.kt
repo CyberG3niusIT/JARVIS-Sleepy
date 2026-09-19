@@ -420,23 +420,52 @@ private val AutomationDraftSaver = androidx.compose.runtime.saveable.Saver<Autom
     restore = { decodeAutomationDraft(it) },
 )
 
-private const val SHEET_NONE = "\u0000none"
-private fun encodeStepSheet(s: StepSheetState?): String = s?.let { "${it.id ?: ""}\u0001${it.label}" } ?: SHEET_NONE
+/**
+ * `open` flag first, then id/label, all as [StringFieldCodec] fields -
+ * `null` is encoded as its own explicit flag rather than an empty-string
+ * sentinel, so an id or label that happens to be empty is never confused
+ * with "no sheet open".
+ */
+private fun encodeStepSheet(s: StepSheetState?): String {
+    val writer = com.jarvis.mobile.core.util.StringFieldCodec.writer()
+    writer.write((s != null).toString())
+    if (s != null) {
+        writer.write((s.id != null).toString())
+        writer.write(s.id ?: "")
+        writer.write(s.label)
+    }
+    return writer.build()
+}
 private fun decodeStepSheet(raw: String): StepSheetState? {
-    if (raw == SHEET_NONE) return null
-    val (id, label) = raw.split("\u0001", limit = 2)
-    return StepSheetState(id.ifEmpty { null }, label)
+    val reader = com.jarvis.mobile.core.util.StringFieldCodec.reader(raw)
+    if (!reader.read().toBoolean()) return null
+    val hasId = reader.read().toBoolean()
+    val id = reader.read()
+    val label = reader.read()
+    return StepSheetState(if (hasId) id else null, label)
 }
 private val StepSheetSaver = androidx.compose.runtime.saveable.Saver<StepSheetState?, String>(
     save = { encodeStepSheet(it) },
     restore = { decodeStepSheet(it) },
 )
 
-private fun encodeConditionSheet(s: ConditionSheetState?): String = s?.let { "${it.id ?: ""}\u0001${it.text}" } ?: SHEET_NONE
+private fun encodeConditionSheet(s: ConditionSheetState?): String {
+    val writer = com.jarvis.mobile.core.util.StringFieldCodec.writer()
+    writer.write((s != null).toString())
+    if (s != null) {
+        writer.write((s.id != null).toString())
+        writer.write(s.id ?: "")
+        writer.write(s.text)
+    }
+    return writer.build()
+}
 private fun decodeConditionSheet(raw: String): ConditionSheetState? {
-    if (raw == SHEET_NONE) return null
-    val (id, text) = raw.split("\u0001", limit = 2)
-    return ConditionSheetState(id.ifEmpty { null }, text)
+    val reader = com.jarvis.mobile.core.util.StringFieldCodec.reader(raw)
+    if (!reader.read().toBoolean()) return null
+    val hasId = reader.read().toBoolean()
+    val id = reader.read()
+    val text = reader.read()
+    return ConditionSheetState(if (hasId) id else null, text)
 }
 private val ConditionSheetSaver = androidx.compose.runtime.saveable.Saver<ConditionSheetState?, String>(
     save = { encodeConditionSheet(it) },
