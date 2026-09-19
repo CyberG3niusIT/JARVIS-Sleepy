@@ -51,6 +51,8 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
             text = "Ein lokaler Export ist im Entwurfszustand nicht verfügbar. Sobald er " +
                 "umgesetzt ist, verlässt eine Diagnosedatei das Gerät nur auf ausdrückliche Freigabe.",
         )
+
+        DiagnosticsDemoSection()
     }
 }
 
