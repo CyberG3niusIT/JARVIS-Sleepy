@@ -127,6 +127,61 @@ class MemoryManager:
         text = content.lower()
         return any(kw in text for kw in self._SENSITIVE_KEYWORDS)
 
+    # ------------------------------------------------------------------
+    # Polarity ("liebe X" vs later "hasse X" must never be treated as
+    # REINFORCEMENT just because subject/value match — see
+    # _store_fact_locked). Deliberately a small, explicit keyword
+    # lexicon rather than sentiment analysis: false negatives (polarity
+    # not detected) just fall back to the pre-existing value/content
+    # comparison, which is the same behavior as before this was added —
+    # so an unrecognized phrasing never behaves worse than today.
+    # ------------------------------------------------------------------
+    _POLARITY_CATEGORIES = frozenset({"preference", "opinion"})
+    _POSITIVE_POLARITY_WORDS = frozenset({
+        # German
+        "liebe", "liebt", "liebst", "mag", "mögen", "gerne", "gern",
+        "bevorzuge", "bevorzugt", "genieße", "genießt", "toll", "super",
+        "gefällt", "gefallen",
+        # English
+        "love", "loves", "like", "likes", "enjoy", "enjoys", "prefer",
+        "prefers", "favorite", "favourite", "great", "awesome",
+    })
+    _NEGATIVE_POLARITY_WORDS = frozenset({
+        # German
+        "hasse", "hasst", "hassen", "mag nicht", "mögen nicht",
+        "nicht gern", "nicht gerne", "verabscheue", "verabscheut",
+        "schrecklich", "furchtbar", "kann nicht ausstehen",
+        # English
+        "hate", "hates", "dislike", "dislikes", "can't stand",
+        "cannot stand", "don't like", "doesn't like", "no longer likes",
+        "not anymore", "not a fan",
+    })
+
+    @classmethod
+    def _detect_polarity(cls, category: str, content: str) -> Optional[int]:
+        """Return +1 (positive sentiment), -1 (negative), or None (not
+        a polarity-bearing category, or no recognized sentiment word).
+        Longer, more specific phrases are checked before single words so
+        "mag nicht" wins over the bare "mag" it contains.
+        """
+        if category not in cls._POLARITY_CATEGORIES:
+            return None
+        text = f" {content.lower()} "
+        negative_hits = [w for w in cls._NEGATIVE_POLARITY_WORDS if f" {w} " in text or text.strip().startswith(w)]
+        if negative_hits:
+            return -1
+        positive_hits = [w for w in cls._POSITIVE_POLARITY_WORDS if f" {w} " in text]
+        if positive_hits:
+            # A standalone negation elsewhere in the sentence flips a
+            # positive word ("Alex mag Pizza nicht" — "mag" and "nicht"
+            # aren't adjacent, so the phrase-level negative lexicon
+            # above doesn't catch it, but the sentence is still negative).
+            standalone_negations = {"nicht", "kein", "keine", "not", "n't"}
+            if any(f" {n} " in text for n in standalone_negations):
+                return -1
+            return 1
+        return None
+
     EXPLICIT_PATTERNS = [
         # Preferences (positive)
         (re.compile(r"\b(?:i|I) (?:really )?(?:prefer|like|love|enjoy|always use|always go with)\s+(.+)", re.IGNORECASE), "preference"),
@@ -250,6 +305,17 @@ class MemoryManager:
                     pass  # column already exists
                 try:
                     conn.execute("ALTER TABLE facts ADD COLUMN value TEXT")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+                try:
+                    # Polarity: -1 (negative sentiment/negated), 0 (neutral),
+                    # +1 (positive sentiment). NULL for facts with no
+                    # detectable polarity (most categories) — see
+                    # _detect_polarity(). Legacy rows read back as NULL,
+                    # which compares as "no opinion" rather than as a
+                    # false 0, so old facts remain fully readable and
+                    # simply never trigger the reversal check below.
+                    conn.execute("ALTER TABLE facts ADD COLUMN polarity INTEGER")
                 except sqlite3.OperationalError:
                     pass  # column already exists
 
@@ -1624,6 +1690,9 @@ class MemoryManager:
         # (see _find_similar_fact's docstring: an unconstrained generic
         # subject like "mutter" could otherwise match two unrelated facts).
         category_for_match = fact.get("category", "general")
+        source = fact.get("source", "explicit")
+        confidence = fact.get("confidence", 0.90)
+        new_polarity = self._detect_polarity(category_for_match, content)
         existing = self._find_similar_fact(user_id, subject, content, category=category_for_match)
         if existing:
             new_value = (fact.get("value") or "").strip().lower()
@@ -1650,6 +1719,17 @@ class MemoryManager:
                 # comparison, the only reliable check free text allows.
                 is_same_fact = existing["content"].lower().strip() == content.lower().strip()
 
+            # Polarity reversal always wins over a value/content match.
+            # "Alex liebt Pizza" and "Alex hasst Pizza" can both extract
+            # subject="Pizza"/value="Pizza" (the object of the sentiment,
+            # not the sentiment itself) — a value-only comparison would
+            # wrongly REINFORCE a flat contradiction. See
+            # _detect_polarity()'s docstring.
+            existing_polarity = existing.get("polarity")
+            if (existing_polarity is not None and new_polarity is not None
+                    and existing_polarity != new_polarity):
+                is_same_fact = False
+
             if is_same_fact:
                 # Reinforce rather than silently no-op or duplicate.
                 # Repeated observation of the same candidate is exactly
@@ -1657,17 +1737,33 @@ class MemoryManager:
                 # (see CANDIDATE_CONFIDENCE_THRESHOLD docstring above).
                 self._reinforce_fact(existing)
                 return existing["fact_id"]
-            # Supersede old fact
+
+            # Real change (value differed, or a polarity reversal). An
+            # explicit user statement always outranks a mere inference:
+            # a single inferred/per-turn extraction must not silently
+            # overwrite a fact the user stated directly. Only an
+            # explicit correction (or the user restating it themselves)
+            # may supersede an explicit fact — the inferred contradiction
+            # is instead stored as its own non-superseding low-confidence
+            # candidate, visible but not overwriting the trusted answer.
+            existing_is_explicit = existing.get("source") == "explicit"
+            new_is_explicit = source == "explicit"
             new_id = str(uuid.uuid4())
-            self.update_fact(existing["fact_id"], superseded_by=new_id)
-            self.logger.info(f"Superseding fact {existing['fact_id'][:8]}... with {new_id[:8]}...")
+            if existing_is_explicit and not new_is_explicit:
+                confidence = min(confidence, self.CANDIDATE_CONFIDENCE_THRESHOLD - 0.01)
+                self.logger.info(
+                    "Inferred fact conflicts with explicit fact %s... — "
+                    "stored as candidate %s..., not superseding",
+                    existing["fact_id"][:8], new_id[:8],
+                )
+            else:
+                self.update_fact(existing["fact_id"], superseded_by=new_id)
+                self.logger.info(f"Superseding fact {existing['fact_id'][:8]}... with {new_id[:8]}...")
         else:
             new_id = str(uuid.uuid4())
 
         now = time.time()
-        category = fact.get("category", "general")
-        source = fact.get("source", "explicit")
-        confidence = fact.get("confidence", 0.90)
+        category = category_for_match
         if source != "explicit" and self._is_sensitive(category, content):
             # Risk gate (§7 "Leine"): a non-explicit inference about a
             # sensitive topic never starts above the cap, no matter what
@@ -1681,8 +1777,8 @@ class MemoryManager:
                     INSERT INTO facts
                         (fact_id, user_id, category, subject, content, value, source,
                          confidence, source_messages, created_at, last_referenced,
-                         times_referenced, superseded_by, deleted)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0)
+                         times_referenced, superseded_by, deleted, polarity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, ?)
                 """, (
                     new_id,
                     user_id,
@@ -1695,6 +1791,7 @@ class MemoryManager:
                     fact.get("source_messages"),
                     now,
                     now,
+                    new_polarity,
                 ))
                 conn.commit()
             finally:
