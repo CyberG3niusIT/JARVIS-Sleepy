@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun PermissionsScreen(onBack: () -> Unit) {
-    var openId by remember { mutableStateOf<String?>(null) }
+    var openId by rememberSaveable { mutableStateOf<String?>(null) }
     val openGroup = permissionGroups.find { it.id == openId }
 
     DetailScaffold(
@@ -88,7 +88,7 @@ fun PermissionsScreen(onBack: () -> Unit) {
 
 @Composable
 private fun PermissionDetailSheet(group: PermissionGroup?, onClose: () -> Unit) {
-    var demoState by remember(group?.id) { mutableStateOf(PermissionGrantState.NOT_REQUESTED) }
+    var demoState by rememberSaveable(group?.id) { mutableStateOf(PermissionGrantState.NOT_REQUESTED) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
 

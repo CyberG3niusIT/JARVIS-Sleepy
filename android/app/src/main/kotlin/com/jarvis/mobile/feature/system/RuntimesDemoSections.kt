@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
@@ -38,9 +38,9 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun SleepyPairingSection() {
-    var pairing by remember { mutableStateOf(PairingState.NICHT_VERBUNDEN) }
-    var sheetOpen by remember { mutableStateOf(false) }
-    var disconnectOpen by remember { mutableStateOf(false) }
+    var pairing by rememberSaveable { mutableStateOf(PairingState.NICHT_VERBUNDEN) }
+    var sheetOpen by rememberSaveable { mutableStateOf(false) }
+    var disconnectOpen by rememberSaveable { mutableStateOf(false) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
     fun report(message: String) { scope.launch { actionResult.report("$message Entwurfszustand, keine Runtime-Aktion ausgeführt.") } }
@@ -154,7 +154,7 @@ fun TrustInspectionSection() {
 /** Ported 1:1 from runtimes-demo.tsx (HandoffReviewSection). No remote execution happens. */
 @Composable
 fun HandoffReviewSection() {
-    var state by remember { mutableStateOf(HandoffReviewState.ENTWURF) }
+    var state by rememberSaveable { mutableStateOf(HandoffReviewState.ENTWURF) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
     fun report(message: String) { scope.launch { actionResult.report("$message Entwurfszustand, keine Runtime-Aktion ausgeführt.") } }

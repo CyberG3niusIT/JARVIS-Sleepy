@@ -1,6 +1,9 @@
 package com.jarvis.mobile.feature.more
 
 import com.jarvis.mobile.core.model.SystemState
+import com.jarvis.mobile.core.util.StringFieldCodec
+import com.jarvis.mobile.core.util.StringFieldReader
+import com.jarvis.mobile.core.util.StringFieldWriter
 
 /** Ported 1:1 from src/components/jarvis/screens/memory-screen.tsx. */
 
@@ -151,3 +154,84 @@ val memoryDemoSeed: List<MemoryEntry> = listOf(
         confirmationStatus = MemoryConfirmationStatus.UNCONFIRMED,
     ),
 )
+
+/**
+ * String encoding for the user-edited demo entry list ([MemoryScreen]'s
+ * `demoEntries`, changed by confirm/correct/discard/supersede), so it
+ * survives activity recreation, not just rotation. Built on
+ * [StringFieldCodec]; a nullable field is written as a presence flag
+ * followed by its value (an empty flag skips the value read), never an
+ * empty-string sentinel, so a genuinely empty string is never confused
+ * with a missing value.
+ */
+private fun StringFieldWriter.writeNullable(value: String?): StringFieldWriter {
+    write((value != null).toString())
+    if (value != null) write(value)
+    return this
+}
+
+private fun StringFieldReader.readNullable(): String? = if (read().toBoolean()) read() else null
+
+private fun encodeMemoryEntry(e: MemoryEntry): String {
+    val writer = StringFieldCodec.writer()
+    writer.write(e.id)
+    writer.write(e.layer.name)
+    writer.writeNullable(e.subject)
+    writer.write(e.summary)
+    writer.write(e.state.name)
+    writer.write(e.provenance.name)
+    writer.writeNullable(e.confidence?.toString())
+    writer.writeNullable(e.createdAt)
+    writer.writeNullable(e.updatedAt)
+    writer.writeNullable(e.scope?.name)
+    writer.writeNullable(e.sensitivity?.name)
+    writer.writeNullable(e.confirmationStatus?.name)
+    writer.writeNullable(e.supersedes?.id)
+    writer.writeNullable(e.supersedes?.label)
+    writer.writeNullable(e.sourceReference)
+    writer.writeNullable(e.supersedeNote)
+    return writer.build()
+}
+
+private fun decodeMemoryEntry(raw: String): MemoryEntry {
+    val reader = StringFieldCodec.reader(raw)
+    val id = reader.read()
+    val layer = MemoryLayer.valueOf(reader.read())
+    val subject = reader.readNullable()
+    val summary = reader.read()
+    val state = SystemState.valueOf(reader.read())
+    val provenance = MemoryProvenance.valueOf(reader.read())
+    val confidence = reader.readNullable()?.toFloat()
+    val createdAt = reader.readNullable()
+    val updatedAt = reader.readNullable()
+    val scope = reader.readNullable()?.let { MemoryScope.valueOf(it) }
+    val sensitivity = reader.readNullable()?.let { MemorySensitivity.valueOf(it) }
+    val confirmationStatus = reader.readNullable()?.let { MemoryConfirmationStatus.valueOf(it) }
+    val supersedesId = reader.readNullable()
+    val supersedesLabel = reader.readNullable()
+    val sourceReference = reader.readNullable()
+    val supersedeNote = reader.readNullable()
+    return MemoryEntry(
+        id = id,
+        layer = layer,
+        subject = subject,
+        summary = summary,
+        state = state,
+        provenance = provenance,
+        confidence = confidence,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        scope = scope,
+        sensitivity = sensitivity,
+        confirmationStatus = confirmationStatus,
+        supersedes = supersedesId?.let { MemorySupersedes(it, supersedesLabel ?: "") },
+        sourceReference = sourceReference,
+        supersedeNote = supersedeNote,
+    )
+}
+
+fun encodeMemoryEntries(entries: List<MemoryEntry>): String =
+    StringFieldCodec.encodeStringList(entries.map { encodeMemoryEntry(it) })
+
+fun decodeMemoryEntries(raw: String): List<MemoryEntry> =
+    StringFieldCodec.decodeStringList(raw).map { decodeMemoryEntry(it) }

@@ -11,6 +11,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -42,11 +44,18 @@ import kotlinx.coroutines.launch
  * their detail-sheet actions (confirm/correct/discard/supersede) only ever
  * change local Compose state, never a real memory store.
  */
+private val MemoryEntriesSaver = Saver<List<MemoryEntry>, String>(
+    save = { encodeMemoryEntries(it) },
+    restore = { decodeMemoryEntries(it) },
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MemoryScreen(onBack: () -> Unit) {
-    var demoEntries by remember { mutableStateOf(memoryDemoSeed) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    // Category A: demo entries are edited via confirm/correct/discard/
+    // supersede below, so the edits must survive activity recreation.
+    var demoEntries by rememberSaveable(stateSaver = MemoryEntriesSaver) { mutableStateOf(memoryDemoSeed) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
     fun report(message: String) {
@@ -141,12 +150,15 @@ private fun MemoryDetailSheet(
     onDiscard: (String) -> Unit,
     onSupersede: (String, String) -> Unit,
 ) {
-    var editing by remember(entry?.id) { mutableStateOf(false) }
-    var draft by remember(entry?.id) { mutableStateOf(entry?.summary ?: "") }
-    var confirmDiscard by remember(entry?.id) { mutableStateOf(false) }
-    var supersedeOpen by remember(entry?.id) { mutableStateOf(false) }
-    var supersedeNote by remember(entry?.id) { mutableStateOf("") }
-    var provenanceOpen by remember(entry?.id) { mutableStateOf(false) }
+    // Category A: mid-edit/mid-dialog state for the open sheet (draft text,
+    // which sub-sheet/dialog is open) should survive activity recreation
+    // while the sheet is open, keyed by entry id so switching entries resets it.
+    var editing by rememberSaveable(entry?.id) { mutableStateOf(false) }
+    var draft by rememberSaveable(entry?.id) { mutableStateOf(entry?.summary ?: "") }
+    var confirmDiscard by rememberSaveable(entry?.id) { mutableStateOf(false) }
+    var supersedeOpen by rememberSaveable(entry?.id) { mutableStateOf(false) }
+    var supersedeNote by rememberSaveable(entry?.id) { mutableStateOf("") }
+    var provenanceOpen by rememberSaveable(entry?.id) { mutableStateOf(false) }
 
     JarvisBottomSheet(open = entry != null, onClose = onClose, title = "Memory-Eintrag") {
         if (entry == null) return@JarvisBottomSheet

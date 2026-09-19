@@ -62,3 +62,28 @@ sealed interface PrivacyOverlay {
     data class ConfirmLock(val target: PrivacyMode) : PrivacyOverlay
     data class ConfirmRelax(val target: PrivacyMode) : PrivacyOverlay
 }
+
+/**
+ * String encoding for [PrivacyOverlay], since it is not itself Bundle-safe
+ * (a sealed interface's `data object`/`data class` implementations are not
+ * [java.io.Serializable] by default), so [PrivacyScreen]'s `overlay` state
+ * needs a custom `Saver` to survive activity recreation.
+ */
+fun encodePrivacyOverlay(overlay: PrivacyOverlay): String = when (overlay) {
+    is PrivacyOverlay.None -> "NONE"
+    is PrivacyOverlay.Explain -> "EXPLAIN:${overlay.target.name}"
+    is PrivacyOverlay.ConfirmLock -> "CONFIRM_LOCK:${overlay.target.name}"
+    is PrivacyOverlay.ConfirmRelax -> "CONFIRM_RELAX:${overlay.target.name}"
+}
+
+fun decodePrivacyOverlay(raw: String): PrivacyOverlay {
+    if (raw == "NONE") return PrivacyOverlay.None
+    val (kind, target) = raw.split(":", limit = 2)
+    val mode = PrivacyMode.valueOf(target)
+    return when (kind) {
+        "EXPLAIN" -> PrivacyOverlay.Explain(mode)
+        "CONFIRM_LOCK" -> PrivacyOverlay.ConfirmLock(mode)
+        "CONFIRM_RELAX" -> PrivacyOverlay.ConfirmRelax(mode)
+        else -> throw IllegalArgumentException("Unknown PrivacyOverlay kind: $kind")
+    }
+}

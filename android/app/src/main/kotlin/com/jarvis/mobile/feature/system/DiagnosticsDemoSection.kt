@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,10 +49,12 @@ private enum class ExportStep { GESCHLOSSEN, PRUEFEN }
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DiagnosticsDemoSection() {
-    var severity by remember { mutableStateOf(SeverityFilter.ALLE) }
-    var runtimeFilter by remember { mutableStateOf<ExecutionLocation?>(null) }
-    var openId by remember { mutableStateOf<String?>(null) }
-    var exportStep by remember { mutableStateOf(ExportStep.GESCHLOSSEN) }
+    // Category A: user-set filters and selections that should survive
+    // activity recreation.
+    var severity by rememberSaveable { mutableStateOf(SeverityFilter.ALLE) }
+    var runtimeFilter by rememberSaveable { mutableStateOf<ExecutionLocation?>(null) }
+    var openId by rememberSaveable { mutableStateOf<String?>(null) }
+    var exportStep by rememberSaveable { mutableStateOf(ExportStep.GESCHLOSSEN) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
     fun report(message: String) { scope.launch { actionResult.report("$message Entwurfszustand, keine Runtime-Aktion ausgeführt.") } }

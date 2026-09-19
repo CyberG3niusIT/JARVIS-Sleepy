@@ -8,8 +8,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -40,10 +41,16 @@ import kotlinx.coroutines.launch
  * inside the clearly labelled Zustandsdemonstration section, and cancelling
  * or retrying it only changes that local demo state.
  */
+private val AgentEntrySaver = Saver<AgentEntry, String>(
+    save = { encodeAgentEntry(it) },
+    restore = { decodeAgentEntry(it) },
+)
+
 @Composable
 fun AgentsScreen(onBack: () -> Unit) {
-    var demo by remember { mutableStateOf(demoAgent) }
-    var sheetView by remember { mutableStateOf(AgentSheetView.CLOSED) }
+    // Category A: cancel/retry/fail-demo edit this in place below.
+    var demo by rememberSaveable(stateSaver = AgentEntrySaver) { mutableStateOf(demoAgent) }
+    var sheetView by rememberSaveable { mutableStateOf(AgentSheetView.CLOSED) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
 

@@ -3,6 +3,9 @@ package com.jarvis.mobile.feature.system
 import com.jarvis.mobile.core.model.ExecutionLocation
 import com.jarvis.mobile.core.model.PrivacyMode
 import com.jarvis.mobile.core.model.SystemState
+import com.jarvis.mobile.core.util.StringFieldCodec
+import com.jarvis.mobile.core.util.StringFieldReader
+import com.jarvis.mobile.core.util.StringFieldWriter
 
 /** Ported 1:1 from src/components/jarvis/screens/agents-screen.tsx. */
 
@@ -95,3 +98,90 @@ val demoAgent = AgentEntry(
     startedAt = "vor 2 Minuten",
     updatedAt = "vor 12 Sekunden",
 )
+
+/**
+ * String encoding for [AgentEntry], since [AgentsScreen]'s `demo` state is
+ * edited in place (cancel/retry/fail-demo change `taskState`,
+ * `errorReason`, `currentStep`, `lastResult`), so it must survive activity
+ * recreation like any other edited demo state. Built on [StringFieldCodec];
+ * nullable fields use an explicit presence flag, never an empty-string
+ * sentinel.
+ */
+private fun StringFieldWriter.writeNullable(value: String?): StringFieldWriter {
+    write((value != null).toString())
+    if (value != null) write(value)
+    return this
+}
+
+private fun StringFieldReader.readNullable(): String? = if (read().toBoolean()) read() else null
+
+fun encodeAgentEntry(e: AgentEntry): String {
+    val writer = StringFieldCodec.writer()
+    writer.write(e.id)
+    writer.write(e.name)
+    writer.write(e.purpose)
+    writer.write(e.goal)
+    writer.write(e.state.name)
+    writer.write(StringFieldCodec.encodeStringList(e.allowedTools))
+    writer.write(e.runtime.name)
+    writer.write(e.privacyContext.name)
+    writer.writeNullable(e.currentTask)
+    writer.write(e.taskState.name)
+    writer.writeNullable(e.maxSteps?.toString())
+    writer.writeNullable(e.currentStep?.toString())
+    writer.writeNullable(e.timeoutSeconds?.toString())
+    writer.write(StringFieldCodec.encodeStringList(e.approvedContext))
+    writer.writeNullable(e.expectedResult)
+    writer.writeNullable(e.lastResult)
+    writer.writeNullable(e.errorReason)
+    writer.write(StringFieldCodec.encodeStringList(e.toolActivity.flatMap { listOf(it.tool, it.summary) }))
+    writer.writeNullable(e.startedAt)
+    writer.writeNullable(e.updatedAt)
+    return writer.build()
+}
+
+fun decodeAgentEntry(raw: String): AgentEntry {
+    val reader = StringFieldCodec.reader(raw)
+    val id = reader.read()
+    val name = reader.read()
+    val purpose = reader.read()
+    val goal = reader.read()
+    val state = SystemState.valueOf(reader.read())
+    val allowedTools = StringFieldCodec.decodeStringList(reader.read())
+    val runtime = ExecutionLocation.valueOf(reader.read())
+    val privacyContext = PrivacyMode.valueOf(reader.read())
+    val currentTask = reader.readNullable()
+    val taskState = AgentTaskState.valueOf(reader.read())
+    val maxSteps = reader.readNullable()?.toInt()
+    val currentStep = reader.readNullable()?.toInt()
+    val timeoutSeconds = reader.readNullable()?.toInt()
+    val approvedContext = StringFieldCodec.decodeStringList(reader.read())
+    val expectedResult = reader.readNullable()
+    val lastResult = reader.readNullable()
+    val errorReason = reader.readNullable()
+    val toolActivityFlat = StringFieldCodec.decodeStringList(reader.read())
+    val startedAt = reader.readNullable()
+    val updatedAt = reader.readNullable()
+    return AgentEntry(
+        id = id,
+        name = name,
+        purpose = purpose,
+        goal = goal,
+        state = state,
+        allowedTools = allowedTools,
+        runtime = runtime,
+        privacyContext = privacyContext,
+        currentTask = currentTask,
+        taskState = taskState,
+        maxSteps = maxSteps,
+        currentStep = currentStep,
+        timeoutSeconds = timeoutSeconds,
+        approvedContext = approvedContext,
+        expectedResult = expectedResult,
+        lastResult = lastResult,
+        errorReason = errorReason,
+        toolActivity = toolActivityFlat.chunked(2).map { ToolActivityEntry(it[0], it[1]) },
+        startedAt = startedAt,
+        updatedAt = updatedAt,
+    )
+}

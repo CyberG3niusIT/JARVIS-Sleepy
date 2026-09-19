@@ -7,7 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,9 +42,21 @@ private val executionRules = listOf(
  * from the audited [capabilityRows], so nothing is invented here. Tapping a
  * row opens a read-only detail sheet built only from audited fields.
  */
+/**
+ * [CapabilityRow] is a plain data class, not Bundle-safe by default, so this
+ * saves the row's unique [CapabilityRow.name] and looks it up again in the
+ * fixed, audited [capabilityRows] list on restore, rather than encoding the
+ * whole row.
+ */
+private val SelectedCapabilityRowSaver = Saver<CapabilityRow?, String>(
+    save = { it?.name ?: "" },
+    restore = { name -> capabilityRows.find { it.name == name } },
+)
+
 @Composable
 fun ToolsScreen(onBack: () -> Unit) {
-    var selected by remember { mutableStateOf<CapabilityRow?>(null) }
+    // Category A: the open detail sheet should survive activity recreation.
+    var selected by rememberSaveable(stateSaver = SelectedCapabilityRowSaver) { mutableStateOf<CapabilityRow?>(null) }
 
     DetailScaffold(
         title = "Tools",

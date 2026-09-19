@@ -11,7 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -35,8 +35,9 @@ import com.jarvis.mobile.core.designsystem.component.JarvisNoticeTone
  */
 @Composable
 fun ModelImportFlow(onDone: (String) -> Unit) {
-    var step by remember { mutableStateOf(ModelImportStep.AUSWAHL) }
-    var failedAt by remember { mutableStateOf<ModelImportStep?>(null) }
+    // Category A: mid-wizard progress should survive activity recreation.
+    var step by rememberSaveable { mutableStateOf(ModelImportStep.AUSWAHL) }
+    var failedAt by rememberSaveable { mutableStateOf<ModelImportStep?>(null) }
 
     val failed = failedAt
     if (failed != null) {
@@ -110,7 +111,7 @@ fun ModelImportFlow(onDone: (String) -> Unit) {
 
 @Composable
 fun ModelCatalogBrowser(onDone: (String) -> Unit) {
-    var openId by remember { mutableStateOf<String?>(null) }
+    var openId by rememberSaveable { mutableStateOf<String?>(null) }
     val open = modelCatalogEntries.find { it.id == openId }
 
     Column {
