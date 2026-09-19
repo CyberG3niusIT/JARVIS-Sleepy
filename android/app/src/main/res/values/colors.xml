@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors src/lib/jarvis/tokens.ts colorTokens. Used only for the
+         pre-Compose window background/status bar, see themes.xml. The
+         Compose JarvisColor object is the source of truth for UI colour. -->
+    <color name="jarvis_bg_0">#13191E</color>
+</resources>
