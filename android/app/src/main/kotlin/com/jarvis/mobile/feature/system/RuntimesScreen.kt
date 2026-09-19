@@ -18,11 +18,12 @@ import com.jarvis.mobile.core.model.comparisonBaseline
 import com.jarvis.mobile.feature.common.DetailScaffold
 
 /**
- * Ported 1:1 from src/components/jarvis/screens/runtimes-screen.tsx. Sleepy
- * pairing/trust/handoff demo sections (runtimes-demo.tsx) are deferred, see
- * android/PORTING_PLAN.md and android/OPEN_DECISIONS.md Sec.1; only the
- * documented handoff-package structure is ported, since it describes a
- * target shape, not a transport decision.
+ * Ported 1:1 from src/components/jarvis/screens/runtimes-screen.tsx plus the
+ * full runtimes-demo.tsx sections (SleepyPairingSection,
+ * TrustInspectionSection, HandoffReviewSection). No real transport, pairing
+ * protocol or certificate scheme is bound - see android/OPEN_DECISIONS.md
+ * Sec.1 - only the already-specified abstract-phase UI and its local state
+ * machine.
  */
 @Composable
 fun RuntimesScreen(onBack: () -> Unit) {
@@ -75,6 +76,10 @@ fun RuntimesScreen(onBack: () -> Unit) {
             lineHeight = 16.sp,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
+
+        SleepyPairingSection()
+        TrustInspectionSection()
+        HandoffReviewSection()
     }
 }
 
