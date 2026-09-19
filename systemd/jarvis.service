@@ -1,0 +1,61 @@
+# NEEDS HW VERIFY — see systemd/README.md before installing.
+#
+# Replaces the old jarvis.service in the repo root, which had
+# WorkingDirectory=/home/user/jarvis (wrong host layout — Sleepy's real
+# user is alex per config.yaml's committed /home/alex/... paths) and a
+# literal placeholder secret (OPENWEATHER_API_KEY=YOUR_OPENWEATHER_API_KEY)
+# inlined in the unit instead of coming from .env.
+#
+# Soft-depends on llama-server and chatterbox (Wants=/After=, not
+# Requires=): local-first is the intended path, but the app already
+# tolerates both being down (llm_router.py falls back to the configured
+# cloud API on local quality-gate failure; core/tts.py falls back to
+# Piper when the Chatterbox HTTP call fails) — a hard Requires= here
+# would prevent JARVIS from starting in that degraded mode, which is
+# not what the existing fallback logic was built for.
+
+[Unit]
+Description=JARVIS Voice Assistant (continuous mode)
+After=network.target sound.target llama-server.service chatterbox.service
+Wants=llama-server.service chatterbox.service
+
+[Service]
+Type=simple
+User=alex
+EnvironmentFile=-/home/alex/jarvis/.env
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/home/alex/jarvis
+
+# NEEDS HW VERIFY: confirm the venv path and that this venv has every
+# dependency jarvis_continuous.py imports at module scope (sounddevice/
+# PortAudio in particular — see docs/ARCHITECTURE.md's test-environment
+# note: that dependency was NOT installable in the sandbox this pass ran
+# in, so it must be specifically checked on Sleepy itself, not assumed).
+ExecStart=/home/alex/jarvis-venv/bin/python3 /home/alex/jarvis/jarvis_continuous.py
+
+# Preflight: fails fast if the venv or entrypoint don't exist, instead of
+# systemd reporting a bare non-zero exit with no obvious cause.
+ExecStartPre=/usr/bin/test -x /home/alex/jarvis-venv/bin/python3
+ExecStartPre=/usr/bin/test -f /home/alex/jarvis/jarvis_continuous.py
+
+# Before enabling for real, run scripts/preflight_check.py manually once
+# (not wired as ExecStartPre — its check semantics/exit codes weren't
+# verified against systemd's pass/fail expectations in this pass):
+#   cd /home/alex/jarvis && source /home/alex/jarvis-venv/bin/activate
+#   python scripts/preflight_check.py
+
+Restart=on-failure
+RestartSec=10
+# Give the shutdown sequence in jarvis_continuous.py's finally block
+# (coordinator.shutdown, watchdog.stop, tts.kill_active + chatterbox
+# session close, memory_manager.save/FAISS persist, context_window.flush,
+# and every manager's .stop()) enough time to run instead of being
+# SIGKILLed mid-flush.
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis
+
+[Install]
+WantedBy=default.target

@@ -1,3 +1,10 @@
+# SUPERSEDED — see systemd/jarvis.service instead. This file still has
+# WorkingDirectory=/home/user/jarvis and an inline placeholder secret,
+# which don't match Sleepy's real layout (config.yaml uses /home/alex/...)
+# or the "EnvironmentFile for secrets" requirement. Left in place
+# unmodified rather than deleted since it may still be referenced
+# elsewhere; do not install this one.
+#
 # Systemd Service for Jarvis
 # This will be installed later once core system is working
 
