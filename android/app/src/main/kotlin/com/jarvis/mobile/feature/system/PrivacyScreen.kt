@@ -1,5 +1,6 @@
 package com.jarvis.mobile.feature.system
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -48,6 +49,7 @@ private val PrivacyOverlaySaver = Saver<PrivacyOverlay, String>(
     restore = { decodePrivacyOverlay(it) },
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PrivacyScreen(onBack: () -> Unit) {
     val baseline = comparisonBaseline.privacyMode

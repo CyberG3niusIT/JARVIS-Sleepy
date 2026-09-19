@@ -2,6 +2,7 @@ package com.jarvis.mobile.feature.more
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -64,6 +65,7 @@ import kotlinx.coroutines.launch
  * confirmation when [draft] differs from [initial], matching the goal
  * spec's locked Automation-Editor back table exactly.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AutomationEditorScreen(
     mode: AutomationEditorMode,

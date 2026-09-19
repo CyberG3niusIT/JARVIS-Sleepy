@@ -1,6 +1,7 @@
 package com.jarvis.mobile.feature.system
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -36,6 +37,7 @@ import kotlinx.coroutines.launch
  * (SleepyPairingSection). Deliberately abstract phases only - see
  * android/OPEN_DECISIONS.md Sec.1 for why no real transport is bound.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SleepyPairingSection() {
     var pairing by rememberSaveable { mutableStateOf(PairingState.NICHT_VERBUNDEN) }
