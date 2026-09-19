@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -123,6 +124,7 @@ private fun PermissionDetailSheet(group: PermissionGroup?, onClose: () -> Unit) 
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = JarvisSpacing.sm)
+                    .selectableGroup()
                     .background(JarvisSemanticColor.surface)
                     .border(androidx.compose.foundation.BorderStroke(0.5.dp, JarvisSemanticColor.borderSoft)),
             ) {
