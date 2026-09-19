@@ -1041,11 +1041,21 @@ class JarvisContinuous:
                 self.logger.info("Shutdown requested")
             finally:
                 self.coordinator.shutdown()
+                if hasattr(self, 'watchdog') and self.watchdog:
+                    # Was started above but never stopped — the thread is
+                    # a daemon so it wouldn't block exit, but its internal
+                    # health loop and any in-flight recovery action never
+                    # got a clean stop signal.
+                    self.watchdog.stop()
                 # Stop any in-flight audio subprocess immediately rather
                 # than leaving it playing as an orphaned child process
                 # after this Python process has already exited.
                 if self.tts:
                     self.tts.kill_active()
+                    if hasattr(self.tts, '_chatterbox_session') and self.tts._chatterbox_session:
+                        # The Session (and its connection pool) was never
+                        # closed on shutdown.
+                        self.tts._chatterbox_session.close()
                 if self.memory_manager:
                     # Persists the FAISS embedding index (MemoryManager.save()'s
                     # own docstring: "Call on shutdown") — jarvis_web.py already
