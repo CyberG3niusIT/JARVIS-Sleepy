@@ -31,19 +31,24 @@ import com.jarvis.mobile.core.model.comparisonBaseline
 import com.jarvis.mobile.feature.common.DetailScaffold
 import kotlinx.coroutines.launch
 
+private enum class AddModelChoice { IMPORT, KATALOG }
+
 /**
- * Ported 1:1 from src/components/jarvis/screens/models-screen.tsx. The local
- * model registry stays empty on purpose - it is not bound to a runtime yet,
- * which is not a claim that the real device carries no model file. The
- * catalog browser / local-file import flows inside the add-model sheet
- * (models-demo.tsx) are deferred, see android/PORTING_PLAN.md; the sheet's
- * two-choice entry point is ported.
+ * Ported 1:1 from src/components/jarvis/screens/models-screen.tsx and
+ * models-demo.tsx. The truthful baseline model registry stays empty on
+ * purpose - it is not bound to a runtime yet, which is not a claim that the
+ * real device carries no model file. [ModelsDemoSection] is the clearly
+ * labelled Zustandsdemonstration with its own local state machine.
  */
 @Composable
 fun ModelsScreen(onBack: () -> Unit) {
     var sheetOpen by remember { mutableStateOf(false) }
+    var choice by remember { mutableStateOf<AddModelChoice?>(null) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
+
+    fun closeSheet() { sheetOpen = false; choice = null }
+    fun report(message: String) { scope.launch { actionResult.report(message) } }
 
     DetailScaffold(
         title = "Modelle",
@@ -86,6 +91,8 @@ fun ModelsScreen(onBack: () -> Unit) {
         }
         JarvisActionResultText(message = actionResult.message)
 
+        ModelsDemoSection()
+
         JarvisSectionHeader("Verwaltung")
         JarvisListGroup {
             managementCapabilities.forEach { (title, detail) ->
@@ -101,26 +108,42 @@ fun ModelsScreen(onBack: () -> Unit) {
         )
     }
 
-    JarvisBottomSheet(open = sheetOpen, onClose = { sheetOpen = false }, title = "Modell hinzufügen") {
-        JarvisListGroup {
-            JarvisListRow(
-                title = "Lokale Datei importieren",
-                subtitle = "Unterstützte lokale Modelldatei auswählen.",
-                chevron = true,
-                onClick = {
-                    sheetOpen = false
-                    scope.launch { actionResult.report("Lokaler Import ist im Prototyp noch nicht angebunden.") }
-                },
-            )
-            JarvisListRow(
-                title = "Modellkatalog öffnen",
-                subtitle = "Kompatibles Modell auswählen und lokal herunterladen.",
-                chevron = true,
-                onClick = {
-                    sheetOpen = false
-                    scope.launch { actionResult.report("Modellkatalog ist im Prototyp noch nicht angebunden.") }
-                },
-            )
+    JarvisBottomSheet(
+        open = sheetOpen,
+        onClose = ::closeSheet,
+        title = when (choice) {
+            AddModelChoice.IMPORT -> "Lokale Datei importieren"
+            AddModelChoice.KATALOG -> "Modellkatalog"
+            null -> "Modell hinzufügen"
+        },
+    ) {
+        when (choice) {
+            AddModelChoice.IMPORT -> Column {
+                ModelImportFlow(onDone = { report(it); closeSheet() })
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
+                    JarvisButton(text = "Zurück", onClick = { choice = null })
+                }
+            }
+            AddModelChoice.KATALOG -> Column {
+                ModelCatalogBrowser(onDone = { report(it); closeSheet() })
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
+                    JarvisButton(text = "Zurück", onClick = { choice = null })
+                }
+            }
+            null -> JarvisListGroup {
+                JarvisListRow(
+                    title = "Lokale Datei importieren",
+                    subtitle = "Unterstützte lokale Modelldatei auswählen.",
+                    chevron = true,
+                    onClick = { choice = AddModelChoice.IMPORT },
+                )
+                JarvisListRow(
+                    title = "Modellkatalog öffnen",
+                    subtitle = "Kompatibles Modell auswählen und lokal herunterladen.",
+                    chevron = true,
+                    onClick = { choice = AddModelChoice.KATALOG },
+                )
+            }
         }
     }
 }
