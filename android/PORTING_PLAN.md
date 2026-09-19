@@ -48,47 +48,52 @@ dokumentiert nur die technische Uebersetzung, keine neuen Entscheidungen.
 ## Navigation / app shell
 
 - `src/App.tsx` + `shell.tsx` bottom nav (`Start`, `Chat`, `System`, `Mehr`) ->
-  Navigation Compose `NavHost` with 4 top-level destinations
-  (`JarvisDestination.Start/Chat/System/More`) hosted in `JarvisAppShell`
-  (Scaffold: `JarvisTopBar` + `JarvisRuntimeStrip` + content + `JarvisBottomNavigation`).
-- System/More detail navigation (`system-screen.tsx`, `more-screen.tsx`: local
-  `useState` detail routing with `ScreenTransition` direction) -> nested
-  `NavHost` graphs (`system` / `more` sub-graphs) so each detail screen is its
-  own back-stack entry; Android system Back pops the sub-graph before leaving
-  the tab, matching the locked Back table in the goal spec.
-- Automation editor discard-confirmation -> `JarvisDialog` shown from a
-  `BackHandler` when the editor's local state is dirty.
+  a single flat Navigation Compose `NavHost` with 4 tab-root routes plus one
+  route per detail screen, hosted in `JarvisAppShell` (Scaffold:
+  `JarvisTopBar` + `JarvisRuntimeStrip` + content + `JarvisBottomNavigation`).
+  Switching tabs pops back to that tab's own root instead of restoring saved
+  state, so a detail screen never survives a tab change, matching the web
+  reference's per-tab container unmount behaviour and the locked Back table.
+- Automationen (`automations-screen.tsx` + `automation-editor.tsx`) is the one
+  exception: like the web reference, the editor is not a separate nav route
+  but a local Compose state swap inside `AutomationsScreen` (`editorSession`),
+  so the in-progress draft never has to cross a navigation boundary. Its
+  discard confirmation is a `JarvisDialog` shown from a `BackHandler` that
+  fires while the editor is the active composable.
 
 ## Screens
 
-| Web screen | Compose screen | Phase 1 status |
+Round 2 finished porting every interaction flow the web reference actually
+specifies for these fifteen screens - including their `*-demo.tsx`
+Zustandsdemonstration sections, which are locked UI, not optional filler.
+What stays open is real backend/runtime/transport binding, tracked in
+`OPEN_DECISIONS.md`, never the UI itself.
+
+| Web screen | Compose screen | Status |
 |---|---|---|
 | `screens/start-screen.tsx` | `feature/start/StartScreen.kt` | ported |
-| `screens/chat-screen.tsx` | `feature/chat/ChatScreen.kt` | ported (core layout, message list, composer, execution tags; attachment picker UI deferred, see OPEN_DECISIONS) |
+| `screens/chat-screen.tsx` + `chat-attachment.tsx` | `feature/chat/ChatScreen.kt` + `ChatAttachment*.kt` | ported, including real file/image picking, ContentResolver-based validation and Coil preview |
 | `screens/system-screen.tsx` (overview) | `feature/system/SystemOverviewScreen.kt` | ported |
 | `screens/more-screen.tsx` (overview) | `feature/more/MoreOverviewScreen.kt` | ported |
-| `screens/models-screen.tsx` | `feature/system/ModelsScreen.kt` | ported (current-state rows, empty local-model list, management capabilities, add-model sheet entry point); catalog browser / local-file import flows (`models-demo.tsx`) deferred |
+| `screens/models-screen.tsx` + `models-demo.tsx` | `feature/system/ModelsScreen.kt` + `ModelsDemoSection.kt` + `ModelImportCatalog.kt` | ported, including the full demo state machine (load/unload/download/pause/resume/cancel/retry/delete), import wizard and catalog browser |
 | `screens/agents-screen.tsx` | `feature/system/AgentsScreen.kt` | ported (agent model, safety bounds, empty running-tasks state, full demo-agent detail sheet with cancel/retry/fail-demo/error/tool-activity) |
-| `screens/tools-screen.tsx` | `feature/system/ToolsScreen.kt` | ported (full `capabilityRows` capability audit list) |
+| `screens/tools-screen.tsx` | `feature/system/ToolsScreen.kt` | ported (capability list, execution rules, read-only capability detail sheet) |
 | `screens/permissions-screen.tsx` | `feature/system/PermissionsScreen.kt` | ported (eight access-area groups, detail sheet with why-needed/capabilities/demo-state selector) |
 | `screens/privacy-screen.tsx` | `feature/system/PrivacyScreen.kt` | ported (mode selector, explain sheet, PRIVACY_LOCK/relax confirm dialogs, protected groups, guarantees) |
-| `screens/runtimes-screen.tsx` | `feature/system/RuntimesScreen.kt` | ported (this-device/trusted-runtime/cloud rows, handoff-package structure); pairing/trust/handoff demo sections (`runtimes-demo.tsx`) deferred, see OPEN_DECISIONS Sec.1 |
-| `screens/device-screen.tsx` | `feature/system/DeviceScreen.kt` | ported (real `android.os.Build` fields) |
-| `screens/diagnostics-screen.tsx` | `feature/system/DiagnosticsScreen.kt` | ported (empty history/crash states, redaction rules, export notice) |
+| `screens/runtimes-screen.tsx` + `runtimes-demo.tsx` | `feature/system/RuntimesScreen.kt` + `RuntimesDemoSections.kt` | ported, including Sleepy pairing state machine, trust inspection and handoff review; no real transport/pairing protocol, see OPEN_DECISIONS Sec.1 |
+| `screens/device-screen.tsx` | `feature/system/DeviceScreen.kt` | ported (service section, Android capability list, device-info fields left "Nicht gebunden" exactly as specified) |
+| `screens/diagnostics-screen.tsx` + `diagnostics-demo.tsx` | `feature/system/DiagnosticsScreen.kt` + `DiagnosticsDemoSection.kt` | ported, including severity/runtime filters, detail sheet and export-preview sheet |
 | `screens/voice-screen.tsx` | `feature/more/VoiceScreen.kt` | ported (full labelled state machine + transition controls, Wake Word/STT/TTS configuration sheets) |
 | `screens/memory-screen.tsx` | `feature/more/MemoryScreen.kt` | ported (layers/provenance/rules lists, empty baseline, full demo-entry detail sheet with confirm/correct/discard/supersede/provenance) |
-| `screens/automations-screen.tsx` | `feature/more/AutomationsScreen.kt` | ported (types, execution rules, empty baseline state); full step/condition/schedule editor (`automation-editor.tsx`, 685 lines) and the local in-session automation list deferred |
+| `screens/automations-screen.tsx` + `automation-editor.tsx` | `feature/more/AutomationsScreen.kt` + `AutomationEditorScreen.kt` | ported, including the full editor (steps, routine conditions with AND/ODER, schedule datetime/interval, validation, save/discard/delete, dirty-state back confirmation) |
 | `screens/settings-screen.tsx` | `feature/more/SettingsScreen.kt` | ported |
 | `screens/about-screen.tsx` | `feature/more/AboutScreen.kt` | ported |
 
-All thirteen System/Mehr detail destinations now render their full static
-content and locked German copy from the web reference. What remains
-deferred everywhere is *interactive* content that needs a real backing
-system to mean anything: attachment picking (Chat), the model
-catalog/import flows (Modelle), Sleepy pairing/trust (Runtimes), and the
-automation editor's step/condition/schedule builder (Automationen). Each is
-called out in its screen's doc comment and, where it touches an open
-architecture question, in OPEN_DECISIONS.md.
+Deferred, and only where real backend/runtime/transport binding is the
+actual blocker (never the UI): Sleepy's transport/pairing protocol (Runtimes,
+OPEN_DECISIONS Sec.1), the real permission-grant read (Permissions,
+OPEN_DECISIONS Sec.3) and the LiteRT-LM binding (Modelle, OPEN_DECISIONS
+Sec.4).
 
 ## State layering (goal spec Sec. 13)
 
