@@ -134,4 +134,32 @@ class AutomationDraftCodecTest {
 
         assertEquals(drafts, decodeAutomationDraftList(encodeAutomationDraftList(drafts)))
     }
+
+    @Test
+    fun `closed step and condition sheets round trip as null`() {
+        assertEquals(null, decodeStepSheet(encodeStepSheet(null)))
+        assertEquals(null, decodeConditionSheet(encodeConditionSheet(null)))
+    }
+
+    @Test
+    fun `new step and condition sheet inputs round trip arbitrary strings`() {
+        val step = StepSheetState(null, "5:hello\n😀\u0001")
+        val condition = ConditionSheetState(null, "12:not-a-header\t日本語\u0002")
+
+        assertEquals(step, decodeStepSheet(encodeStepSheet(step)))
+        assertEquals(condition, decodeConditionSheet(encodeConditionSheet(condition)))
+    }
+
+    @Test
+    fun `sheet codecs distinguish a null id from an empty id`() {
+        val newStep = StepSheetState(null, "")
+        val existingStep = StepSheetState("", "")
+        val newCondition = ConditionSheetState(null, "")
+        val existingCondition = ConditionSheetState("", "")
+
+        assertEquals(newStep, decodeStepSheet(encodeStepSheet(newStep)))
+        assertEquals(existingStep, decodeStepSheet(encodeStepSheet(existingStep)))
+        assertEquals(newCondition, decodeConditionSheet(encodeConditionSheet(newCondition)))
+        assertEquals(existingCondition, decodeConditionSheet(encodeConditionSheet(existingCondition)))
+    }
 }

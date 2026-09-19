@@ -21,6 +21,16 @@ class ChatAttachmentTest {
         assertEquals(25L * 1024 * 1024, MAX_FILE_BYTES)
         assertEquals(50L * 1024 * 1024, MAX_TOTAL_BYTES)
     }
+
+    @Test
+    fun `signature header read fails closed when the stream throws`() {
+        assertEquals(null, readAttachmentHeader { FailingInputStream() })
+    }
+
+    @Test
+    fun `signature header read fails closed when no stream can be opened`() {
+        assertEquals(null, readAttachmentHeader { null })
+    }
 }
 
 private class FailingInputStream : InputStream() {

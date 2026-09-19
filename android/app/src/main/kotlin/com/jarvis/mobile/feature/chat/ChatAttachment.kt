@@ -130,6 +130,13 @@ private fun resolveAttachmentSize(resolver: ContentResolver, uri: Uri, cursorSiz
     return resolveAttachmentSizeFromSources(cursorSize, descriptorLength) { resolver.openInputStream(uri) }
 }
 
+/** Reads the signature header and converts missing or failing streams into a closed failure. */
+internal fun readAttachmentHeader(openStream: () -> InputStream?): ByteArray? = runCatching {
+    val header = ByteArray(16)
+    val read = openStream()?.use { it.read(header) } ?: return@runCatching null
+    header.takeIf { read > 0 }
+}.getOrNull()
+
 /**
  * Reads display name, size and header bytes through the ContentResolver, the
  * Android equivalent of the web reference's File API access. Never a
@@ -158,9 +165,8 @@ suspend fun validateAttachment(context: Context, uri: Uri): AttachmentCheck = wi
         return@withContext AttachmentCheck.Failed("Dateityp und Inhaltstyp passen nicht zusammen.")
     }
 
-    val header = ByteArray(16)
-    val read = resolver.openInputStream(uri)?.use { it.read(header) } ?: -1
-    if (read <= 0 || !rule.matches(header)) {
+    val header = readAttachmentHeader { resolver.openInputStream(uri) }
+    if (header == null || !rule.matches(header)) {
         return@withContext AttachmentCheck.Failed("Dateiinhalt passt nicht zur Dateiendung.")
     }
 

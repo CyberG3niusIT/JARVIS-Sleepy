@@ -114,15 +114,15 @@ Three explicit Kotlin layers, none of them a placeholder for the others:
 
 ## Lifecycle / process-death robustness
 
-Every screen-local state that is *interactive, edited, or a user selection*
-(open sheets/dialogs, form drafts, filters, edited demo entries) uses
-`rememberSaveable`, not `remember`, so it survives both a configuration
-change and full activity recreation (process death), not rotation alone.
-This was audited screen by screen; a state that is purely derived from a
-fixed input, or transient action-result text that is deliberately meant to
-reset (matching the `PrototypeActionResult`/`rememberJarvisActionResult()`
-pattern), stays `remember` on purpose - resetting it is correct, not an
-oversight. Per screen:
+Within the eleven Compose-local screens listed below, every state that is
+*interactive, edited, or a user selection* (open sheets/dialogs, form drafts,
+filters, edited demo entries) uses `rememberSaveable`, not `remember`. Those
+values survive configuration-change activity recreation and participate in
+saved-instance-state restoration after process recreation. A state that is
+purely derived from a fixed input, or transient action-result text that is
+deliberately meant to reset (matching the
+`PrototypeActionResult`/`rememberJarvisActionResult()` pattern), stays
+`remember` on purpose - resetting it is correct, not an oversight. Per screen:
 
 - `AutomationsScreen.kt` / `AutomationEditorScreen.kt`: the open editor's
   draft, the local automation list and the open editor session all persist
@@ -165,6 +165,11 @@ oversight. Per screen:
   saveable via a small `Saver` that stores the row's unique `name` and looks
   it up again in the fixed, audited `capabilityRows` list on restore.
 
+`ChatScreen` is deliberately outside that `rememberSaveable` claim. Its
+interactive transcript, draft and attachment state live in `ChatViewModel`,
+which survives configuration-change activity recreation but currently has no
+`SavedStateHandle`; restoration after process death is therefore not claimed.
+
 The Automationen feature is the deepest case: the open editor's draft, the
 local automation list and the open editor session (`AutomationsScreen.kt`,
 `AutomationEditorScreen.kt`) all persist through a shared length-prefixed
@@ -197,7 +202,9 @@ a stream over the limit (clamped to `MAX_FILE_BYTES + 1`), a stream that
 throws while reading, and `openStream()` returning `null` - the last two
 both resolve to `MAX_FILE_BYTES + 1`, never `0`, since `0` would let an
 oversized file slip past the per-file and total budget checks in
-`ChatViewModel.onAddFiles`. Preview URIs are only attached to a
+`ChatViewModel.onAddFiles`. The preceding signature-header read also fails
+closed on a throwing or missing stream instead of propagating an exception.
+Preview URIs are only attached to a
 `ChatAttachment` after this resolved size has passed both budget checks.
 
 ## Privacy
