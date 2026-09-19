@@ -133,7 +133,23 @@ private fun resolveAttachmentSize(resolver: ContentResolver, uri: Uri, cursorSiz
 /** Reads the signature header and converts missing or failing streams into a closed failure. */
 internal fun readAttachmentHeader(openStream: () -> InputStream?): ByteArray? = runCatching {
     val header = ByteArray(16)
-    val read = openStream()?.use { it.read(header) } ?: return@runCatching null
+    val stream = openStream() ?: return@runCatching null
+    val read = stream.use {
+        var offset = 0
+        while (offset < header.size) {
+            val count = it.read(header, offset, header.size - offset)
+            if (count < 0) break
+            if (count == 0) {
+                val single = it.read()
+                if (single < 0) break
+                header[offset] = single.toByte()
+                offset += 1
+            } else {
+                offset += count
+            }
+        }
+        offset
+    }
     header.takeIf { read > 0 }
 }.getOrNull()
 

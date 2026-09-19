@@ -3,6 +3,7 @@ package com.jarvis.mobile.feature.chat
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -31,11 +32,24 @@ class ChatAttachmentTest {
     fun `signature header read fails closed when no stream can be opened`() {
         assertEquals(null, readAttachmentHeader { null })
     }
+
+    @Test
+    fun `signature header read fills the buffer across legal short reads`() {
+        val bytes = ByteArray(16) { it.toByte() }
+
+        val header = readAttachmentHeader { ChunkedInputStream(bytes, chunkSize = 2) }
+
+        assertArrayEquals(bytes, header)
+    }
 }
 
 private class FailingInputStream : InputStream() {
     override fun read(): Int = throw IOException("simulated read failure")
     override fun read(b: ByteArray, off: Int, len: Int): Int = throw IOException("simulated read failure")
+}
+
+private class ChunkedInputStream(bytes: ByteArray, private val chunkSize: Int) : ByteArrayInputStream(bytes) {
+    override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, minOf(len, chunkSize))
 }
 
 /**
