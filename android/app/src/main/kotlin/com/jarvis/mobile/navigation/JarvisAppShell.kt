@@ -113,7 +113,9 @@ fun JarvisAppShell(navController: NavHostController = rememberNavController()) {
         JarvisBottomNavigation(
             items = bottomNavItems,
             current = currentTab,
-            onSelect = { tab -> navController.navigateToTab(tab) },
+            onSelect = { tab ->
+                if (tab != currentTab) navController.navigateToTab(tab)
+            },
         )
     }
 }

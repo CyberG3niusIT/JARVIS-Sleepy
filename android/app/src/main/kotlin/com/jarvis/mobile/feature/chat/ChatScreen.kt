@@ -185,7 +185,7 @@ private fun EmptyConversation(onPick: (String) -> Unit) {
 private fun ChatMessageItem(message: ChatMessage) {
     when (message.role) {
         ChatRole.USER -> Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Box(
+            Column(
                 modifier = Modifier
                     .widthIn(max = 280.dp)
                     .clip(RoundedCornerShape(JarvisRadii.sm))
