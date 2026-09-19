@@ -128,15 +128,20 @@ field, including nested steps/conditions and the list/session separators).
 
 ## Chat attachment size resolution
 
-`ChatAttachment.kt: resolveAttachmentSize` never accepts an unknown file
-size as `0`, since that would let an oversized file slip past the 25 MiB
-per-file / 50 MiB total budget checks in `ChatViewModel.onAddFiles`. It
-tries, in order: the `OpenableColumns.SIZE` cursor column, then
-`AssetFileDescriptor.length`, then counts bytes read from the content
-stream capped at `MAX_FILE_BYTES + 1` (exact size if the file is at or under
-the limit; a value that already fails the per-file check if the cap is
-hit). Preview URIs are only attached to a `ChatAttachment` after this
-resolved size has passed both budget checks.
+`ChatAttachment.kt: resolveAttachmentSize` is a thin Android wrapper (cursor
+query, `AssetFileDescriptor`, content stream) around
+`resolveAttachmentSizeFromSources`, the actual decision logic, which takes
+plain values and an `InputStream`-opening lambda so it is unit-tested
+directly (`ChatAttachmentTest.kt: ResolveAttachmentSizeFromSourcesTest`) -
+without Robolectric or any Android framework type - covering: a known
+cursor size, the descriptor-length fallback, an unknown size with a small
+stream (exact byte count), a stream exactly at the 25 MiB per-file limit,
+a stream over the limit (clamped to `MAX_FILE_BYTES + 1`), a stream that
+throws while reading, and `openStream()` returning `null` - the last two
+both resolve to `MAX_FILE_BYTES + 1`, never `0`, since `0` would let an
+oversized file slip past the per-file and total budget checks in
+`ChatViewModel.onAddFiles`. Preview URIs are only attached to a
+`ChatAttachment` after this resolved size has passed both budget checks.
 
 ## Privacy
 
