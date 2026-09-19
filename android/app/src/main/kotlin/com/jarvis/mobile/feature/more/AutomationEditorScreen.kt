@@ -20,10 +20,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -80,9 +78,9 @@ fun AutomationEditorScreen(
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
 
-    val dirty by remember { derivedStateOf { draft != initial } }
-    val errors by remember { derivedStateOf { validateDraft(draft) } }
-    val nextRun by remember { derivedStateOf { derivedNextRun(draft) } }
+    val dirty = draft != initial
+    val errors = validateDraft(draft)
+    val nextRun = derivedNextRun(draft)
     val stepLabels = stepListCopy(draft.type)
 
     fun requestClose() {
