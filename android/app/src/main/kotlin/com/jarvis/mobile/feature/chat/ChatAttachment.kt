@@ -1,5 +1,6 @@
 package com.jarvis.mobile.feature.chat
 
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -65,6 +66,53 @@ sealed interface AttachmentCheck {
 }
 
 /**
+ * Upper bound the counting fallback below ever reads: exactly one byte past
+ * the largest size any attachment is ever allowed to have. Reading further
+ * would only confirm "even larger", which the caller does not need to know.
+ */
+private const val SIZE_PROBE_LIMIT = MAX_FILE_BYTES + 1
+
+/**
+ * Resolves a real byte count for [uri], never a guessed or defaulted value.
+ * `OpenableColumns.SIZE` is authoritative when a provider reports it, but
+ * some providers (certain cloud/document providers) omit or misreport it, in
+ * which case treating a missing column as "0 bytes" would let an oversized
+ * file slip past the per-file and total budget checks in
+ * [com.jarvis.mobile.feature.chat.ChatViewModel.onAddFiles]. The fallbacks
+ * below always resolve a real count:
+ * 1. `AssetFileDescriptor.length` (a second, independent provider-reported
+ *    value; some providers that omit the cursor column still fill this in).
+ * 2. Counting bytes read from the content stream, capped at
+ *    [SIZE_PROBE_LIMIT] so a multi-gigabyte file cannot be read in full just
+ *    to be rejected. If the stream is exhausted before the cap, the count is
+ *    the file's exact size. If the cap is reached, the returned value
+ *    ([SIZE_PROBE_LIMIT]) is already larger than [MAX_FILE_BYTES], so the
+ *    per-file limit check that follows in the caller rejects it correctly
+ *    without needing the file's true size.
+ */
+private fun resolveAttachmentSize(resolver: ContentResolver, uri: Uri, cursorSize: Long?): Long {
+    if (cursorSize != null && cursorSize > 0) return cursorSize
+
+    val descriptorLength = runCatching {
+        resolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+    }.getOrNull()
+    if (descriptorLength != null && descriptorLength > 0) return descriptorLength
+
+    return runCatching {
+        resolver.openInputStream(uri)?.use { stream ->
+            val buffer = ByteArray(8192)
+            var counted = 0L
+            while (counted < SIZE_PROBE_LIMIT) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                counted += read
+            }
+            counted
+        }
+    }.getOrNull() ?: SIZE_PROBE_LIMIT
+}
+
+/**
  * Reads display name, size and header bytes through the ContentResolver, the
  * Android equivalent of the web reference's File API access. Never a
  * security boundary by itself - a future backend must re-validate content
@@ -73,13 +121,13 @@ sealed interface AttachmentCheck {
 suspend fun validateAttachment(context: Context, uri: Uri): AttachmentCheck = withContext(Dispatchers.IO) {
     val resolver = context.contentResolver
     var displayName = uri.lastPathSegment ?: "Datei"
-    var size = 0L
+    var cursorSize: Long? = null
     resolver.query(uri, null, null, null, null)?.use { cursor ->
         val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
         val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
         if (cursor.moveToFirst()) {
             if (nameIdx >= 0) displayName = cursor.getString(nameIdx) ?: displayName
-            if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
+            if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) cursorSize = cursor.getLong(sizeIdx)
         }
     }
 
@@ -98,5 +146,6 @@ suspend fun validateAttachment(context: Context, uri: Uri): AttachmentCheck = wi
         return@withContext AttachmentCheck.Failed("Dateiinhalt passt nicht zur Dateiendung.")
     }
 
+    val size = resolveAttachmentSize(resolver, uri, cursorSize)
     AttachmentCheck.Ok(rule.kind, displayName, size)
 }
