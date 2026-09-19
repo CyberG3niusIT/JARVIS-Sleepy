@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.jarvis.mobile.core.designsystem.JarvisRadii
+import com.jarvis.mobile.core.designsystem.JarvisLayout
 import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
 import com.jarvis.mobile.core.designsystem.JarvisSpacing
 import com.jarvis.mobile.core.designsystem.component.JarvisExecutionTag
@@ -129,8 +130,8 @@ private fun ChatHeader(showReset: Boolean, onReset: () -> Unit) {
                 fontSize = 12.sp,
                 modifier = Modifier
                     .clip(RoundedCornerShape(JarvisRadii.sm))
+                    .defaultMinSize(minWidth = JarvisLayout.touchTargetMin, minHeight = JarvisLayout.touchTargetMin)
                     .clickable(role = Role.Button, onClick = onReset)
-                    .defaultMinSize(minHeight = JarvisSpacing.xxl)
                     .padding(horizontal = JarvisSpacing.xs, vertical = JarvisSpacing.xs),
             )
         }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
+import com.jarvis.mobile.core.designsystem.JarvisLayout
 import com.jarvis.mobile.core.designsystem.JarvisSpacing
 import com.jarvis.mobile.core.designsystem.component.JarvisButton
 import com.jarvis.mobile.core.designsystem.component.JarvisButtonVariant
@@ -111,6 +113,7 @@ fun StartScreen(onOpenChat: () -> Unit, onOpenSystem: (() -> Unit)? = null) {
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .defaultMinSize(minHeight = JarvisLayout.touchTargetMin)
                         .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
                         .clickable(role = Role.Button, onClick = onOpenSystem)
                         .padding(vertical = JarvisSpacing.sm),
