@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -73,33 +74,34 @@ sealed interface AttachmentCheck {
 private const val SIZE_PROBE_LIMIT = MAX_FILE_BYTES + 1
 
 /**
- * Resolves a real byte count for [uri], never a guessed or defaulted value.
- * `OpenableColumns.SIZE` is authoritative when a provider reports it, but
- * some providers (certain cloud/document providers) omit or misreport it, in
- * which case treating a missing column as "0 bytes" would let an oversized
- * file slip past the per-file and total budget checks in
- * [com.jarvis.mobile.feature.chat.ChatViewModel.onAddFiles]. The fallbacks
- * below always resolve a real count:
- * 1. `AssetFileDescriptor.length` (a second, independent provider-reported
- *    value; some providers that omit the cursor column still fill this in).
- * 2. Counting bytes read from the content stream, capped at
- *    [SIZE_PROBE_LIMIT] so a multi-gigabyte file cannot be read in full just
- *    to be rejected. If the stream is exhausted before the cap, the count is
- *    the file's exact size. If the cap is reached, the returned value
- *    ([SIZE_PROBE_LIMIT]) is already larger than [MAX_FILE_BYTES], so the
- *    per-file limit check that follows in the caller rejects it correctly
- *    without needing the file's true size.
+ * Pure decision logic behind [resolveAttachmentSize], taking a plain
+ * [InputStream]-opening lambda instead of a [ContentResolver] so it is
+ * unit-testable without Robolectric or any Android framework mock. Never
+ * returns a guessed or defaulted value - in particular, an unknown size
+ * (no cursor value, no descriptor length, an unreadable/failing stream, or
+ * `openStream()` returning `null`) always resolves to [SIZE_PROBE_LIMIT]
+ * (already over [MAX_FILE_BYTES]), never `0`, since `0` would let an
+ * oversized file slip past the per-file and total budget checks in
+ * [com.jarvis.mobile.feature.chat.ChatViewModel.onAddFiles].
+ *
+ * Resolution order:
+ * 1. `cursorSize` when the provider reported a positive value.
+ * 2. `descriptorLength` (a second, independent provider-reported value;
+ *    some providers that omit the cursor column still fill this in).
+ * 3. Counting bytes read from `openStream()`, capped at [SIZE_PROBE_LIMIT]
+ *    so a multi-gigabyte file cannot be read in full just to be rejected.
+ *    If the stream is exhausted before the cap, the count is the file's
+ *    exact size. If the cap is reached, or the stream throws, or
+ *    `openStream()` returns `null`, the result is [SIZE_PROBE_LIMIT],
+ *    which the caller's per-file limit check rejects correctly without
+ *    needing the file's true size.
  */
-private fun resolveAttachmentSize(resolver: ContentResolver, uri: Uri, cursorSize: Long?): Long {
+internal fun resolveAttachmentSizeFromSources(cursorSize: Long?, descriptorLength: Long?, openStream: () -> InputStream?): Long {
     if (cursorSize != null && cursorSize > 0) return cursorSize
-
-    val descriptorLength = runCatching {
-        resolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
-    }.getOrNull()
     if (descriptorLength != null && descriptorLength > 0) return descriptorLength
 
     return runCatching {
-        resolver.openInputStream(uri)?.use { stream ->
+        openStream()?.use { stream ->
             val buffer = ByteArray(8192)
             var counted = 0L
             while (counted < SIZE_PROBE_LIMIT) {
@@ -107,9 +109,25 @@ private fun resolveAttachmentSize(resolver: ContentResolver, uri: Uri, cursorSiz
                 if (read < 0) break
                 counted += read
             }
-            counted
+            // A single read can return up to a full buffer past the cap
+            // (the loop only checks the threshold before reading, not
+            // after), so clamp here rather than letting an arbitrarily
+            // large file overshoot SIZE_PROBE_LIMIT by an unbounded amount.
+            minOf(counted, SIZE_PROBE_LIMIT)
         }
     }.getOrNull() ?: SIZE_PROBE_LIMIT
+}
+
+/**
+ * Thin Android wrapper around [resolveAttachmentSizeFromSources]: resolves
+ * the `AssetFileDescriptor.length` fallback value and supplies the content
+ * stream, but holds none of the size-decision logic itself.
+ */
+private fun resolveAttachmentSize(resolver: ContentResolver, uri: Uri, cursorSize: Long?): Long {
+    val descriptorLength = runCatching {
+        resolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+    }.getOrNull()
+    return resolveAttachmentSizeFromSources(cursorSize, descriptorLength) { resolver.openInputStream(uri) }
 }
 
 /**
