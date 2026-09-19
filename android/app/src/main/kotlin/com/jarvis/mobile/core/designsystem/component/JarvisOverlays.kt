@@ -8,10 +8,14 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -59,7 +64,8 @@ fun JarvisBottomSheet(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
-                    .clickable(onClick = onClose),
+                    .clickable(onClick = onClose)
+                    .clearAndSetSemantics {},
             )
             AnimatedVisibility(
                 visible = true,
@@ -88,25 +94,39 @@ fun JarvisBottomSheet(
                         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(text = title, color = JarvisSemanticColor.foreground, fontSize = 13.sp)
+                        Text(
+                            text = title,
+                            color = JarvisSemanticColor.foreground,
+                            fontSize = 13.sp,
+                            modifier = Modifier.weight(1f),
+                        )
                         IconButton(onClick = onClose) {
                             Icon(Icons.Filled.Close, contentDescription = "Schließen", tint = JarvisSemanticColor.mutedForeground)
                         }
                     }
-                    Box(modifier = Modifier.padding(bottom = JarvisSpacing.lg)) { content() }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .padding(bottom = JarvisSpacing.lg),
+                    ) {
+                        content()
+                    }
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun JarvisDialog(
     open: Boolean,
     onClose: () -> Unit,
     title: String,
     description: String? = null,
-    actions: @Composable RowScope.() -> Unit = {},
+    actions: @Composable FlowRowScope.() -> Unit = {},
     content: (@Composable () -> Unit)? = null,
 ) {
     if (!open) return
@@ -116,6 +136,7 @@ fun JarvisDialog(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(JarvisRadii.md))
                 .background(JarvisSemanticColor.surfaceRaised)
+                .verticalScroll(rememberScrollState())
                 .padding(JarvisSpacing.lg),
         ) {
             Text(text = title, color = JarvisSemanticColor.foreground, fontSize = 14.sp)
@@ -129,11 +150,12 @@ fun JarvisDialog(
                 )
             }
             content?.invoke()
-            Row(
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = JarvisSpacing.lg),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm),
                 content = actions,
             )
         }

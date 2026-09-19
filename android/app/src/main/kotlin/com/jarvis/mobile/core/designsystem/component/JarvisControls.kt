@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -142,15 +143,22 @@ fun JarvisTextField(
                 .padding(horizontal = JarvisSpacing.md),
             contentAlignment = Alignment.CenterStart,
         ) {
-            if (value.isEmpty() && placeholder != null) {
-                Text(text = placeholder, color = JarvisSemanticColor.mutedForeground, fontSize = 13.sp)
-            }
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
                 textStyle = TextStyle(color = JarvisSemanticColor.foreground, fontSize = 13.sp),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(JarvisSemanticColor.primary),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                decorationBox = { innerTextField ->
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty() && placeholder != null) {
+                            Text(text = placeholder, color = JarvisSemanticColor.mutedForeground, fontSize = 13.sp)
+                        }
+                        innerTextField()
+                    }
+                },
             )
         }
     }

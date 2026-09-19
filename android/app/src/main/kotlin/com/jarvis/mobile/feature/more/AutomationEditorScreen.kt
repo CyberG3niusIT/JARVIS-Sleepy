@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
 import com.jarvis.mobile.core.designsystem.JarvisSpacing
+import com.jarvis.mobile.core.designsystem.JarvisLayout
 import com.jarvis.mobile.core.designsystem.component.JarvisActionResultText
 import com.jarvis.mobile.core.designsystem.component.JarvisBottomSheet
 import com.jarvis.mobile.core.designsystem.component.JarvisButton
@@ -269,10 +270,10 @@ fun AutomationEditorScreen(
                                 title = if (i > 0) "${draft.conditionLogic} ${c.text}" else c.text,
                                 trailing = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        IconButton(onClick = { conditionSheet = ConditionSheetState(c.id, c.text) }, modifier = Modifier.size(40.dp)) {
+                                        IconButton(onClick = { conditionSheet = ConditionSheetState(c.id, c.text) }, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
                                             Icon(Icons.Filled.Edit, contentDescription = "Bedingung ${c.text} bearbeiten", tint = JarvisSemanticColor.mutedForeground)
                                         }
-                                        IconButton(onClick = { removeCondition(c.id) }, modifier = Modifier.size(40.dp)) {
+                                        IconButton(onClick = { removeCondition(c.id) }, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
                                             Icon(Icons.Filled.Delete, contentDescription = "Bedingung ${c.text} entfernen", tint = JarvisSemanticColor.mutedForeground)
                                         }
                                     }
@@ -303,16 +304,16 @@ fun AutomationEditorScreen(
                             },
                             trailing = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(onClick = { moveStep(step.id, -1) }, enabled = i != 0, modifier = Modifier.size(40.dp)) {
+                                    IconButton(onClick = { moveStep(step.id, -1) }, enabled = i != 0, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
                                         Icon(Icons.Filled.ArrowUpward, contentDescription = "Schritt ${step.label} nach oben verschieben", tint = JarvisSemanticColor.mutedForeground)
                                     }
-                                    IconButton(onClick = { moveStep(step.id, 1) }, enabled = i != draft.steps.size - 1, modifier = Modifier.size(40.dp)) {
+                                    IconButton(onClick = { moveStep(step.id, 1) }, enabled = i != draft.steps.size - 1, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
                                         Icon(Icons.Filled.ArrowDownward, contentDescription = "Schritt ${step.label} nach unten verschieben", tint = JarvisSemanticColor.mutedForeground)
                                     }
-                                    IconButton(onClick = { stepSheet = StepSheetState(step.id, step.label) }, modifier = Modifier.size(40.dp)) {
+                                    IconButton(onClick = { stepSheet = StepSheetState(step.id, step.label) }, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
                                         Icon(Icons.Filled.Edit, contentDescription = "Schritt ${step.label} bearbeiten", tint = JarvisSemanticColor.mutedForeground)
                                     }
-                                    IconButton(onClick = { removeStep(step.id) }, modifier = Modifier.size(40.dp)) {
+                                    IconButton(onClick = { removeStep(step.id) }, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
                                         Icon(Icons.Filled.Delete, contentDescription = "Schritt ${step.label} entfernen", tint = JarvisSemanticColor.mutedForeground)
                                     }
                                 }
