@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,6 +30,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,16 +43,20 @@ import com.jarvis.mobile.core.designsystem.JarvisRadii
 import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
 import com.jarvis.mobile.core.designsystem.JarvisSpacing
 import com.jarvis.mobile.core.designsystem.component.JarvisExecutionTag
+import com.jarvis.mobile.core.designsystem.component.JarvisInlineNotice
+import com.jarvis.mobile.core.designsystem.component.JarvisNoticeTone
 import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
 import com.jarvis.mobile.core.designsystem.component.JarvisTextField
 import com.jarvis.mobile.core.model.ExecutionLocation
 import com.jarvis.mobile.core.model.SystemState
 
 /**
- * Ported 1:1 from src/components/jarvis/screens/chat-screen.tsx. Attachment
- * picking (paperclip, image/PDF preview) is deferred to a follow-up commit,
- * see android/PORTING_PLAN.md; every other structural element - header,
- * transcript, action rows, task states, composer - is ported.
+ * Ported 1:1 from src/components/jarvis/screens/chat-screen.tsx, including
+ * chat-attachment.tsx: header, transcript, action rows, task states,
+ * composer with real Android file/image picking (ActivityResultContracts.GetMultipleContents,
+ * the standard Storage-Access-Framework picker - no extra permission needed
+ * since the system grants a temporary read URI), attachment validation via
+ * ContentResolver, and image preview via Coil against that same content URI.
  */
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
@@ -81,10 +88,21 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             }
         }
 
+        ChatAttachmentDraftList(attachments = state.attachments, onRemove = viewModel::onRemoveAttachment)
+        val attachmentError = state.attachmentError
+        if (attachmentError != null) {
+            JarvisInlineNotice(
+                modifier = Modifier.padding(horizontal = JarvisSpacing.md, vertical = JarvisSpacing.sm),
+                tone = JarvisNoticeTone.ERROR,
+                text = attachmentError,
+            )
+        }
         ChatComposer(
             value = state.draft,
             onChange = viewModel::onDraftChange,
             onSend = viewModel::onSend,
+            hasAttachments = state.attachments.isNotEmpty(),
+            onAddFiles = viewModel::onAddFiles,
         )
     }
 }
@@ -174,7 +192,10 @@ private fun ChatMessageItem(message: ChatMessage) {
                     .background(JarvisSemanticColor.surfaceSelected)
                     .padding(horizontal = JarvisSpacing.md, vertical = JarvisSpacing.sm),
             ) {
-                Text(text = message.text, color = JarvisSemanticColor.foreground, fontSize = 13.sp, lineHeight = 20.sp)
+                if (message.text.isNotEmpty()) {
+                    Text(text = message.text, color = JarvisSemanticColor.foreground, fontSize = 13.sp, lineHeight = 20.sp)
+                }
+                ChatMessageAttachmentList(attachments = message.attachments)
             }
         }
 
@@ -293,8 +314,17 @@ private fun ChatTaskStateView(state: ChatTaskState) {
 }
 
 @Composable
-private fun ChatComposer(value: String, onChange: (String) -> Unit, onSend: () -> Unit) {
-    val canSend = value.isNotBlank()
+private fun ChatComposer(
+    value: String,
+    onChange: (String) -> Unit,
+    onSend: () -> Unit,
+    hasAttachments: Boolean,
+    onAddFiles: (List<android.net.Uri>) -> Unit,
+) {
+    val canSend = value.isNotBlank() || hasAttachments
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNotEmpty()) onAddFiles(uris)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -304,6 +334,13 @@ private fun ChatComposer(value: String, onChange: (String) -> Unit, onSend: () -
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(JarvisSpacing.sm),
     ) {
+        IconButton(onClick = { pickFiles.launch("*/*") }) {
+            Icon(
+                Icons.Filled.AttachFile,
+                contentDescription = "Bild oder PDF anhängen",
+                tint = JarvisSemanticColor.mutedForeground,
+            )
+        }
         Box(modifier = Modifier.weight(1f)) {
             JarvisTextField(
                 value = value,
