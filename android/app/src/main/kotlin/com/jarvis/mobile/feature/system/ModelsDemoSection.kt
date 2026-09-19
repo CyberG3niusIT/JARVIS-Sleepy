@@ -20,7 +20,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -43,7 +42,6 @@ import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
 import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 
 /**
  * Ported 1:1 from src/components/jarvis/screens/models-demo.tsx. Explicitly
@@ -71,7 +69,6 @@ fun ModelsDemoSection() {
     // rememberJarvisActionResult() pattern used elsewhere - reset on
     // recreation is correct, it is not user-entered content.
     var confirmation by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
 
     fun update(id: String, patch: (DemoModelEntry) -> DemoModelEntry) {
         models = models.map { if (it.id == id) patch(it) else it }
@@ -96,13 +93,21 @@ fun ModelsDemoSection() {
         }
     }
 
+    // A saveable LOADING state can be restored after activity recreation.
+    // Driving completion from that state restarts the cancelled delay instead
+    // of leaving the model permanently stuck without an available action.
+    models.filter { it.loadState == ModelLoadState.LOADING }.forEach { m ->
+        key("loading:${m.id}") {
+            LaunchedEffect(m.id) {
+                delay(600)
+                update(m.id) { it.copy(loadState = ModelLoadState.READY) }
+                report("\"${m.name}\" wurde im Demozustand geladen. Entwurfszustand, keine Runtime-Aktion ausgeführt.")
+            }
+        }
+    }
+
     fun load(m: DemoModelEntry) {
         update(m.id) { it.copy(loadState = ModelLoadState.LOADING) }
-        scope.launch {
-            delay(600)
-            update(m.id) { it.copy(loadState = ModelLoadState.READY) }
-            report("\"${m.name}\" wurde im Demozustand geladen. Entwurfszustand, keine Runtime-Aktion ausgeführt.")
-        }
     }
 
     fun unload(m: DemoModelEntry) {
@@ -135,10 +140,6 @@ fun ModelsDemoSection() {
             update(m.id) { it.copy(loadState = ModelLoadState.DOWNLOADING, downloadProgress = 0, errorKind = null) }
         } else {
             update(m.id) { it.copy(loadState = ModelLoadState.LOADING, errorKind = null) }
-            scope.launch {
-                delay(600)
-                update(m.id) { it.copy(loadState = ModelLoadState.READY) }
-            }
         }
         report("Vorgang für \"${m.name}\" wurde im Demozustand erneut versucht. Entwurfszustand, keine Runtime-Aktion ausgeführt.")
     }
