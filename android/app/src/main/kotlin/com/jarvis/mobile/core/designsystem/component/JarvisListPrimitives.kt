@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -67,15 +68,19 @@ fun JarvisListRow(
     leading: @Composable (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
     chevron: Boolean = false,
-    selected: Boolean = false,
+    selected: Boolean? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val rowModifier = modifier
         .fillMaxWidth()
         .defaultMinSize(minHeight = 48.dp)
-        .background(if (selected) JarvisSemanticColor.surfaceSelected else androidx.compose.ui.graphics.Color.Transparent)
+        .background(if (selected == true) JarvisSemanticColor.surfaceSelected else androidx.compose.ui.graphics.Color.Transparent)
         .let { base ->
-            if (onClick != null) base.clickable(role = Role.Button, onClick = onClick) else base
+            when {
+                onClick == null -> base
+                selected != null -> base.selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+                else -> base.clickable(role = Role.Button, onClick = onClick)
+            }
         }
         .padding(horizontal = 16.dp, vertical = 10.dp)
 

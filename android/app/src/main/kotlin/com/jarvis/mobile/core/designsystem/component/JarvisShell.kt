@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -118,6 +120,7 @@ fun JarvisBottomNavigation(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(JarvisLayout.bottomNavHeight)
+                .selectableGroup()
                 .background(JarvisSemanticColor.surface)
                 .border(androidx.compose.foundation.BorderStroke(0.5.dp, JarvisSemanticColor.borderSoft)),
         ) {
@@ -128,7 +131,7 @@ fun JarvisBottomNavigation(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(role = Role.Tab) { onSelect(item.id) },
+                        .selectable(selected = active, role = Role.Tab) { onSelect(item.id) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                 ) {
