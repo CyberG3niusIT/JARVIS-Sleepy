@@ -457,16 +457,17 @@ class TextToSpeech:
             )
             return "unknown"
 
-    def _speak_chatterbox(self, text: str) -> bool:
+    def _speak_chatterbox(self, text: str, timeout_override: float = None) -> bool:
         if not self._chatterbox_available():
             return False
 
+        read_timeout = timeout_override if timeout_override is not None else self.chatterbox_timeout
         try:
             t0 = time.time()
             response = self._chatterbox_session.post(
                 self.chatterbox_endpoint,
                 json={"text": text},
-                timeout=(self.chatterbox_connect_timeout, self.chatterbox_timeout),
+                timeout=(self.chatterbox_connect_timeout, read_timeout),
             )
             wav = response.content
 
@@ -668,18 +669,37 @@ class TextToSpeech:
 
     # ── Shared speak interface ─────────────────────────────────────────
 
-    def speak(self, text: str, normalize: bool = True) -> bool:
+    def speak(self, text: str, normalize: bool = True, cancel_check=None,
+              timeout_override: float = None) -> bool:
         """
         Speak text using the configured TTS engine.
 
         Args:
             text: Text to speak
             normalize: Whether to normalize text (default: True)
+            cancel_check: Optional callable returning True to abort right
+                          after the TTS lock is acquired but before any
+                          synthesis starts — same re-check-after-lock
+                          pattern as speak_ack(). Used by the contextual
+                          ack path (core/pipeline.py) so a real response
+                          that arrived while waiting for the lock isn't
+                          delayed further by a now-stale ack.
+            timeout_override: Caps the Chatterbox request timeout for
+                               this call only (connect+read), instead of
+                               the configured self.chatterbox_timeout.
+                               Also used by the contextual ack path: an
+                               ack must never be allowed to hold
+                               _tts_lock for as long as a real response
+                               synthesis legitimately can.
 
         Returns:
             True if successful, False otherwise
         """
         with self._tts_lock:
+            if cancel_check and cancel_check():
+                self.logger.debug("speak() cancelled after lock acquisition")
+                return False
+
             if not text or not text.strip():
                 self.logger.warning("Empty text provided to speak()")
                 return False
@@ -740,7 +760,7 @@ class TextToSpeech:
                         return self._fallback_to_piper(text)
                     return result
                 elif self.engine == "chatterbox":
-                    result = self._speak_chatterbox(text)
+                    result = self._speak_chatterbox(text, timeout_override=timeout_override)
                     if not result:
                         return self._fallback_to_piper(text)
                     return result

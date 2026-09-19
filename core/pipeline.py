@@ -738,6 +738,13 @@ class Coordinator:
     decisions, and manages conversation state.
     """
 
+    # Hard budget for the dynamically-generated contextual ack's
+    # Chatterbox synthesis call (see _play_ack_if_still_thinking). Kept
+    # well under a typical real-response synthesis time so a slow/stuck
+    # ack can never hold _tts_lock anywhere near as long as a real
+    # response legitimately might.
+    _CONTEXTUAL_ACK_TIMEOUT_S = 2.5
+
     def __init__(self, *, config, event_queue: queue.Queue,
                  tts_queue: queue.Queue, listener, tts, llm,
                  skill_manager, conversation, reminder_manager=None,
@@ -2100,12 +2107,26 @@ class Coordinator:
             # flow calls listener.resume_listening() when fully done.
             self.listener.pause_listening()
 
-            # Try contextual ack first (4B-generated, fired at command arrival)
+            # Try contextual ack first (4B-generated, fired at command arrival).
+            # This goes through the SAME tts.speak() the real response uses,
+            # which for Chatterbox is a real GPU synthesis request that holds
+            # _tts_lock — unlike the pre-cached fallback ack below. Two
+            # guards keep it from delaying the real response beyond a fixed
+            # budget: cancel_check re-checks _llm_responded once the lock is
+            # actually acquired (closing the pre-lock race window), and
+            # timeout_override caps how long the Chatterbox call itself may
+            # run, instead of the full response-length timeout. See
+            # TextToSpeech.speak()'s docstring.
             ctx_ack = getattr(self, '_contextual_ack_text', None)
             if ctx_ack and not self._llm_responded:
                 self.logger.info(f"Contextual ack: '{ctx_ack}'")
-                self.tts.speak(ctx_ack)
-                self.tts._ack_played = True
+                played = self.tts.speak(
+                    ctx_ack,
+                    cancel_check=lambda: self._llm_responded,
+                    timeout_override=self._CONTEXTUAL_ACK_TIMEOUT_S,
+                )
+                if played:
+                    self.tts._ack_played = True
                 return
 
             # Fallback: generic cached ack
