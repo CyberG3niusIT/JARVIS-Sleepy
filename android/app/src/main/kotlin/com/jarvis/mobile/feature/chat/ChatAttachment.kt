@@ -161,22 +161,27 @@ internal fun readAttachmentHeader(openStream: () -> InputStream?): ByteArray? = 
  */
 suspend fun validateAttachment(context: Context, uri: Uri): AttachmentCheck = withContext(Dispatchers.IO) {
     val resolver = context.contentResolver
-    var displayName = uri.lastPathSegment ?: "Datei"
-    var cursorSize: Long? = null
-    resolver.query(uri, null, null, null, null)?.use { cursor ->
-        val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
-        if (cursor.moveToFirst()) {
-            if (nameIdx >= 0) displayName = cursor.getString(nameIdx) ?: displayName
-            if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) cursorSize = cursor.getLong(sizeIdx)
+    val metadata = runCatching {
+        var displayName = uri.lastPathSegment ?: "Datei"
+        var cursorSize: Long? = null
+        resolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIdx >= 0) displayName = cursor.getString(nameIdx) ?: displayName
+                if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) cursorSize = cursor.getLong(sizeIdx)
+            }
         }
+        Triple(displayName, cursorSize, resolver.getType(uri) ?: "")
+    }.getOrElse {
+        return@withContext AttachmentCheck.Failed("Dateimetadaten konnten nicht gelesen werden.")
     }
+    val (displayName, cursorSize, mimeType) = metadata
 
     val lowerName = displayName.lowercase()
     val rule = signatureRules.find { rule -> rule.extensions.any { lowerName.endsWith(it) } }
         ?: return@withContext AttachmentCheck.Failed("Dateityp wird nicht unterstützt. Erlaubt sind PNG, JPEG, GIF, WebP und PDF.")
 
-    val mimeType = resolver.getType(uri) ?: ""
     if (mimeType !in rule.mimeTypes) {
         return@withContext AttachmentCheck.Failed("Dateityp und Inhaltstyp passen nicht zusammen.")
     }
