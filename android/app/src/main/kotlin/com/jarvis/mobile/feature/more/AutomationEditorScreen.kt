@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -224,9 +225,9 @@ fun AutomationEditorScreen(
 
             if (draft.type == AutomationType.SCHEDULE) {
                 JarvisSectionHeader("Zeitplan")
-                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = JarvisSpacing.sm), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
-                    JarvisButton(text = "Datum/Uhrzeit", variant = if (draft.scheduleMode == ScheduleMode.DATETIME) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, onClick = { draft = draft.copy(scheduleMode = ScheduleMode.DATETIME) })
-                    JarvisButton(text = "Intervall", variant = if (draft.scheduleMode == ScheduleMode.INTERVAL) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, onClick = { draft = draft.copy(scheduleMode = ScheduleMode.INTERVAL) })
+                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = JarvisSpacing.sm).selectableGroup(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
+                    JarvisButton(text = "Datum/Uhrzeit", variant = if (draft.scheduleMode == ScheduleMode.DATETIME) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, selected = draft.scheduleMode == ScheduleMode.DATETIME, onClick = { draft = draft.copy(scheduleMode = ScheduleMode.DATETIME) })
+                    JarvisButton(text = "Intervall", variant = if (draft.scheduleMode == ScheduleMode.INTERVAL) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, selected = draft.scheduleMode == ScheduleMode.INTERVAL, onClick = { draft = draft.copy(scheduleMode = ScheduleMode.INTERVAL) })
                 }
                 if (draft.scheduleMode == ScheduleMode.DATETIME) {
                     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -257,9 +258,9 @@ fun AutomationEditorScreen(
                 JarvisSectionHeader("Bedingungen") {
                     JarvisButton(text = "+ Bedingung", onClick = { conditionSheet = ConditionSheetState(null, "") })
                 }
-                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = JarvisSpacing.sm), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
-                    JarvisButton(text = "UND", variant = if (draft.conditionLogic == ConditionLogic.UND) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, onClick = { draft = draft.copy(conditionLogic = ConditionLogic.UND) })
-                    JarvisButton(text = "ODER", variant = if (draft.conditionLogic == ConditionLogic.ODER) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, onClick = { draft = draft.copy(conditionLogic = ConditionLogic.ODER) })
+                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = JarvisSpacing.sm).selectableGroup(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
+                    JarvisButton(text = "UND", variant = if (draft.conditionLogic == ConditionLogic.UND) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, selected = draft.conditionLogic == ConditionLogic.UND, onClick = { draft = draft.copy(conditionLogic = ConditionLogic.UND) })
+                    JarvisButton(text = "ODER", variant = if (draft.conditionLogic == ConditionLogic.ODER) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY, selected = draft.conditionLogic == ConditionLogic.ODER, onClick = { draft = draft.copy(conditionLogic = ConditionLogic.ODER) })
                 }
                 if (draft.conditions.isEmpty()) {
                     JarvisInlineNotice(modifier = Modifier.padding(horizontal = 16.dp), tone = JarvisNoticeTone.WARNING, text = "Noch keine Bedingung angelegt.")

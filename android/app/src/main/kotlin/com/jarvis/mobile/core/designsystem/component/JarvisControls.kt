@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +43,7 @@ fun JarvisButton(
     variant: JarvisButtonVariant = JarvisButtonVariant.SECONDARY,
     fullWidth: Boolean = false,
     enabled: Boolean = true,
+    selected: Boolean? = null,
     onClick: () -> Unit = {},
 ) {
     val (background, border, contentColor) = when {
@@ -70,7 +72,13 @@ fun JarvisButton(
             .clip(RoundedCornerShape(JarvisRadii.sm))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(JarvisRadii.sm))
-            .let { if (enabled) it.clickable(role = Role.Button, onClick = onClick) else it }
+            .let { base ->
+                if (selected != null) {
+                    base.selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+                } else {
+                    base.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                }
+            }
             .padding(horizontal = JarvisSpacing.lg),
         contentAlignment = Alignment.Center,
     ) {

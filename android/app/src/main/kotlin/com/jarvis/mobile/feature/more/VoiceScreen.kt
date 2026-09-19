@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -260,11 +261,12 @@ fun VoiceScreen(onBack: () -> Unit) {
 private fun SegmentedOptions(label: String, options: List<String>, selected: String, onSelect: (String) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
         Text(text = label.uppercase(), color = JarvisSemanticColor.mutedForeground, fontSize = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
-        FlowRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
+        FlowRow(modifier = Modifier.selectableGroup(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm)) {
             options.forEach { option ->
                 JarvisButton(
                     text = option,
                     variant = if (option == selected) JarvisButtonVariant.PRIMARY else JarvisButtonVariant.SECONDARY,
+                    selected = option == selected,
                     onClick = { onSelect(option) },
                 )
             }
