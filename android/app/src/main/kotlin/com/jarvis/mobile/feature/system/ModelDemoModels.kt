@@ -1,6 +1,9 @@
 package com.jarvis.mobile.feature.system
 
 import com.jarvis.mobile.core.model.SystemState
+import com.jarvis.mobile.core.util.StringFieldCodec
+import com.jarvis.mobile.core.util.StringFieldReader
+import com.jarvis.mobile.core.util.StringFieldWriter
 
 /** Ported 1:1 from src/components/jarvis/screens/models-screen.tsx + models-demo.tsx. */
 
@@ -97,3 +100,55 @@ val modelCatalogEntries: List<ModelCatalogEntry> = listOf(
     ModelCatalogEntry("cat-2", "Katalogbeispiel Mittel", "900 MB", "Katalogbeispiel"),
     ModelCatalogEntry("cat-3", "Katalogbeispiel Groß", "2,1 GB", "Katalogbeispiel"),
 )
+
+/**
+ * String encoding for [DemoModelEntry], since [ModelsDemoSection]'s `models`
+ * state is edited in place (load/unload/download start-pause-resume-cancel/
+ * retry/delete), so it must survive activity recreation like any other
+ * edited demo state. Built on [StringFieldCodec]; nullable fields use an
+ * explicit presence flag, never an empty-string sentinel.
+ */
+private fun StringFieldWriter.writeNullable(value: String?): StringFieldWriter {
+    write((value != null).toString())
+    if (value != null) write(value)
+    return this
+}
+
+private fun StringFieldReader.readNullable(): String? = if (read().toBoolean()) read() else null
+
+private fun encodeDemoModelEntry(m: DemoModelEntry): String {
+    val writer = StringFieldCodec.writer()
+    writer.write(m.id)
+    writer.write(m.name)
+    writer.write(m.loadState.name)
+    writer.writeNullable(m.compatible?.toString())
+    writer.writeNullable(m.integrity?.name)
+    writer.writeNullable(m.size)
+    writer.writeNullable(m.note)
+    writer.write(m.source.name)
+    writer.writeNullable(m.downloadProgress?.toString())
+    writer.writeNullable(m.errorKind?.name)
+    return writer.build()
+}
+
+private fun decodeDemoModelEntry(raw: String): DemoModelEntry {
+    val reader = StringFieldCodec.reader(raw)
+    return DemoModelEntry(
+        id = reader.read(),
+        name = reader.read(),
+        loadState = ModelLoadState.valueOf(reader.read()),
+        compatible = reader.readNullable()?.toBoolean(),
+        integrity = reader.readNullable()?.let { ModelIntegrity.valueOf(it) },
+        size = reader.readNullable(),
+        note = reader.readNullable(),
+        source = ModelSource.valueOf(reader.read()),
+        downloadProgress = reader.readNullable()?.toInt(),
+        errorKind = reader.readNullable()?.let { ModelErrorKind.valueOf(it) },
+    )
+}
+
+fun encodeDemoModelEntries(entries: List<DemoModelEntry>): String =
+    StringFieldCodec.encodeStringList(entries.map { encodeDemoModelEntry(it) })
+
+fun decodeDemoModelEntries(raw: String): List<DemoModelEntry> =
+    StringFieldCodec.decodeStringList(raw).map { decodeDemoModelEntry(it) }

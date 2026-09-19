@@ -21,6 +21,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,12 +55,21 @@ import kotlinx.coroutines.launch
  * DOWNLOADING state - the Compose equivalent of the web's setInterval scoped
  * per model id.
  */
+private val DemoModelEntriesSaver = Saver<List<DemoModelEntry>, String>(
+    save = { encodeDemoModelEntries(it) },
+    restore = { decodeDemoModelEntries(it) },
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ModelsDemoSection() {
-    var models by remember { mutableStateOf(initialDemoModels) }
-    var openId by remember { mutableStateOf<String?>(null) }
-    var deleteId by remember { mutableStateOf<String?>(null) }
+    // Category A: load/unload/download/delete edit this in place below.
+    var models by rememberSaveable(stateSaver = DemoModelEntriesSaver) { mutableStateOf(initialDemoModels) }
+    var openId by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Category B: transient auto-shown action-result text, same as the
+    // rememberJarvisActionResult() pattern used elsewhere - reset on
+    // recreation is correct, it is not user-entered content.
     var confirmation by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 

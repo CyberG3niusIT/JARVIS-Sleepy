@@ -7,8 +7,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -41,11 +42,18 @@ import kotlinx.coroutines.launch
  * flow (explain -> confirm for a stricter mode, confirm for relaxing), and
  * never touches [comparisonBaseline] or a real policy.
  */
+private val PrivacyOverlaySaver = Saver<PrivacyOverlay, String>(
+    save = { encodePrivacyOverlay(it) },
+    restore = { decodePrivacyOverlay(it) },
+)
+
 @Composable
 fun PrivacyScreen(onBack: () -> Unit) {
     val baseline = comparisonBaseline.privacyMode
-    var selectedMode by remember { mutableStateOf(baseline) }
-    var overlay by remember { mutableStateOf<PrivacyOverlay>(PrivacyOverlay.None) }
+    // Category A: the selected mode and which confirmation/explain overlay
+    // is open are both user-driven and should survive activity recreation.
+    var selectedMode by rememberSaveable { mutableStateOf(baseline) }
+    var overlay by rememberSaveable(stateSaver = PrivacyOverlaySaver) { mutableStateOf<PrivacyOverlay>(PrivacyOverlay.None) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
 

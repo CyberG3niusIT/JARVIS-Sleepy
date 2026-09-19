@@ -10,8 +10,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,26 +53,29 @@ fun VoiceScreen(onBack: () -> Unit) {
         scope.launch { actionResult.report("$message Entwurfszustand, keine Runtime-Aktion ausgeführt.") }
     }
 
-    var voiceState by remember { mutableStateOf(VoiceState.IDLE) }
+    // Category A: all of this is user-set config/demo state (selected state,
+    // sheet toggles, configured values) that should survive activity
+    // recreation rather than silently resetting.
+    var voiceState by rememberSaveable { mutableStateOf(VoiceState.IDLE) }
     fun goTo(next: VoiceState, note: String) {
         voiceState = next
         report(note)
     }
 
-    var wakeWordSheetOpen by remember { mutableStateOf(false) }
-    var wakeWordEnabled by remember { mutableStateOf(false) }
-    var keyword by remember { mutableStateOf("Jarvis") }
-    var sensitivity by remember { mutableStateOf("Mittel") }
+    var wakeWordSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var wakeWordEnabled by rememberSaveable { mutableStateOf(false) }
+    var keyword by rememberSaveable { mutableStateOf("Jarvis") }
+    var sensitivity by rememberSaveable { mutableStateOf("Mittel") }
 
-    var sttSheetOpen by remember { mutableStateOf(false) }
-    var sttLanguage by remember { mutableStateOf("Deutsch") }
-    var sttLocalOnly by remember { mutableStateOf(true) }
-    var sttPunctuation by remember { mutableStateOf(true) }
+    var sttSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var sttLanguage by rememberSaveable { mutableStateOf("Deutsch") }
+    var sttLocalOnly by rememberSaveable { mutableStateOf(true) }
+    var sttPunctuation by rememberSaveable { mutableStateOf(true) }
 
-    var ttsSheetOpen by remember { mutableStateOf(false) }
-    var ttsVoice by remember { mutableStateOf(ttsVoiceOptions[0]) }
-    var tempo by remember { mutableStateOf("Normal") }
-    var volume by remember { mutableStateOf("Normal") }
+    var ttsSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var ttsVoice by rememberSaveable { mutableStateOf(ttsVoiceOptions[0]) }
+    var tempo by rememberSaveable { mutableStateOf("Normal") }
+    var volume by rememberSaveable { mutableStateOf("Normal") }
 
     val currentConfig = voiceStateConfig.getValue(voiceState)
 

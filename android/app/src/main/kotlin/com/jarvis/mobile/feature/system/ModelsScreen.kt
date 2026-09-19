@@ -7,8 +7,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -42,8 +42,8 @@ private enum class AddModelChoice { IMPORT, KATALOG }
  */
 @Composable
 fun ModelsScreen(onBack: () -> Unit) {
-    var sheetOpen by remember { mutableStateOf(false) }
-    var choice by remember { mutableStateOf<AddModelChoice?>(null) }
+    var sheetOpen by rememberSaveable { mutableStateOf(false) }
+    var choice by rememberSaveable { mutableStateOf<AddModelChoice?>(null) }
     val actionResult = rememberJarvisActionResult()
     val scope = rememberCoroutineScope()
 

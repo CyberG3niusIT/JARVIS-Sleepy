@@ -114,17 +114,74 @@ Three explicit Kotlin layers, none of them a placeholder for the others:
 
 ## Lifecycle / process-death robustness
 
-Every screen-local prototype state (drafts, open sheets, filters, demo
-entries) uses `rememberSaveable`, not `remember`, so it survives both a
-configuration change and full activity recreation (process death), not
-rotation alone. The Automationen feature is the deepest case: the open
-editor's draft, the local automation list and the open editor session
-(`AutomationsScreen.kt`, `AutomationEditorScreen.kt`) all persist through a
-single shared string codec (`AutomationModels.kt: encodeAutomationDraft` /
-`decodeAutomationDraft`), because a plain `String` is unconditionally
-Bundle-safe while a nested `List<List<Any>>` is not. Covered by
-`app/src/test/kotlin/.../AutomationDraftCodecTest.kt` (round-trip for every
-field, including nested steps/conditions and the list/session separators).
+Every screen-local state that is *interactive, edited, or a user selection*
+(open sheets/dialogs, form drafts, filters, edited demo entries) uses
+`rememberSaveable`, not `remember`, so it survives both a configuration
+change and full activity recreation (process death), not rotation alone.
+This was audited screen by screen; a state that is purely derived from a
+fixed input, or transient action-result text that is deliberately meant to
+reset (matching the `PrototypeActionResult`/`rememberJarvisActionResult()`
+pattern), stays `remember` on purpose - resetting it is correct, not an
+oversight. Per screen:
+
+- `AutomationsScreen.kt` / `AutomationEditorScreen.kt`: the open editor's
+  draft, the local automation list and the open editor session all persist
+  through a shared string codec, see below.
+- `MemoryScreen.kt`: `demoEntries` (edited via confirm/correct/discard/
+  supersede) and `selectedId` are saveable via a `MemoryEntry` list codec
+  (`MemoryModels.kt: encodeMemoryEntries`/`decodeMemoryEntries`). The detail
+  sheet's `editing`/`draft`/`confirmDiscard`/`supersedeOpen`/`supersedeNote`/
+  `provenanceOpen` are saveable, keyed by entry id.
+- `VoiceScreen.kt`: all state (`voiceState`, the three configuration sheets'
+  open flags and configured values) is saveable - all plain enum/Boolean/
+  String values, no custom codec needed.
+- `AgentsScreen.kt`: `demo` (edited via cancel/retry/fail-demo) is saveable
+  via an `AgentEntry` codec (`AgentModels.kt: encodeAgentEntry`/
+  `decodeAgentEntry`); `sheetView` is a plain enum, saveable directly.
+- `DiagnosticsDemoSection.kt`: `severity`, `runtimeFilter`, `openId`,
+  `exportStep` are saveable (plain enum/String values). `runtimes` stays
+  `remember`: it is purely derived from the fixed demo entry list, so
+  recomputing it on recreation is correct, not a lost user choice.
+- `ModelImportCatalog.kt`: `step`/`failedAt` (import wizard progress) and
+  `openId` (catalog browser selection) are saveable.
+- `ModelsDemoSection.kt`: `models` (edited via load/unload/download start-
+  pause-resume-cancel/retry/delete) is saveable via a `DemoModelEntry` list
+  codec (`ModelDemoModels.kt: encodeDemoModelEntries`/
+  `decodeDemoModelEntries`); `openId`/`deleteId` are saveable. `confirmation`
+  stays `remember`: it is the same kind of transient, auto-shown
+  action-result text as `rememberJarvisActionResult()` elsewhere, not
+  user-entered content, so resetting it on recreation is correct.
+- `ModelsScreen.kt`: `sheetOpen`/`choice` are saveable (Boolean/plain enum).
+- `PermissionsScreen.kt`: `openId` and the detail sheet's `demoState` are
+  saveable (String/plain enum).
+- `PrivacyScreen.kt`: `selectedMode` (plain enum) is saveable directly;
+  `overlay` (a sealed interface, not `Serializable` by default) is saveable
+  via a small codec (`PrivacyModels.kt: encodePrivacyOverlay`/
+  `decodePrivacyOverlay`).
+- `RuntimesDemoSections.kt`: `pairing`, `sheetOpen`, `disconnectOpen`
+  (`SleepyPairingSection`) and `state` (`HandoffReviewSection`) are saveable
+  (plain enum/Boolean values).
+- `ToolsScreen.kt`: `selected` (a `CapabilityRow`, not `Serializable`) is
+  saveable via a small `Saver` that stores the row's unique `name` and looks
+  it up again in the fixed, audited `capabilityRows` list on restore.
+
+The Automationen feature is the deepest case: the open editor's draft, the
+local automation list and the open editor session (`AutomationsScreen.kt`,
+`AutomationEditorScreen.kt`) all persist through a shared length-prefixed
+string codec (`core/util/StringFieldCodec.kt`, used by
+`AutomationModels.kt: encodeAutomationDraft`/`decodeAutomationDraft`),
+because a plain `String` is unconditionally Bundle-safe while a nested
+`List<List<Any>>` is not. Unlike an earlier control-character-separator
+scheme, this codec is provably collision-free regardless of field content
+(length-prefixed fields, not delimiter search) - covered by
+`StringFieldCodecTest.kt` (empty/unicode/newline/control-character/
+separator-like content) and `AutomationDraftCodecTest.kt` (every draft
+field, including steps/conditions/permissions and fields that themselves
+contain the codec's own header syntax or the previous ad-hoc separator
+characters). The same codec backs the `MemoryEntry`, `AgentEntry` and
+`DemoModelEntry` list encodings above, each covered by its own round-trip
+test (`MemoryEntryCodecTest.kt`, `AgentEntryCodecTest.kt`,
+`DemoModelEntryCodecTest.kt`).
 
 ## Chat attachment size resolution
 
