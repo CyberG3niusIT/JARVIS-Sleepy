@@ -52,7 +52,39 @@ venv. If the `import chatterbox.mtl_tts` check above fails in
 `jarvis-venv`'s pins to make it fit without checking why they were pinned
 that way.
 
-## Install steps (once the checklist above is confirmed)
+## Install strategy: system-level is primary, user-level is the fallback
+
+Session #6 found the repo carrying **both** conventions unreconciled: the
+old root `jarvis.service` documents `~/.config/systemd/user/` +
+`systemctl --user`, while these `systemd/*.service` files (written in
+session #5) target `/etc/systemd/system` + plain `systemctl`. Only one
+should actually be used — running the same service both ways (e.g. a
+leftover user-level unit alongside a new system-level one) means two
+JARVIS processes fighting over the mic, port 8080, and port 8765.
+
+**Recommendation: system-level (`/etc/systemd/system`), with `User=alex`,
+is the one to use**, for a concrete architectural reason, not just
+preference: `jarvis.service`, `llama-server.service`, and
+`chatterbox.service` are meant to be always-on background services that
+start at boot with nobody logged in. System-level units do that natively.
+User-level units only start at boot if `loginctl enable-linger alex` is
+also set up — which exists specifically to make user units behave like
+system units for exactly this case. Reaching for that workaround when a
+native system-level unit is available and no permission blocker has
+actually been confirmed is the less direct path, so system-level is
+primary here.
+
+**Use the user-level fallback only if system-level installation is
+confirmed blocked** (no sudo/root in whatever session does the install —
+an actual permission fact, not assumed) — full instructions in that case
+are in the second block below, not just "drop two lines": the unit files
+would need `User=alex` and `EnvironmentFile=-/home/alex/jarvis/.env`
+removed (user units already run as that user and typically source their
+environment differently — e.g. via `~/.config/environment.d/` or a
+`systemctl --user import-environment` step, itself unverified without
+Sleepy access) and every `%h`-relative path double-checked.
+
+### Primary: system-level install
 
 ```bash
 sudo cp systemd/llama-server.service systemd/chatterbox.service systemd/jarvis.service /etc/systemd/system/
@@ -67,12 +99,34 @@ journalctl -u chatterbox.service --no-pager -n 50
 journalctl -u jarvis.service --no-pager -n 50
 ```
 
-If `/etc/systemd/system` isn't writable in whatever session does this
-install, user-level units under `~/.config/systemd/user/` (matching the
-old root `jarvis.service`'s own install comment) are the fallback — but
-then `EnvironmentFile=-/home/alex/jarvis/.env` and `User=alex` should be
-dropped (user units already run as that user) and `loginctl enable-linger
-alex` is needed for them to start before login.
+### Fallback: user-level install (only if system-level is confirmed blocked)
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/llama-server.service systemd/chatterbox.service systemd/jarvis.service ~/.config/systemd/user/
+# In each copied file: remove the `User=alex` line, and replace
+# `EnvironmentFile=-/home/alex/jarvis/.env` with whatever this Sleepy
+# session's actual environment-sourcing convention turns out to be —
+# NOT verified here, must be confirmed on the real machine.
+sed -i '/^User=/d' ~/.config/systemd/user/{llama-server,chatterbox,jarvis}.service
+
+systemctl --user daemon-reload
+systemctl --user enable --now llama-server.service
+systemctl --user enable --now chatterbox.service
+systemctl --user enable --now jarvis.service
+loginctl enable-linger alex   # required for user units to start before login
+
+systemctl --user status --no-pager llama-server.service chatterbox.service jarvis.service
+journalctl --user -u llama-server.service --no-pager -n 50
+journalctl --user -u chatterbox.service --no-pager -n 50
+journalctl --user -u jarvis.service --no-pager -n 50
+```
+
+Whichever strategy is used, **use only that one** — before installing,
+confirm the other convention isn't already active
+(`systemctl list-units | grep -i jarvis` AND
+`systemctl --user list-units | grep -i jarvis`) to avoid two instances
+running at once.
 
 ## What's deliberately NOT included
 
