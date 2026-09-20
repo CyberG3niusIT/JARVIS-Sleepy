@@ -7,25 +7,42 @@ way, and what's known to be broken or half-done*. Keep it current: when you
 make an architectural decision or find a real bug, write it here, not just
 in a commit message.
 
-Last major update: 2026-09-19 (Claude session #5, branch
-`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `0c92653` — which
-`main` and `claude/jarvis-architecture` both also pointed at when this
-session started; verified via `git fetch --all --prune` + `git log`
-before any change, not assumed). Session #5 scope: backend-only, same
-constraint as session #4 (no UI/Android work). Ran with **no shell access
-to the real Sleepy machine** — every "NEEDS HW VERIFY" tag in this
-document below means exactly that: written and unit-tested in a sandbox,
-never run against real hardware/models, not to be reported as validated
-until someone with Sleepy access actually does so. Delivered this
-session: a central `PrivacyGate` (P0, new — see §11), the memory
-polarity-reversal bug fix (§5d, item 6 from the old open-work list),
-bounded contextual-ack synthesis (§3.4, item 3 from the old open-work
-list), two lifecycle/shutdown gaps closed (§12), and corrected-but-
-unverified Sleepy systemd units (§13, item 12 from the old open-work
-list). Still open from session #4's list and not attempted this session:
-the German-first string backlog, memory consolidation/decay/autonomy
-budget, and the full speech_end→...→response_done latency chain — see
-the updated §14.
+Last major update: 2026-09-20 (Claude session #6, same branch
+`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `4991633` —
+verified via `git fetch --all --prune` + `git log` + diff against
+`origin/main` before any change, not assumed; working tree was clean).
+Session #6 scope: backend-only, same constraint as prior sessions. Ran
+with **no shell access to the real Sleepy machine**, same as session
+#5 — every "NEEDS HW VERIFY" tag still means exactly that.
+
+Session #6 found and fixed real gaps in session #5's own PrivacyGate
+work — not just new features. Most notably: the mic-privacy fix only
+gated the speech-collection handoff, not the underlying VAD ring buffer
+(§11); the "explicit fact wins over inference" fix only worked for the
+FIRST conflicting observation, and a second one could reinforce the
+losing candidate right past the explicit fact's own confidence (§5d) —
+both reproduced with a failing test before being fixed, per the task's
+own instruction. Full list: audio ring-buffer/Silero-state privacy leak
+closed, webcam capture-teardown on privacy enter, conversation
+JSONL/topic-segment/session-summarization persistence gated, a real
+local privacy-exit control path (voice cannot reliably exit PRIVACY —
+architectural, not a bug to paper over), the memory escalation bug
+above, a stale-Piper-ack-after-Chatterbox-failure fix, FILESYSTEM_OBSERVATION/
+REMOTE_TOOL wired to their real call sites, memory decay/bounded-
+consolidation/autonomy-budget (the one item session #5 explicitly
+deferred), and a systemd --user-vs-system install-strategy
+inconsistency resolved in documentation. See §11 (privacy, rewritten
+significantly this session), §5d (memory), §3.4 (ack), §13 (systemd).
+
+Not attempted this session, flagged rather than silently skipped: the
+XTTSv2-Streaming-ONNX/Windows-Audio voice target (needs the actual
+ONNX model files and a Windows environment neither of which this
+sandbox has — implementing it blind would mean shipping unverified
+code against a path this session couldn't even confirm exists), a full
+agentic/skill-system dead-path audit, a generic proactive/event-
+notification layer, and the German-first string backlog. Each is a
+substantial standalone piece of work better done with a fresh session's
+full budget than squeezed in superficially — see the updated §14.
 
 **Persona note (clarified explicitly by the user this session, don't
 "fix" this again):** German-first does NOT mean removing "Sir"/"Ma'am".
@@ -351,6 +368,22 @@ chop prosody. German abbreviations added in the previous session.
   `tests/unit/test_contextual_ack_blocking.py` (bare-object pattern, no
   real Chatterbox needed). **Not yet observed against a real Chatterbox
   server** — see item 2 in §14.
+  ~~Session #6 gap in this fix~~ **Fixed (session #6)**: on a Chatterbox
+  timeout/failure, `speak()`'s failure path still unconditionally fell
+  back to Piper — trading one slow engine for another, still holding
+  `_tts_lock` for the full Piper synthesis+playback, with no re-check of
+  `cancel_check` first (so it could speak a stale ack even after the
+  real response had already arrived). Fixed: the Chatterbox branch now
+  checks `cancel_check is not None` (only ever passed by the ack call
+  site) before falling back — on that path, a failure now drops the ack
+  unconditionally instead of trying Piper. Real (non-ack) `speak()`
+  calls never pass `cancel_check`, so their Piper fallback is
+  byte-for-byte unchanged. Known residual, not fixed: the Kokoro engine
+  branch still falls back to Piper unconditionally regardless of
+  `cancel_check` — Kokoro is inactive in this deployment, so this is a
+  dormant version of the same bug class, left alone to keep the change
+  scoped to the actually-exercised path. Tests: 3 more cases added to
+  the same `test_contextual_ack_blocking.py`.
 - ~~Single shared timeout...~~ **Fixed** (previous + this session):
   `_chatterbox_available()` probes `/health` with a short (1.5s) timeout,
   throttled (5s re-check when healthy, 1s when down), before every
@@ -823,6 +856,108 @@ explicit-wins-over-inference in both directions, and a 10-thread
 concurrent-writes race test asserting no false reinforcement survives
 mixed-polarity concurrent `store_fact()` calls on the same subject.
 
+**Session #6: the "explicit wins" fix above had an escalation bug,
+reproduced and fixed.** It only handled the *first* conflicting
+inferred observation correctly. `_find_similar_fact()` matches "the
+most recent active row for this subject+category" — after the first
+conflict inserts a new active (non-superseded) candidate row, a
+*second* matching inferred observation finds *that candidate* instead
+of the original explicit fact (it's now the most recent active row),
+and since neither side of that comparison is `"explicit"` anymore, it
+falls through to plain reinforcement. Confirmed with a real repro
+script before writing the fix (per the task's explicit instruction to
+reproduce, not just theorize): starting from an explicit fact at 0.90
+confidence, 7 repeated conflicting inferred observations pushed the
+*inferred* candidate to 0.99 (`MAX_FACT_CONFIDENCE`, `evidence_count=7`)
+while the explicit fact sat untouched at 0.90 — now the lower-
+confidence, effectively shadowed row for that subject.
+
+Fix: idempotent migration adds `excluded_from_matching INTEGER NOT
+NULL DEFAULT 0`. Every candidate created via the "explicit wins" branch
+is inserted with this set to 1, and `_find_similar_fact()`'s two
+queries (exact + fuzzy subject match) both add
+`AND excluded_from_matching = 0` — so a conflicting-inferred-vs-
+explicit candidate can never again be anyone's "existing" match. Every
+future conflicting inference for the same subject compares against the
+explicit fact again, landing as its own separate low-confidence row
+rather than accumulating reinforcement. Accepted trade-off: repeated
+identical contradictions now produce multiple near-duplicate
+low-confidence rows instead of one reinforced row — a storage cost,
+not a correctness one, and the one the safety requirement calls for.
+The column only affects the internal dedup/reinforcement lookup —
+`get_facts()` still returns these rows unchanged (same "visible but not
+overwriting" behavior as session #5 intended). Also reused this
+session for **decay** (§14 note, "archived" is a separate column but
+follows the same "exclude from active queries, keep for audit" shape) —
+see the new decay/consolidation/autonomy-budget work below.
+
+Tests: `TestConflictingInferredFactsNeverEscalate` in the same
+`test_memory_polarity.py` (4 tests) — 7 repeated conflicting
+observations each create a distinct, never-reinforced row strictly
+below the explicit fact's confidence (the actual invariant, not just
+"doesn't crash"); excluded candidates remain visible via `get_facts()`;
+the explicit fact's own `evidence_count` stays untouched either
+direction.
+
+### Memory: decay, bounded consolidation, autonomy budget (session #6)
+
+Closes the item session #5 explicitly deferred (old open-work item 14).
+Additive on the existing `facts` table, no new architecture.
+
+**Decay** (`MemoryManager.run_decay_pass()`): idempotent migration adds
+`archived INTEGER NOT NULL DEFAULT 0`. A candidate is archived only if
+ALL of: `source != 'explicit'`, confidence still below
+`CANDIDATE_CONFIDENCE_THRESHOLD`, `evidence_count <= 1` (never
+reinforced), and older than
+`conversational_memory.autonomy_budget.decay_days` (default 14).
+Archived rows are excluded from every active-fact query via a blanket
+`AND archived = 0` added alongside the existing `AND deleted = 0 AND
+superseded_by IS NULL` filter (7 call sites, including
+`_find_similar_fact()` — an archived candidate can't be silently
+reinforced back to life). Rows are archived, never hard-deleted, so
+decay stays auditable; explicit facts and anything reinforced even once
+are never touched regardless of age.
+
+**Consolidation** (`run_consolidation()`): bounded, deterministic —
+currently just the decay pass, with its own budget
+(`autonomy_budget.max_consolidation_runs`, default 50 per process
+lifetime). Deliberately NOT a KEEP/REINFORCE/PROMOTE/MERGE/.../LLM-judged
+pipeline: REINFORCE/SUPERSEDE/UPDATE already happen synchronously in
+`store_fact()`, and "PROMOTE" isn't a discrete action in this
+architecture (confirmed-vs-candidate is computed on read from
+confidence, not a stored status). A real LLM-judged MERGE/
+NEEDS_CONFIRMATION pass was explicitly out of scope ("kein autonomer
+permanenter LLM-Selbstreflexionsloop") and not attempted speculatively.
+Wired at two trigger points: session-end (`jarvis_continuous.py`'s
+shutdown, before `memory_manager.save()`) and "N new candidates"
+(every `autonomy_budget.consolidation_interval_candidates`, default 50,
+checked inside `store_fact()`). Idle and "explicit maintenance job"
+triggers are NOT wired to anything — `run_consolidation()` is a plain
+public method either could call, but no idle-detection or maintenance-
+job caller was added this session.
+
+**Autonomy budget**: `max_new_candidates` (default 500) caps genuinely
+NEW candidate rows per `MemoryManager` instance lifetime — not
+reinforcement of an existing row, which must keep working unbounded
+(that's bounded confidence growth, not row creation). Explicit
+statements are never budget-limited. Counters are scoped to this
+instance's lifetime (one `jarvis_continuous.py` process run in
+practice) — no shorter "session" boundary exists in the architecture to
+reset them against. `retrieval_candidate_count` and background-LLM-call
+budgets from the original request were NOT added — existing `limit`
+parameters on `get_facts()`/`get_proactive_context()`/etc. already
+bound retrieval size, and no unbounded background LLM-call loop was
+found that needed bounding.
+
+Tests: `tests/unit/test_memory_decay_consolidation.py` (12 tests, real
+temp-file SQLite) — old+low-evidence candidates archive, recent/
+reinforced/explicit ones don't regardless of age; archived rows
+excluded from `get_facts()` and from being re-matched; consolidation
+budget enforcement, the N-candidates auto-trigger firing exactly once
+at the configured interval; new-candidate budget denial past the cap,
+explicit facts bypassing it, reinforcement confirmed not to consume
+budget.
+
 ## 5e. Session #4 specialized reviews (Memory, Concurrency, German runtime)
 
 Per the task's explicit ask, three subagents each reviewed a fixed scope
@@ -1063,29 +1198,135 @@ CLI/control path is acceptable for now" fallback the task allowed,
 implemented as a voice skill instead of a literal CLI since that was
 just as simple given the existing skill-registration pattern.
 
-**Deferred — not yet wired, do not assume covered**:
-`FILESYSTEM_OBSERVATION`, `SESSION_SUMMARY`, and `AGENT_CONTEXT_INGEST`
-capabilities exist in the enum (so call sites can start using them
-immediately) but no call site was actually gated with them this
-session — the research pass that grounded this section's other rows
-didn't read those subsystems in depth, and gating them without reading
-the real code first would have been exactly the "raten" the task
-explicitly forbids. Also not attempted: a true remote/networked control
-plane (the task explicitly said a local path is acceptable for now).
-
-**Tests**: `tests/unit/test_privacy_gate.py` (49 tests — mode/capability
-matrix, flush/enter/exit callbacks, epoch-based race guarantees,
-concurrent enter/exit stress test) and
+**Session #5 tests**: `tests/unit/test_privacy_gate.py` (49 tests —
+mode/capability matrix, flush/enter/exit callbacks, epoch-based race
+guarantees, concurrent enter/exit stress test) and
 `tests/unit/test_privacy_memory_integration.py` (real temp-file SQLite
-`MemoryManager`, not mocked — `store_fact`/`on_message`/`index_message`
-denied during PRIVACY and PRIVACY_LOCK, epoch rejection of a
-background-extraction write that started before a privacy transition).
-Maps to the acceptance criteria named in the task: PRIV-001 (audio) —
-covered at the gate+continuous_listener level, not yet observed against
-real mic hardware; PRIV-002 (screen) — covered, `take_screenshot`
-returns `None`/no file; PRIV-003 (memory) — covered by the integration
-tests; PRIV-004 (cloud) — covered at the gate level for both cloud call
-sites; PRIV-005 (exit/no catch-up) — covered by the epoch race tests.
+`MemoryManager`, not mocked). Maps to the acceptance criteria named in
+the task: PRIV-001 (audio) — covered at the gate+continuous_listener
+level, not yet observed against real mic hardware; PRIV-002 (screen) —
+covered; PRIV-003 (memory) — covered; PRIV-004 (cloud) — covered;
+PRIV-005 (exit/no catch-up) — covered by the epoch race tests.
+
+### Session #6: closed real gaps in the above, wired the deferred capabilities
+
+Two real bugs found and fixed in session #5's own wiring — not new
+features, gaps in what was already claimed done:
+
+- **Audio ring-buffer leak.** Session #5 gated
+  `_on_speech_start()`/`_process_speech()` (the speech-collection
+  handoff), but `continuous_listener._audio_callback()` still fed
+  every raw frame into `VoiceActivityDetector.process_frame()`
+  unconditionally — which appends to `vad.audio_buffer` regardless of
+  privacy mode, and that ring buffer is what `_on_speech_start()` reads
+  as the pre-speech snapshot. So audio recorded *during* PRIVACY could
+  still sit in the ring buffer and leak into the very first utterance
+  captured right after exit. Fixed: `_audio_callback()` now returns
+  before RNNoise/VAD processing when `MIC_INGEST` is denied, and the
+  flush callback now also calls `vad.clear_buffer()` + `vad.reset()`
+  (clears the ring buffer, resets Silero's hidden state and the
+  speech/silence counters) on both enter() and exit(), not just
+  `speech_buffer`/`_pre_speech_audio` as before.
+- **Webcam capture kept running.** `start()` was gated (session #5),
+  but a capture already running when privacy was entered was never
+  stopped, and `get_frame()`'s <2s cached-frame shortcut plus
+  `stream_frames()` didn't re-check the gate at all. Fixed:
+  `WebcamManager` registers its own flush callback that stops any
+  running capture (scheduling the async `stop()` onto whichever loop
+  `start()` recorded, via `run_coroutine_threadsafe` with a bounded 5s
+  wait) and clears `_current_frame`; `get_frame()`/`stream_frames()`
+  both check `WEBCAM_CAPTURE` directly now.
+
+Conversation persistence — three unconditional paths in
+`conversation.add_message()`'s side-effect chain that session #5 only
+partly covered (`memory_manager.on_message()` was gated; three others
+weren't):
+- `ConversationManager._append_to_history_file()` wrote every message
+  to `chat_history.jsonl` unconditionally — reachable even from
+  `jarvis_console.py`/`jarvis_web.py`'s typed-text paths, which never
+  touch mic/STT at all, so this was a real bypass of the PRIVACY
+  guarantee, not just an audio-path gap. Gated on `CONTENT_LOGGING`.
+- `ContextWindow.on_message()` (topic-segment/embedding ingestion) —
+  gated on `AGENT_CONTEXT_INGEST`.
+- `ContextWindow._persist_segment()` (writes the full segment,
+  including raw text, to SQLite) and `_summarize_segment()` (sends
+  that transcript to the local LLM for summarization) — both ran from
+  a background thread on every topic shift, not just at shutdown. Both
+  gated on `SESSION_SUMMARY`, both take the same captured-epoch
+  parameter as memory's background extraction (same race class, same
+  fix).
+Deliberate design choice, not an oversight: `ConversationManager.
+session_history` (in-RAM) is NOT gated — the typed-text path has no
+STT gate to rely on, so the user must still be able to get a coherent
+reply (e.g. to type "privacy beenden"). Nothing added to it during
+privacy is written anywhere; it disappears on process restart.
+
+**Voice-exit is unreliable by design, not a bug to work around.**
+`PrivacyGate` is a process-local singleton, and
+`jarvis_continuous.py`/`jarvis_console.py`/`jarvis_web.py` are three
+separate entrypoints/processes (each constructs its own
+`ConversationManager` etc.) — so session #5's `PrivacySkill` only ever
+reached whichever process's gate instance the text arrived in, not
+necessarily the one actually running the mic pipeline. More
+fundamentally: once `PRIVACY` is entered, `MIC_INGEST`/`STT` are both
+denied, so spoken audio is never transcribed while privacy is active —
+a spoken "Privatsphäre beenden" can never reach any intent matcher, in
+any process, because there is no text for it to match against. A
+special-case STT bypass for an exit phrase was explicitly ruled out
+("kein STT-Bypass") since that would mean privacy-mode audio *is*
+being transcribed after all. Fix: `core/privacy_control_watcher.py` —
+a daemon thread polling three sentinel files
+(`/tmp/.jarvis_privacy_enter|_lock|_exit`, existence-only, same trust
+model as the existing `core/debug_logger.py` sentinel convention),
+wired into `jarvis_continuous.py` (the one entrypoint with genuinely no
+interactive text input) alongside `Watchdog`. Fail-closed by design:
+lock/enter are checked before exit in the poll order, so a sentinel
+collision favors staying protected. Also maintains
+`/tmp/.jarvis_privacy_status` (mode + timestamp only) via the gate's
+own enter/exit callbacks, regardless of what triggered the transition.
+
+**Memory escalation bug** (found while implementing the above,
+confirmed with a repro script before fixing): session #5's "explicit
+fact wins over a single conflicting inference" logic only handled the
+*first* conflicting observation — `_find_similar_fact()` matches "the
+most recent active row for this subject+category," and after the first
+conflict creates a new active candidate row, a *second* matching
+inferred observation found *that candidate* instead of the explicit
+fact and reinforced it. Confirmed: confidence climbed 0.70 → 0.99
+(`MAX_FACT_CONFIDENCE`) after 7 repeated conflicting observations,
+while the actual explicit fact (0.90) sat untouched and was now the
+*lower*-confidence row. Fixed via a new `excluded_from_matching`
+column (idempotent migration) — see §5d for the full writeup, this is
+the memory-side half of session #6's privacy/correctness work.
+
+**Deferred capabilities wired this session**: `FILESYSTEM_OBSERVATION`
+— `core/tools/find_files.py`'s `handler()` (single dispatch chokepoint)
+and `skills/system/filesystem/skill.py`'s four registered intent
+handlers (a separate, independent implementation with its own direct
+filesystem reads — gating one does not cover the other). `REMOTE_TOOL`
+— `core/mcp_client.py`'s `MCPBridge._make_sync_handler()`, the single
+closure every registered MCP tool call funnels through. Per the
+existing (unchanged) capability matrix: plain `PRIVACY` does **not**
+block `REMOTE_TOOL`, only `PRIVACY_LOCK` does.
+
+**Still deferred, do not assume covered**: `core/web_research.py` and
+other external-API-reaching tools were not reviewed for `REMOTE_TOOL`
+coverage this session — MCP was the clearest, most literally-named
+"remote tool execution" abstraction actually verified. A true
+remote/networked privacy control plane was still not attempted (the
+task allows the local sentinel-file path for now).
+
+**Session #6 tests**: `tests/unit/test_privacy_audio_reset.py` (6,
+against the real `core/vad.py` — `continuous_listener.py` itself still
+can't be imported in this sandbox, see §12),
+`tests/unit/test_privacy_webcam.py` (8, real async methods against
+`core/webcam_manager.py`), `tests/unit/test_privacy_conversation_
+persistence.py` (11, real `ConversationManager`/`ContextWindow` against
+tmp_path-backed files/SQLite), `tests/unit/test_privacy_control_
+watcher.py` (15, real background-thread polling integration test),
+`tests/unit/test_privacy_gate_audit_callsites.py` (11). Full
+non-hardware unit suite by the end of session #6: 251 passed (was 159
+at the end of session #4, 182 partway through session #5).
 
 ## 12. Lifecycle / shutdown audit (session #5)
 
@@ -1181,100 +1422,113 @@ bestimmt werden kann."
 Roughly in priority order — see §3.4/§3.5 for TTS specifics, §5a-e for
 German-first/memory specifics, §8/§9 for instrumentation/preflight.
 
-**Resolved across sessions #3-5 (previously listed here, no longer open):**
-honorific-default question (Sir/Ma'am confirmed wanted) · Chatterbox
-connection reuse/circuit breaker/connect-timeout · streaming queue
-backpressure · sentence-final numbers not normalized (real bug, fixed) ·
-ports/phone numbers read as cardinal numbers · memory candidate/confirmed
-tiers + reinforcement · value-based reinforcement-vs-supersede (the
-"Kernproblem") · sensitive-topic risk gate · German memory rendering/
-commands/why-query · TTS startup warmup contention · 3 CRITICAL bugs from
-the memory/concurrency reviews (§5d/§5e) · real latency instrumentation
-(§8, implemented — was previously the single biggest documented gap) ·
-startup preflight script (§9) · **cancellable/bounded contextual-ack
-synthesis (§3.4, session #5)** · **polarity-reversal memory bug (§5d,
-session #5)** · **central PrivacyGate, P0 (§11, session #5, new)** ·
-**watchdog.stop()/Chatterbox session-close shutdown gaps (§12, session
-#5)**.
+**Resolved across sessions #3-6 (previously listed here, no longer open):**
+honorific-default question · Chatterbox connection reuse/circuit
+breaker/connect-timeout · streaming queue backpressure · sentence-final
+numbers · ports/phone numbers · memory candidate/confirmed tiers +
+reinforcement · value-based reinforcement-vs-supersede · sensitive-topic
+risk gate · German memory rendering/commands/why-query · TTS startup
+warmup contention · 3 CRITICAL bugs from the memory/concurrency reviews
+(§5d/§5e) · real latency instrumentation (§8) · startup preflight script
+(§9) · cancellable/bounded contextual-ack synthesis + its session #6
+stale-Piper-fallback gap (§3.4) · polarity-reversal memory bug + its
+session #6 escalation gap (§5d) · central PrivacyGate P0 + its session
+#6 audio-ring-buffer/webcam/conversation-persistence/voice-exit gaps
+(§11) · watchdog/Chatterbox-session shutdown gaps (§12) · memory
+decay/consolidation/autonomy-budget (§5d) · FILESYSTEM_OBSERVATION/
+REMOTE_TOOL call-site audit (§11) · systemd --user-vs-system
+inconsistency, resolved in documentation (§13).
 
 1. **German-first backlog — ~330-340 strings across ~12 files, see the
-   table in §5a.** The single largest remaining piece of work. Not
-   attempted in session #5 (P0/P1 items took priority — see §11/§5d/§3.4/
-   §13). `skills/personal/conversation/skill.py` (~90, confirmed active)
-   is the best first target — it's a near-duplicate of `core/persona.py`'s
-   already-German pools, so equivalent phrasing already exists to adapt.
-   Per session #5's own pass over `skills/system/*`: `app_launcher/skill.py`
-   is the most English-heavy of the system skills (~64 remaining
-   user-facing strings by a heuristic grep), `file_editor/skill.py` is a
-   partial migration in progress (~20 remaining, some already German),
-   `conversation/skill.py` itself has only ~2 stray English strings left.
-2. Live GPU run of the Chatterbox streaming path (`_ChatterboxAudioWriter`
-   producer/consumer, bounded queue, circuit breaker, throttled warmup,
-   and session #5's new `cancel_check`/`timeout_override` bound on
-   contextual-ack synthesis) — this environment has no CUDA, so all of it
-   is verified with fakes/mocks but not yet observed against the real
-   server. Do this before relying on any of it in production.
-3. Kokoro/Chatterbox `_tts_lock` scope inconsistency found by the
-   Concurrency reviewer (§5e) — Kokoro holds the lock through playback
-   backpressure, Chatterbox releases it earlier, so `speak_ack()`
-   starvation risk differs by engine. Not fixed (Kokoro is inactive,
-   judged lower priority than the Chatterbox-side fixes actually made).
+   table in §5a.** The single largest remaining piece of work. Still not
+   attempted after three sessions — P0 correctness/privacy work has
+   consistently outranked it. `skills/personal/conversation/skill.py`
+   (~90, confirmed active) is the best first target. Per session #5's
+   pass over `skills/system/*`: `app_launcher/skill.py` is the most
+   English-heavy (~64 strings), `file_editor/skill.py` is a partial
+   migration (~20 remaining), `conversation/skill.py` itself has ~2
+   stray strings left.
+2. Live GPU run of the Chatterbox streaming path and every
+   PrivacyGate-gated Chatterbox/webcam/mic code path — this environment
+   has no CUDA/audio hardware, so all of it is verified with fakes/mocks
+   but not yet observed against real hardware. Do this before relying on
+   any of it in production, and before reporting any "NEEDS HW VERIFY"
+   item in this document as done.
+3. Kokoro/Chatterbox `_tts_lock` scope inconsistency (§5e) — not fixed,
+   Kokoro is inactive. The Kokoro branch of `speak()`'s Piper-fallback
+   logic also still lacks session #6's `cancel_check` guard (§3.4) — same
+   reason, same dormant-bug-class note.
 4. Redesign fact storage/extraction to not be English-sentence-shaped
-   (§5b) — `render_fact_de()` (§5d) works around this for facts with a
-   structured `value`, but older/one-group-extracted facts still fall
-   back to raw English content.
+   (§5b) — `render_fact_de()` works around this for facts with a
+   structured `value`; older/one-group-extracted facts still fall back
+   to raw English content.
 5. Embedding-based contradiction detection for memory facts (§5c/§5d
-   document why the text-similarity approach that was tried doesn't
-   work — don't repeat that attempt). Session #5's keyword-lexicon
-   polarity check (§5d) is a narrower, cheaper fix for the specific
-   "liebe X" → "hasse X" case, not a replacement for this.
-6. Vocal-behavior layer: now that `chatterbox_server.py` accepts
-   per-request `exaggeration`/`cfg_weight`/etc. overrides, design the
-   policy that decides when to use them (e.g. per persona mood, per
-   response category).
-7. Decide the fate of `core/tts_normalizer.py` (unused English normalizer)
-   and `core/health_check.py`'s `format_voice_summary()` (confirmed dead
-   code this session) — delete, or document as intentionally kept.
+   explain why text-similarity doesn't work — don't repeat that
+   attempt). The keyword-lexicon polarity check (§5d) and
+   `excluded_from_matching` (§5d, session #6) are narrower, cheaper
+   fixes for specific cases, not a replacement for this.
+6. Vocal-behavior layer: `chatterbox_server.py` accepts per-request
+   `exaggeration`/`cfg_weight`/etc. overrides; no policy exists yet for
+   when to use them.
+7. Decide the fate of `core/tts_normalizer.py` (unused) and
+   `core/health_check.py`'s `format_voice_summary()` (confirmed dead
+   code) — delete or document as intentionally kept.
 8. Delete `legacy_backups_20260915/` once confirmed unneeded.
-9. `tests/unit/test_edge_cases.py` phase 7C-03 (`"Dr. Smith..."`) asserts
-    pre-abbreviation-guard chunking behavior — stale test expectation,
-    not a pipeline bug.
-10. **Sleepy systemd units — written and corrected this session
-    (`systemd/llama-server.service`, `systemd/chatterbox.service`,
-    `systemd/jarvis.service`), but NEEDS HW VERIFY — see §13 and
-    `systemd/README.md`.** Not installed, not started, no `systemctl`/
-    `journalctl` output exists yet. This was previously listed as
-    "needs to happen ON Sleepy" — it still does, for the install/
-    verify/enable step; the unit files themselves are now ready for
-    that.
-11. STT hot-path (persistent model residency, adaptive endpointing), LLM
-    TTFT (prompt/context size, prewarm, KV-cache reuse), and fast-paths
-    for deterministic local commands (open app, set volume, etc. without
-    the 35B model) — all explicitly requested, all require either live
-    hardware measurement or a larger implementation effort. **Now that
-    §8's instrumentation exists, the very next step on Sleepy should be:
-    run real turns, read the `JARVIS LATENCY` lines, and let the actual
-    bottleneck (not a guess) decide which of these to tackle first.**
-    §8's checkpoint set was NOT extended this session (still
-    `command_received` → `response_done`, not the fuller
-    `speech_end`→...→`response_done` chain that was requested) — the
-    research done this session found the reason: no turn-id/tracker
-    handoff exists yet between `continuous_listener.py`'s callback
-    thread (where speech_end/VAD/STT would be marked) and
-    `core/pipeline.py` (where the tracker is currently created,
-    at `command_received`). Building that handoff is real, separate
-    work, not attempted this session — see §12 note.
-12. Memory: no explicit consolidation job (session-end/idle-triggered
-    review of short-term → long-term), no decay (candidates with low
-    confidence that age out un-reinforced), no configurable autonomy
-    budget (max candidates/promotions/consolidation runs per session).
-    All explicitly requested across sessions #4 and #5; still not
-    built — session #5 prioritized the polarity-reversal correctness
-    bug (§5d) over these, since a wrong REINFORCE is a worse failure
-    mode than a missing decay/budget mechanism. Next session's highest-
-    value memory work.
-13. Privacy: filesystem observation, session summarization, and
-    agent-context-ingest call sites were not part of session #5's
-    verified research (the research agent's own report flagged these
-    as not read in depth) and are **not yet wired to PrivacyGate** —
-    see §11's "Deferred" note. Don't assume they're covered.
+9. `tests/unit/test_edge_cases.py` phase 7C-03 (`"Dr. Smith..."`) — stale
+   test expectation, not a pipeline bug.
+10. **Sleepy systemd units — written, corrected, and given a
+    consistent (system-level primary, user-level fallback) install
+    strategy this session, but NEEDS HW VERIFY — see §13 and
+    `systemd/README.md`.** Not installed, not started, no real
+    `systemctl`/`journalctl` output exists yet. This is now purely a
+    "run the checklist on Sleepy" item — nothing left to design.
+11. STT hot-path, LLM TTFT, fast-paths for deterministic local
+    commands — all require live hardware measurement. **§8's
+    instrumentation exists; the next step on Sleepy is: run real turns,
+    read the `JARVIS LATENCY` lines, let the actual bottleneck decide.**
+    §8's checkpoint set is STILL not extended to the full
+    `speech_end`→...→`response_done` chain — confirmed again this
+    session, same root cause as session #5 found: no turn-id/tracker
+    handoff exists between `continuous_listener.py`'s callback thread
+    and `core/pipeline.py` (where the tracker is created, at
+    `command_received`). Not attempted in session #6 either — a real,
+    separate piece of work, deliberately not rushed.
+12. **XTTSv2-Streaming-ONNX + Windows Audio as the primary local TTS
+    path — a real architectural target named this session, NOT
+    attempted.** The model lives at a Windows path
+    (`C:\Users\Alex\Projekte\KI\Modelle\.onnx\XTTSv2-Streaming-ONNX`)
+    this Linux sandbox has no access to, and there is no Windows
+    environment here to build or test a Windows-Audio-backend
+    integration against. Implementing this blind — guessing at the
+    ONNX runtime API, the streaming chunking behavior, and the
+    Windows audio backend's actual interface — would mean shipping
+    unverified code against a path this session couldn't even confirm
+    exists, which is exactly what §13's "nicht raten" discipline exists
+    to prevent. Chatterbox/Piper remain the active local TTS path
+    (§3) — nothing about them was degraded to make room for this.
+    Genuinely needs a session with access to that Windows machine (or
+    at minimum the ONNX model files and a way to exercise ONNX Runtime)
+    to do responsibly.
+13. **Agentic system audit — skill system, tools, task planner, agents,
+    background tasks, permissions, audit logging, remote/local
+    boundaries, dead/duplicate/prototype paths.** Named this session,
+    not done: this is a substantial standalone research+fix workstream
+    (comparable in scope to the privacy call-site audit, which took
+    most of a session on its own) and squeezing a shallow pass into
+    what remained of this session's budget would have meant either
+    incomplete findings or unverified fixes — neither acceptable per
+    this document's own standards. `skills/system/_in_development/`
+    (currently just `web_navigation`) is the one obvious "not yet
+    active" marker found via a quick grep; no other dead-code markers
+    turned up, but that grep was not a substitute for the real audit.
+14. **Generic proactive/event-notification layer** (service/hardware/
+    security events, reminders, background-task results, scheduled
+    tasks, with policy/severity/destination/channel-adapter concepts,
+    WhatsApp/phone as later adapters) — named this session as "if
+    passend," not attempted. Building a new cross-cutting subsystem
+    without first confirming none of the existing pieces
+    (`reminder_manager.py`, `news_manager.py`, `weather_poller.py`,
+    `event_logger.py`, `watchdog.py`'s recovery actions) already cover
+    enough of this need would risk exactly the "zweite konkurrierende
+    Engine" earlier sessions were told to avoid — needs the audit in
+    item 13 first, not built in parallel with it.
