@@ -195,3 +195,58 @@ class TestAckNeverOutlivesRealResponseLock:
         # Bounded by the ack's own (short) duration, not some large
         # unrelated real-response timeout.
         assert real_response_got_lock_at[0] < 1.0
+
+
+class TestNoStalePiperAckAfterChatterboxFailure:
+    """Session #6 item 6: after session #5's timeout_override fix, a
+    Chatterbox timeout/failure on the ACK path still unconditionally
+    fell back to Piper — trading one slow engine for another, still
+    holding _tts_lock for the full Piper synthesis+playback, and
+    potentially speaking an ack that's stale by the time it finally
+    plays. Fixed: when cancel_check was given (the ack path's own
+    signal — real response calls never pass it), a Chatterbox failure
+    drops the ack instead of falling back. Normal (non-ack) speak()
+    calls must keep the existing Piper fallback unchanged."""
+
+    def test_ack_path_does_not_fall_back_to_piper_on_chatterbox_failure(self):
+        tts = _make_tts()
+        tts._speak_chatterbox = lambda text, timeout_override=None: False  # simulates timeout/failure
+        tts._fallback_to_piper = lambda text: (
+            (_ for _ in ()).throw(AssertionError("ack path must not fall back to Piper"))
+        )
+
+        result = tts.speak(
+            "Einen Moment.", cancel_check=lambda: False, timeout_override=2.5,
+        )
+
+        assert result is False
+
+    def test_real_response_still_falls_back_to_piper_on_chatterbox_failure(self):
+        """Normal TTS fallback must be completely unchanged for real
+        (non-ack) speak() calls — no cancel_check passed."""
+        tts = _make_tts()
+        tts._speak_chatterbox = lambda text, timeout_override=None: False
+        piper_calls = []
+        tts._fallback_to_piper = lambda text: piper_calls.append(text) or True
+
+        result = tts.speak("Die eigentliche Antwort.")
+
+        assert result is True
+        assert piper_calls == ["Die eigentliche Antwort."]
+
+    def test_ack_dropped_even_if_cancel_check_would_now_say_proceed(self):
+        """Once Chatterbox has already failed/timed out for an ack call,
+        it's dropped unconditionally — no second-guessing via
+        cancel_check, no alternate engine. Deterministic, not "maybe
+        Piper depending on timing"."""
+        tts = _make_tts()
+        tts._speak_chatterbox = lambda text, timeout_override=None: False
+        piper_calls = []
+        tts._fallback_to_piper = lambda text: piper_calls.append(text) or True
+
+        result = tts.speak(
+            "Einen Moment.", cancel_check=lambda: False, timeout_override=2.5,
+        )
+
+        assert result is False
+        assert piper_calls == []

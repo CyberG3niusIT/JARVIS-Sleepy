@@ -762,6 +762,27 @@ class TextToSpeech:
                 elif self.engine == "chatterbox":
                     result = self._speak_chatterbox(text, timeout_override=timeout_override)
                     if not result:
+                        if cancel_check is not None:
+                            # Bounded/cancellable call (the contextual-ack
+                            # path — see _play_ack_if_still_thinking in
+                            # core/pipeline.py, the only caller that passes
+                            # cancel_check). Falling back to Piper here
+                            # would mean a Chatterbox timeout/failure just
+                            # trades one slow engine for another — the
+                            # exact "stale Piper ack" this bound exists to
+                            # prevent, and it would still hold _tts_lock
+                            # for the full Piper synthesis+playback,
+                            # delaying the real response regardless. An
+                            # ack is best-effort by design: drop it
+                            # silently instead. Real (non-ack) speak()
+                            # calls never pass cancel_check, so their
+                            # Piper fallback is completely unchanged below.
+                            self.logger.debug(
+                                "Bounded speak() call: Chatterbox failed/"
+                                "timed out — dropping instead of falling "
+                                "back to Piper"
+                            )
+                            return False
                         return self._fallback_to_piper(text)
                     return result
                 else:
