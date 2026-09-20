@@ -13,6 +13,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 
 
 class ConversationManager:
@@ -35,6 +36,7 @@ class ConversationManager:
         
         self.chat_history_file = self.conversations_dir / "chat_history.jsonl"
         self._history_file_lock = threading.Lock()  # serialize JSONL appends
+        self._privacy_gate = get_privacy_gate(config)
 
         # Configuration
         self.max_history_turns = config.get("conversation.max_history_turns", 16)
@@ -202,6 +204,15 @@ class ConversationManager:
     
     def _append_to_history_file(self, message: Dict):
         """Append message to JSONL history file"""
+        if not self._privacy_gate.allow(Capability.CONTENT_LOGGING):
+            # This is a durable plaintext log of conversation content —
+            # exactly what CONTENT_LOGGING exists to block. Found this
+            # session: previously written unconditionally on every
+            # add_message() call regardless of privacy mode, including
+            # from jarvis_console.py/jarvis_web.py's typed-text paths
+            # which don't go through the (already-gated) mic/STT path at
+            # all, so this was a real bypass of the PRIVACY guarantee.
+            return
         try:
             with self._history_file_lock:
                 with open(self.chat_history_file, 'a', encoding='utf-8') as f:

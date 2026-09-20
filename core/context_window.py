@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 
 
 # Tokens ~ words * 1.3 for prose (fallback when tokenizer unavailable)
@@ -144,6 +145,7 @@ class ContextWindow:
         self.logger = get_logger("context_window", config)
         self.embedding_model = embedding_model
         self.llm = llm  # for Phase 3 summarization
+        self._privacy_gate = get_privacy_gate(config)
 
         # Configuration
         self.enabled = config.get("context_window.enabled", False)
@@ -201,6 +203,13 @@ class ContextWindow:
 
     def on_message(self, message: Dict):
         """Hook called from conversation.add_message() on every new message."""
+        if not self._privacy_gate.allow(Capability.AGENT_CONTEXT_INGEST):
+            # PRIV-003-adjacent: no topic-segment/embedding ingestion of
+            # this message while privacy is active. Nothing else to
+            # flush here on enter/exit — segments only grow through this
+            # gated entry point, so an already-open pre-privacy segment
+            # is unaffected and safe to persist normally later.
+            return
         if not self.enabled or not self.embedding_model:
             return
 
@@ -496,8 +505,20 @@ class ContextWindow:
         # Prune old segments on startup
         self._cleanup_old_segments()
 
-    def _persist_segment(self, segment: TopicSegment):
-        """Persist a closed segment to SQLite. Called in a background thread."""
+    def _persist_segment(self, segment: TopicSegment, captured_epoch: str = None):
+        """Persist a closed segment to SQLite. Called in a background thread.
+
+        `captured_epoch` (the privacy epoch at the time _close_segment()
+        spawned this thread) is re-checked here, not just
+        Capability.SESSION_SUMMARY's live mode — a privacy enter+exit
+        pair that completes while this thread is still starting up would
+        otherwise let a stale write through (same reasoning as
+        memory_manager's _run_batch_extraction; see core/privacy_gate.py).
+        """
+        if not self._privacy_gate.allow(Capability.SESSION_SUMMARY):
+            return
+        if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+            return
         try:
             embedding_bytes = (
                 segment.embedding.tobytes()
@@ -709,12 +730,14 @@ class ContextWindow:
             )
 
             seg = self._current_segment
+            captured_epoch = self._privacy_gate.epoch()
 
             # Phase 4: persist to SQLite (non-blocking)
             if not seg.from_prior_session:
                 threading.Thread(
                     target=self._persist_segment,
                     args=(seg,),
+                    kwargs={"captured_epoch": captured_epoch},
                     daemon=True,
                 ).start()
 
@@ -727,18 +750,28 @@ class ContextWindow:
                 threading.Thread(
                     target=self._summarize_segment,
                     args=(seg,),
+                    kwargs={"captured_epoch": captured_epoch},
                     daemon=True,
                 ).start()
 
             self._current_segment = None
 
-    def _summarize_segment(self, segment: TopicSegment):
+    def _summarize_segment(self, segment: TopicSegment, captured_epoch: str = None):
         """Background-summarize a closed segment via Qwen (llama-server).
 
         Called in a daemon thread after a topic segment closes.
         Writes segment.summary on success; leaves empty on failure
         (graceful degradation — raw messages used as fallback).
+
+        Gated on Capability.SESSION_SUMMARY plus the same captured-epoch
+        re-check as _persist_segment — this sends the segment's raw
+        transcript to the local LLM, exactly what SESSION_SUMMARY exists
+        to block.
         """
+        if not self._privacy_gate.allow(Capability.SESSION_SUMMARY):
+            return
+        if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+            return
         try:
             # Format messages for the summarization prompt
             lines = []
