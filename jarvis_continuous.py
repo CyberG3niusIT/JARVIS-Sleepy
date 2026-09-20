@@ -1033,6 +1033,17 @@ class JarvisContinuous:
                 )
                 self.watchdog.start()
 
+            # Local privacy control path — jarvis_continuous.py has no
+            # interactive text input, and voice cannot reliably exit
+            # PRIVACY (MIC_INGEST/STT are denied while it's active, by
+            # design), so this is the "kleinste sichere CLI" fallback:
+            # `touch /tmp/.jarvis_privacy_enter|_lock|_exit`. See
+            # core/privacy_control_watcher.py's module docstring for why
+            # PrivacySkill's voice/text intents alone aren't enough here.
+            from core.privacy_control_watcher import PrivacyControlWatcher
+            self.privacy_control_watcher = PrivacyControlWatcher(self.config)
+            self.privacy_control_watcher.start()
+
             try:
                 # Coordinator event loop runs on main thread
                 self.coordinator.run()
@@ -1047,6 +1058,8 @@ class JarvisContinuous:
                     # health loop and any in-flight recovery action never
                     # got a clean stop signal.
                     self.watchdog.stop()
+                if hasattr(self, 'privacy_control_watcher') and self.privacy_control_watcher:
+                    self.privacy_control_watcher.stop()
                 # Stop any in-flight audio subprocess immediately rather
                 # than leaving it playing as an orphaned child process
                 # after this Python process has already exited.
