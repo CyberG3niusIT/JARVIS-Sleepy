@@ -232,6 +232,26 @@ class MemoryManager:
         self.proactive_enabled = config.get("conversational_memory.proactive_surfacing", True)
         self.proactive_threshold = config.get("conversational_memory.proactive_confidence_threshold", 0.45)
 
+        # Autonomy budget (session #6) — bounds on unattended memory
+        # growth. Counters are scoped to this MemoryManager instance's
+        # lifetime, which in practice is one jarvis_continuous.py process
+        # run — there is no shorter "session" boundary in the existing
+        # architecture to reset them against, and inventing one wasn't
+        # judged worth the added complexity for what these bounds are
+        # for (a runaway extraction loop, not fine-grained per-
+        # conversation limits).
+        self.max_new_candidates = config.get(
+            "conversational_memory.autonomy_budget.max_new_candidates", 500)
+        self.max_consolidation_runs = config.get(
+            "conversational_memory.autonomy_budget.max_consolidation_runs", 50)
+        self.decay_days = config.get(
+            "conversational_memory.autonomy_budget.decay_days", 14)
+        self.consolidation_interval_candidates = config.get(
+            "conversational_memory.autonomy_budget.consolidation_interval_candidates", 50)
+        self._new_candidates_created = 0
+        self._consolidation_runs = 0
+        self._last_consolidation_at = 0.0
+
         # Thread safety
         # RLock, not Lock: store_fact() wraps its whole read-decide-write
         # sequence in one acquisition (fixes a TOCTOU race — see its
@@ -316,6 +336,24 @@ class MemoryManager:
                     # false 0, so old facts remain fully readable and
                     # simply never trigger the reversal check below.
                     conn.execute("ALTER TABLE facts ADD COLUMN polarity INTEGER")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+                try:
+                    # Decay (see run_decay_pass()): a low-evidence,
+                    # never-reinforced candidate older than
+                    # conversational_memory.autonomy_budget.decay_days
+                    # gets archived = 1. Archived facts are excluded
+                    # from every active-fact query (get_facts(),
+                    # _find_similar_fact(), etc. — see the blanket
+                    # "AND archived = 0" added to each) but the rows
+                    # are kept, not hard-deleted, so decay stays
+                    # auditable/testable. Never applied to explicit
+                    # facts or anything with evidence_count > 1 — see
+                    # run_decay_pass()'s docstring for the exact rule.
+                    conn.execute(
+                        "ALTER TABLE facts ADD COLUMN archived "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
                 except sqlite3.OperationalError:
                     pass  # column already exists
                 try:
@@ -1807,6 +1845,37 @@ class MemoryManager:
             # confidence the extractor assigned it.
             confidence = min(confidence, self._SENSITIVE_CAP_CONFIDENCE)
 
+        if source != "explicit":
+            # Autonomy budget: bounds unattended/inferred memory growth
+            # (batch + per-turn extraction, both of which call store_fact()
+            # on their own initiative, not in direct response to a user
+            # statement). Explicit user statements are never budget-limited
+            # — the user asked for that fact to be remembered directly.
+            # Reinforcement of an EXISTING row (the branches above that
+            # return early) doesn't count either — only genuinely new rows
+            # do, since unbounded row creation (not reinforcement) is the
+            # actual "background growth" risk this guards against.
+            if self._new_candidates_created >= self.max_new_candidates:
+                self.logger.warning(
+                    "Autonomy budget: max_new_candidates (%d) reached this "
+                    "session — dropping new inferred candidate for subject=%s",
+                    self.max_new_candidates, subject,
+                )
+                return None
+            self._new_candidates_created += 1
+            if (self.consolidation_interval_candidates > 0
+                    and self._new_candidates_created % self.consolidation_interval_candidates == 0):
+                # "N neue Candidates" trigger. Runs after this row is
+                # committed further down (the check happens before the
+                # INSERT below but run_consolidation() opens its own
+                # connection, so ordering here doesn't matter for
+                # correctness — decay only ever touches OTHER old rows,
+                # never the one currently being inserted).
+                try:
+                    self.run_consolidation()
+                except Exception as e:
+                    self.logger.warning(f"N-candidates consolidation trigger failed (non-fatal): {e}")
+
         with self._db_lock:
             conn = sqlite3.connect(str(self.db_path))
             try:
@@ -1888,14 +1957,14 @@ class MemoryManager:
                     rows = conn.execute("""
                         SELECT * FROM facts
                         WHERE user_id = ? AND category = ?
-                              AND deleted = 0 AND superseded_by IS NULL
+                              AND deleted = 0 AND superseded_by IS NULL AND archived = 0
                         ORDER BY last_referenced DESC
                         LIMIT ?
                     """, (user_id, category, limit)).fetchall()
                 else:
                     rows = conn.execute("""
                         SELECT * FROM facts
-                        WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL
+                        WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL AND archived = 0
                         ORDER BY last_referenced DESC
                         LIMIT ?
                     """, (user_id, limit)).fetchall()
@@ -1912,7 +1981,7 @@ class MemoryManager:
                 row = conn.execute("""
                     SELECT * FROM facts
                     WHERE fact_id = ? AND user_id = ?
-                          AND deleted = 0 AND superseded_by IS NULL
+                          AND deleted = 0 AND superseded_by IS NULL AND archived = 0
                 """, (fact_id, user_id)).fetchone()
                 return dict(row) if row else None
             finally:
@@ -1926,7 +1995,7 @@ class MemoryManager:
             try:
                 rows = conn.execute("""
                     SELECT * FROM facts
-                    WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL
+                    WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL AND archived = 0
                           AND (subject LIKE ? OR content LIKE ?)
                     ORDER BY confidence DESC, last_referenced DESC
                     LIMIT 20
@@ -1986,7 +2055,7 @@ class MemoryManager:
             try:
                 rows = conn.execute("""
                     SELECT category, COUNT(*) as cnt FROM facts
-                    WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL
+                    WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL AND archived = 0
                     GROUP BY category
                 """, (user_id,)).fetchall()
                 return {row["category"]: row["cnt"] for row in rows}
@@ -2385,6 +2454,102 @@ class MemoryManager:
             finally:
                 conn.close()
 
+    # ------------------------------------------------------------------
+    # Decay + Consolidation (session #6) — bounded, deterministic
+    # maintenance. No autonomous LLM self-reflection loop: every decision
+    # here is a plain SQL predicate on existing columns
+    # (confidence/evidence_count/source/created_at), not an LLM judgment
+    # call. Call sites are the ones the task named as sensible triggers
+    # (session-end, idle, an explicit maintenance job) — not a background
+    # timer loop this class runs on its own.
+    # ------------------------------------------------------------------
+
+    def run_decay_pass(self, now: float = None) -> dict:
+        """Archive stale, never-reinforced candidates. Never touches
+        explicit facts or anything reinforced even once.
+
+        A candidate qualifies for decay only if ALL of:
+          - source != 'explicit' (the user never stated this directly)
+          - confidence < CANDIDATE_CONFIDENCE_THRESHOLD (still a candidate,
+            never crossed into "confirmed")
+          - evidence_count <= 1 (never reinforced — a second matching
+            observation would have raised this via _reinforce_fact())
+          - created_at older than self.decay_days
+          - not already archived/deleted/superseded/excluded_from_matching
+
+        Archived (not deleted): the row stays in the table with
+        archived=1, excluded from every active-fact query (see the
+        migration comment on the `archived` column) but still readable
+        directly for audit — decay must be "nachvollziehbar/testbar",
+        per the task, not a silent hard delete.
+        """
+        if now is None:
+            now = time.time()
+        cutoff = now - (self.decay_days * 86400)
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                rows = conn.execute("""
+                    SELECT fact_id FROM facts
+                    WHERE source != 'explicit'
+                          AND confidence < ?
+                          AND evidence_count <= 1
+                          AND created_at < ?
+                          AND deleted = 0 AND superseded_by IS NULL
+                          AND archived = 0
+                """, (self.CANDIDATE_CONFIDENCE_THRESHOLD, cutoff)).fetchall()
+                fact_ids = [r["fact_id"] for r in rows]
+
+                if fact_ids:
+                    conn.executemany(
+                        "UPDATE facts SET archived = 1 WHERE fact_id = ?",
+                        [(fid,) for fid in fact_ids],
+                    )
+                    conn.commit()
+                    self.logger.info(
+                        "Decay: archived %d stale candidate(s) (>%dd, "
+                        "never reinforced)", len(fact_ids), self.decay_days,
+                    )
+                return {"archived_count": len(fact_ids), "archived_fact_ids": fact_ids}
+            finally:
+                conn.close()
+
+    def run_consolidation(self) -> dict:
+        """Bounded maintenance pass: decay only, for now (see docstring).
+
+        Call at session-end, after N new candidates, on idle, or from an
+        explicit maintenance job — never from a permanent background
+        loop. Budget-limited via
+        conversational_memory.autonomy_budget.max_consolidation_runs so
+        a misbehaving caller (e.g. a retry loop) can't turn this into
+        unbounded background work either.
+
+        Consolidation in the fuller sense the task describes (KEEP/
+        REINFORCE/PROMOTE/MERGE/UPDATE/SUPERSEDE/DECAY/ARCHIVE/DELETE/
+        NEEDS_CONFIRMATION as LLM-judged decisions) is NOT implemented —
+        REINFORCE/SUPERSEDE/UPDATE already happen synchronously and
+        deterministically in store_fact() (see _store_fact_locked), and
+        "PROMOTE" isn't a discrete action in this architecture: a fact
+        is "confirmed" purely by confidence crossing
+        CANDIDATE_CONFIDENCE_THRESHOLD (is_candidate()), computed on
+        read, not a stored status transition. What was genuinely missing
+        — decay of stale unreinforced candidates — is what this method
+        adds. A true LLM-judged MERGE/NEEDS_CONFIRMATION pass was
+        explicitly out of scope ("kein autonomer permanenter LLM-
+        Selbstreflexionsloop") and not attempted speculatively.
+        """
+        if self._consolidation_runs >= self.max_consolidation_runs:
+            self.logger.warning(
+                "Autonomy budget: max_consolidation_runs (%d) reached "
+                "this session — skipping", self.max_consolidation_runs,
+            )
+            return {"skipped": True, "reason": "budget_exceeded"}
+
+        self._consolidation_runs += 1
+        self._last_consolidation_at = time.time()
+        decay_result = self.run_decay_pass()
+        return {"skipped": False, **decay_result}
+
     def _search_facts_semantic(self, query: str, user_id: str, top_k: int = 3) -> list[dict]:
         """Embed query and compare against stored fact content embeddings."""
         facts = self.get_facts(user_id, limit=100)  # All active facts for this user
@@ -2459,7 +2624,7 @@ class MemoryManager:
                 row = conn.execute(f"""
                     SELECT * FROM facts
                     WHERE user_id = ? AND subject = ?{cat_clause}
-                          AND deleted = 0 AND superseded_by IS NULL
+                          AND deleted = 0 AND superseded_by IS NULL AND archived = 0
                           AND excluded_from_matching = 0
                     ORDER BY created_at DESC
                     LIMIT 1
@@ -2471,7 +2636,7 @@ class MemoryManager:
                 # by an existing subject (normalized, case-insensitive)
                 rows = conn.execute(f"""
                     SELECT * FROM facts
-                    WHERE user_id = ?{cat_clause} AND deleted = 0 AND superseded_by IS NULL
+                    WHERE user_id = ?{cat_clause} AND deleted = 0 AND superseded_by IS NULL AND archived = 0
                           AND excluded_from_matching = 0
                     ORDER BY created_at DESC
                 """, (user_id, *cat_params)).fetchall()

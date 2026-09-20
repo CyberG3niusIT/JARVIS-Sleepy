@@ -1070,6 +1070,15 @@ class JarvisContinuous:
                         # closed on shutdown.
                         self.tts._chatterbox_session.close()
                 if self.memory_manager:
+                    # Session-end consolidation trigger (session #6) —
+                    # bounded, deterministic (see run_consolidation()'s
+                    # docstring for exactly what it does: currently just
+                    # the decay pass). Runs before save() so an archived
+                    # candidate's state is part of what gets persisted.
+                    try:
+                        self.memory_manager.run_consolidation()
+                    except Exception as e:
+                        self.logger.warning(f"Session-end consolidation failed (non-fatal): {e}")
                     # Persists the FAISS embedding index (MemoryManager.save()'s
                     # own docstring: "Call on shutdown") — jarvis_web.py already
                     # does this; jarvis_continuous.py (the primary voice
