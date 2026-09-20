@@ -318,6 +318,27 @@ class MemoryManager:
                     conn.execute("ALTER TABLE facts ADD COLUMN polarity INTEGER")
                 except sqlite3.OperationalError:
                     pass  # column already exists
+                try:
+                    # A conflicting inferred/per-turn fact that lost to an
+                    # active explicit fact (see _store_fact_locked's
+                    # "explicit wins" branch) is stored with this set to 1.
+                    # It stays fully visible via get_facts()/etc., but
+                    # _find_similar_fact() excludes it from the dedup/
+                    # reinforcement matching pool — without this, a
+                    # SECOND matching inferred observation would find the
+                    # conflicting candidate itself (as the most recent
+                    # active row for that subject+category) instead of
+                    # the explicit fact, and REINFORCE it, letting a
+                    # contradicted inference climb past the explicit
+                    # fact's own confidence purely through repetition.
+                    # Reproduced and confirmed this session before this
+                    # fix: confidence 0.70 -> 0.99 in 7 reinforcements.
+                    conn.execute(
+                        "ALTER TABLE facts ADD COLUMN excluded_from_matching "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # column already exists
 
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(user_id, category)")
@@ -1751,16 +1772,32 @@ class MemoryManager:
             new_id = str(uuid.uuid4())
             if existing_is_explicit and not new_is_explicit:
                 confidence = min(confidence, self.CANDIDATE_CONFIDENCE_THRESHOLD - 0.01)
+                # excluded_from_matching = 1: without this, a SECOND
+                # matching inferred observation would find THIS candidate
+                # (most recent active row for the subject+category)
+                # instead of the explicit fact, and reinforce it —
+                # letting a contradicted inference climb past the
+                # explicit fact's own confidence purely through
+                # repetition. Reproduced and confirmed before this fix
+                # (confidence 0.70 -> 0.99 in 7 reinforcements). Every
+                # future conflicting inference must keep comparing
+                # against the explicit fact, never against a prior
+                # loser — so this row is permanently excluded from being
+                # anyone's "existing" match, while staying fully visible
+                # via get_facts()/etc.
+                new_fact_excluded_from_matching = True
                 self.logger.info(
                     "Inferred fact conflicts with explicit fact %s... — "
                     "stored as candidate %s..., not superseding",
                     existing["fact_id"][:8], new_id[:8],
                 )
             else:
+                new_fact_excluded_from_matching = False
                 self.update_fact(existing["fact_id"], superseded_by=new_id)
                 self.logger.info(f"Superseding fact {existing['fact_id'][:8]}... with {new_id[:8]}...")
         else:
             new_id = str(uuid.uuid4())
+            new_fact_excluded_from_matching = False
 
         now = time.time()
         category = category_for_match
@@ -1777,8 +1814,9 @@ class MemoryManager:
                     INSERT INTO facts
                         (fact_id, user_id, category, subject, content, value, source,
                          confidence, source_messages, created_at, last_referenced,
-                         times_referenced, superseded_by, deleted, polarity)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, ?)
+                         times_referenced, superseded_by, deleted, polarity,
+                         excluded_from_matching)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, ?, ?)
                 """, (
                     new_id,
                     user_id,
@@ -1792,6 +1830,7 @@ class MemoryManager:
                     now,
                     now,
                     new_polarity,
+                    1 if new_fact_excluded_from_matching else 0,
                 ))
                 conn.commit()
             finally:
@@ -2409,11 +2448,19 @@ class MemoryManager:
                 cat_clause = " AND category = ?" if category else ""
                 cat_params = (category,) if category else ()
 
-                # First try exact match
+                # First try exact match. excluded_from_matching = 0 skips
+                # conflicting-inferred-vs-explicit candidates (see the
+                # migration comment in _init_db and _store_fact_locked's
+                # "explicit wins" branch) — without it, a second matching
+                # inferred observation would find that candidate itself
+                # (most recent active row) instead of the explicit fact
+                # and reinforce it, letting a contradicted inference climb
+                # past the explicit fact purely through repetition.
                 row = conn.execute(f"""
                     SELECT * FROM facts
                     WHERE user_id = ? AND subject = ?{cat_clause}
                           AND deleted = 0 AND superseded_by IS NULL
+                          AND excluded_from_matching = 0
                     ORDER BY created_at DESC
                     LIMIT 1
                 """, (user_id, subject, *cat_params)).fetchone()
@@ -2425,6 +2472,7 @@ class MemoryManager:
                 rows = conn.execute(f"""
                     SELECT * FROM facts
                     WHERE user_id = ?{cat_clause} AND deleted = 0 AND superseded_by IS NULL
+                          AND excluded_from_matching = 0
                     ORDER BY created_at DESC
                 """, (user_id, *cat_params)).fetchall()
                 for row in rows:

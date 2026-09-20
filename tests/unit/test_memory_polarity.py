@@ -188,6 +188,90 @@ class TestExplicitCorrectionWinsOverInference:
         assert fid_per_turn != fid_explicit
 
 
+class TestConflictingInferredFactsNeverEscalate:
+    """Session #6 regression: reproduced and confirmed a real bug in the
+    "explicit wins" fix above — repeated MATCHING conflicting inferred
+    observations don't hit the explicit-wins branch a second time. The
+    first conflicting inference creates a new active (non-superseded)
+    row; _find_similar_fact()'s "most recent active row for this
+    subject+category" lookup then finds THAT row (not the explicit one)
+    on the next call, and since neither side is "explicit" anymore, it
+    falls through to plain reinforcement — letting a contradicted
+    inference climb past the explicit fact's own confidence purely
+    through repetition. Confirmed before the fix: confidence 0.70 ->
+    0.99 (MAX_FACT_CONFIDENCE) after 7 repeated inferred observations,
+    with evidence_count=7, while the explicit fact (0.90) sat untouched
+    and effectively shadowed. Fixed via the excluded_from_matching
+    column: a conflicting-inferred-vs-explicit candidate is permanently
+    excluded from being anyone's "existing" match (get_facts() still
+    returns it — only the dedup/reinforcement lookup excludes it)."""
+
+    def test_repeated_conflicting_inference_never_escalates_past_explicit(self, mm):
+        fid_explicit = mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza",
+            source="explicit", confidence=0.90,
+        ))
+
+        seen_ids = set()
+        for _ in range(7):
+            fid = mm.store_fact(_fact(
+                "Alex liebt Pizza", subject="pizza", value="pizza",
+                source="inferred", confidence=0.70,
+            ))
+            seen_ids.add(fid)
+
+        # Each conflicting observation must create its own row — never
+        # match/reinforce a prior conflicting candidate.
+        assert len(seen_ids) == 7
+
+        for fid in seen_ids:
+            row = _raw_fact(mm, fid)
+            assert row["confidence"] == pytest.approx(0.70)
+            assert row["evidence_count"] == 1  # never reinforced
+            assert row["excluded_from_matching"] == 1
+
+        explicit_after = _raw_fact(mm, fid_explicit)
+        assert explicit_after["superseded_by"] is None
+        assert explicit_after["confidence"] == pytest.approx(0.90)
+        # The explicit fact remains strictly more confident than every
+        # conflicting candidate — the actual invariant item 5 requires.
+        for fid in seen_ids:
+            assert _raw_fact(mm, fid)["confidence"] < explicit_after["confidence"]
+
+    def test_excluded_candidate_still_visible_via_get_facts(self, mm):
+        """excluded_from_matching only affects internal dedup lookup —
+        the candidate must still be visible/queryable, per the original
+        design intent ("visible but not overwriting")."""
+        mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza",
+            source="explicit",
+        ))
+        mm.store_fact(_fact(
+            "Alex liebt Pizza", subject="pizza", value="pizza",
+            source="inferred", confidence=0.70,
+        ))
+
+        facts = mm.get_facts("primary_user", category="preference")
+        contents = {f["content"] for f in facts}
+        assert "Alex hasst Pizza" in contents
+        assert "Alex liebt Pizza" in contents
+
+    def test_matching_inference_after_conflict_does_not_reinforce_explicit_either(self, mm):
+        """The explicit fact itself must also stay untouched by these —
+        no side reinforcement in either direction."""
+        fid_explicit = mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza",
+            source="explicit",
+        ))
+        for _ in range(3):
+            mm.store_fact(_fact(
+                "Alex liebt Pizza", subject="pizza", value="pizza",
+                source="inferred", confidence=0.70,
+            ))
+
+        assert _raw_fact(mm, fid_explicit)["evidence_count"] == 1
+
+
 class TestConcurrentConflictingWrites:
     def test_concurrent_opposite_polarity_writes_stay_consistent(self, mm):
         """Two threads racing store_fact for opposite-polarity facts
