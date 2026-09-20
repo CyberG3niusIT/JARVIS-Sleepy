@@ -61,6 +61,29 @@ class WebcamManager:
         self._running = False
         self._last_frame_time: float = 0
         self._loop: asyncio.AbstractEventLoop | None = None  # set on start()
+        self._privacy_gate.register_flush_callback(self._privacy_flush)
+
+    def _privacy_flush(self) -> None:
+        """PrivacyGate flush callback (sync — called from enter()/exit()
+        on whatever thread invoked those, not necessarily this manager's
+        own asyncio loop thread).
+
+        Stops any running capture and drops the last frame, so a capture
+        already in flight when PRIVACY is entered is torn down instead of
+        left running until the next get_frame()/stream_frames() call
+        happens to notice the mode changed. self.stop() is a coroutine —
+        scheduled onto self._loop (set by start(), see above) via
+        run_coroutine_threadsafe with a bounded wait so this can't hang
+        the caller indefinitely; if the loop isn't running yet (capture
+        was never started), there's nothing to stop.
+        """
+        self._current_frame = None
+        if self._loop is not None and self._loop.is_running():
+            try:
+                fut = asyncio.run_coroutine_threadsafe(self.stop(), self._loop)
+                fut.result(timeout=5)
+            except Exception as e:
+                logger.warning("Privacy flush: webcam stop() failed: %s", e)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -242,6 +265,10 @@ class WebcamManager:
         Returns raw JPEG bytes.
         Raises TimeoutError if no frame arrives within timeout.
         """
+        from core.privacy_gate import Capability
+        if not self._privacy_gate.allow(Capability.WEBCAM_CAPTURE):
+            raise PermissionError("webcam capture denied by privacy gate")
+
         if not self._running:
             await self.start()
 
@@ -268,9 +295,17 @@ class WebcamManager:
 
         Used by the MJPEG stream endpoint.
         """
+        from core.privacy_gate import Capability
         while self._running:
+            if not self._privacy_gate.allow(Capability.WEBCAM_CAPTURE):
+                return
             async with self._frame_condition:
                 await self._frame_condition.wait()
+            if not self._privacy_gate.allow(Capability.WEBCAM_CAPTURE):
+                # Privacy may have been entered while waiting on the
+                # condition — don't yield a frame that arrived (or was
+                # already buffered) during that window.
+                return
             if self._current_frame:
                 yield self._current_frame
 

@@ -168,16 +168,29 @@ class ContinuousListener:
         self.logger.info("Continuous listener initialized")
     
     def _privacy_flush_speech_buffer(self):
-        """PrivacyGate flush callback: drop any in-flight speech collection.
+        """PrivacyGate flush callback: drop any in-flight speech collection
+        AND the VAD's own ring buffer / Silero hidden state.
 
         Called synchronously (under the gate's lock) on both enter() and
         exit(), so a speech snippet that started collecting just before a
-        privacy transition can never be concatenated and handed to STT.
+        privacy transition can never be concatenated and handed to STT,
+        and so audio buffered in vad.audio_buffer (which _on_speech_start()
+        reads as the pre-speech snapshot) can never leak across a privacy
+        transition either way: cleared on enter() so nothing pre-privacy
+        survives into a privacy-era utterance, and cleared again on exit()
+        so nothing recorded during privacy (the raw callback is gated, but
+        this is a second line of defense) survives into the first
+        post-exit utterance. vad.reset() also resets Silero's internal
+        hidden state (VoiceActivityDetector.reset()'s own docstring) and
+        the speech/silence frame counters, so speech-state detection
+        starts clean rather than carrying momentum across the transition.
         """
         with self._buffer_lock:
             self.speech_buffer = []
         self.collecting_speech = False
         self._pre_speech_audio = np.array([], dtype=np.float32)
+        self.vad.clear_buffer()
+        self.vad.reset()
 
     def _on_speech_start(self):
         """Callback when VAD detects speech start"""
@@ -237,7 +250,19 @@ class ContinuousListener:
 
         if status:
             self.logger.warning(f"Audio callback status: {status}")
-        
+
+        # Privacy: stop the instant mic ingestion is denied, before any
+        # processing of this frame — RNNoise denoising and VAD.process_frame()
+        # (which unconditionally appends every frame to vad.audio_buffer,
+        # later read as the pre-speech snapshot by _on_speech_start())
+        # both ran unconditionally here before this check existed, meaning
+        # audio captured *during* PRIVACY could still land in
+        # vad.audio_buffer and leak into the next utterance's pre-speech
+        # snapshot right after exit — session #5's fix only gated the
+        # speech-collection handoff further down, not this raw callback.
+        if not self._privacy_gate.allow(Capability.MIC_INGEST):
+            return
+
         # Handle stereo/mono input
         if indata.ndim > 1 and indata.shape[1] > 1:
             # Stereo: mix to mono (average both channels)
