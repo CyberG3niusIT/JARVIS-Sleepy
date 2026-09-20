@@ -3,8 +3,14 @@ import subprocess
 import os
 from core.base_skill import BaseSkill
 from core.llm_router import LLMRouter
+from core.privacy_gate import get_privacy_gate, Capability
 
 class FilesystemSkill(BaseSkill):
+    _PRIVACY_DENIED_MESSAGE = "Das ist während der Privatsphäre-Einstellung nicht verfügbar."
+
+    def _privacy_denied(self) -> bool:
+        return not get_privacy_gate().allow(Capability.FILESYSTEM_OBSERVATION)
+
     def initialize(self):
         """Register filesystem intents"""
         self.logger.info("🔧 Filesystem skill initializing...")
@@ -87,6 +93,8 @@ class FilesystemSkill(BaseSkill):
     
     def find_file(self, entities: dict = None) -> str:
         """Search for files in user directories"""
+        if self._privacy_denied():
+            return self._PRIVACY_DENIED_MESSAGE
         # Extract filename from original query
         query = entities.get('original_text', '').lower()
         
@@ -141,6 +149,8 @@ class FilesystemSkill(BaseSkill):
     
     def count_code_lines(self, entities: dict = None) -> str:
         """Count lines of code in JARVIS codebase"""
+        if self._privacy_denied():
+            return self._PRIVACY_DENIED_MESSAGE
         try:
             jarvis_path = Path.home() / "jarvis"
             
@@ -175,6 +185,8 @@ class FilesystemSkill(BaseSkill):
     
     def count_files_in_directory(self, entities: dict) -> str:
         """Count files in a specified directory"""
+        if self._privacy_denied():
+            return self._PRIVACY_DENIED_MESSAGE
         try:
             query = entities.get('original_text', '').lower()
             
@@ -235,6 +247,8 @@ class FilesystemSkill(BaseSkill):
     
     def analyze_script(self, entities: dict = None) -> str:
         """Analyze a script file using LLM"""
+        if self._privacy_denied():
+            return self._PRIVACY_DENIED_MESSAGE
         try:
             # Extract potential script name from query
             query = entities.get('original_text', '').lower()

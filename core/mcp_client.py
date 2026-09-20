@@ -21,6 +21,7 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 
 from core.tool_registry import register_external_tool
+from core.privacy_gate import get_privacy_gate, Capability
 
 from core.logger import get_logger
 logger = get_logger("jarvis.mcp_client")
@@ -180,6 +181,14 @@ class MCPBridge:
     def _make_sync_handler(self, server_name: str, tool_name: str):
         """Create sync handler closure bridging to async MCP call."""
         def handler(args: dict) -> str:
+            if not get_privacy_gate().allow(Capability.REMOTE_TOOL):
+                # Every registered MCP tool call funnels through this one
+                # closure — external MCP servers are subprocess/remote
+                # tool execution outside JARVIS's own process, exactly
+                # what REMOTE_TOOL exists to gate. PRIVACY_LOCK always
+                # denies this; plain PRIVACY does not (see
+                # core/privacy_gate.py's capability matrix).
+                return "Das ist während der Privatsphäre-Einstellung nicht verfügbar."
             future = asyncio.run_coroutine_threadsafe(
                 self._call_tool(server_name, tool_name, args),
                 self._loop,

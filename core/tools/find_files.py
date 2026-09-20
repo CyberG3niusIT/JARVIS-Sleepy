@@ -9,6 +9,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from core.privacy_gate import get_privacy_gate, Capability
+
 TOOL_NAME = "find_files"
 SKILL_NAME = "filesystem"
 
@@ -208,6 +210,9 @@ SYSTEM_PROMPT_RULE = (
 
 def handler(args: dict) -> str:
     """Route to the appropriate find_files action."""
+    if not get_privacy_gate().allow(Capability.FILESYSTEM_OBSERVATION):
+        return "Das ist während der Privatsphäre-Einstellung nicht verfügbar."
+
     action = args.get("action", "search")
     dispatch = {
         "search": lambda: _find_search(args.get("pattern", "")),
