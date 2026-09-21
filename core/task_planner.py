@@ -12,10 +12,12 @@ Design:
     - Phase 3: Destructive step confirmation, failure-breaks, voice interrupts
 """
 
+import contextlib
 import json
 import logging
 import queue
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
@@ -24,6 +26,48 @@ from typing import Callable, Optional
 
 from core.logger import get_logger
 logger = get_logger("jarvis.task_planner")
+
+
+# ---------------------------------------------------------------------------
+# Cooperative mid-step cancellation
+# ---------------------------------------------------------------------------
+# Session #8 (agentic-audit open finding): cancellation previously only
+# took effect BETWEEN plan steps (_check_for_interrupt() at the top of
+# execute_plan()'s loop) — a step already in flight (e.g. a multi-page
+# web research fetch) always ran to completion regardless of a cancel
+# request. The task explicitly rules out brutal thread kills, so this
+# adds a purely cooperative mechanism instead: a threading.Event exposed
+# to whatever runs on the SAME thread as execute_plan() via
+# current_cancel_event(), which a long-running tool MAY check between
+# its own internal sub-steps to stop early and return partial/no
+# results cleanly. Tools that don't check it behave exactly as before —
+# nothing is silently broken, this is strictly additive. See
+# core/web_research.py's fetch_pages_parallel() for the first consumer.
+_current_cancel_event = threading.local()
+
+
+def current_cancel_event() -> Optional[threading.Event]:
+    """Return the active plan's cancellation Event if the calling code
+    is running (directly or via a synchronous call chain) on the same
+    thread as an in-progress TaskPlanner.execute_plan(), else None.
+    Long-running, genuinely interruptible tools may poll
+    `current_cancel_event().is_set()` between their own internal
+    sub-steps to stop early on cancellation — this is advisory/
+    cooperative only, never forced."""
+    return getattr(_current_cancel_event, "event", None)
+
+
+@contextlib.contextmanager
+def _cancel_event_scope(event: threading.Event):
+    """Publish `event` as the current thread's active cancellation
+    token for the duration of the `with` block, restoring whatever was
+    there before on exit (supports nested/re-entrant plan execution)."""
+    previous = getattr(_current_cancel_event, "event", None)
+    _current_cancel_event.event = event
+    try:
+        yield
+    finally:
+        _current_cancel_event.event = previous
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +250,9 @@ class TaskPlanner:
         self._skip_requested = False
         self._paused = False
         self._pending_plan_confirmation: Optional[TaskPlan] = None
+        # Cooperative mid-step cancellation token — see
+        # current_cancel_event()'s module-level docstring above.
+        self._cancel_event = threading.Event()
 
     # ------------------------------------------------------------------
     # Properties
@@ -635,6 +682,7 @@ class TaskPlanner:
         self.active_plan = plan
         self._cancel_requested = False
         self._skip_requested = False
+        self._cancel_event.clear()
         plan.status = PlanStatus.RUNNING
 
         from core.debug_logger import get_debug_logger
@@ -644,6 +692,12 @@ class TaskPlanner:
         results = []
         prior_context = ""
 
+        with _cancel_event_scope(self._cancel_event):
+            return self._run_plan_loop(plan, results, prior_context,
+                                        progress_callback, _dbg, _plan_start)
+
+    def _run_plan_loop(self, plan, results, prior_context, progress_callback,
+                        _dbg, _plan_start) -> str:
         for step in plan.steps:
             # Check for programmatic cancellation (from cancel() method)
             if self._cancel_requested:
@@ -1081,6 +1135,7 @@ class TaskPlanner:
         """Request cancellation of the active plan."""
         if self.active_plan and self.active_plan.status == PlanStatus.RUNNING:
             self._cancel_requested = True
+            self._cancel_event.set()
             logger.info("Plan cancellation requested")
         # Also cancel pending confirmation
         if self._pending_plan_confirmation:

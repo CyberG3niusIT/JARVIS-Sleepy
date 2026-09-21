@@ -306,6 +306,23 @@ class WebResearcher:
             self.logger.debug("Parallel fetch: %d URLs, timeout=%ds", len(future_to_info), timeout)
             try:
                 for future in as_completed(future_to_info, timeout=timeout):
+                    # Cooperative mid-step cancellation (session #8, see
+                    # core/task_planner.py's current_cancel_event()):
+                    # when this fetch is running as part of a plan step
+                    # the user cancelled, stop waiting for further pages
+                    # and return whatever was collected so far — a clean
+                    # early exit, not a forced kill of in-flight
+                    # subprocess fetches (cancel_futures=True in the
+                    # finally block below still only cancels futures
+                    # that haven't started running yet).
+                    from core.task_planner import current_cancel_event
+                    _cancel_evt = current_cancel_event()
+                    if _cancel_evt is not None and _cancel_evt.is_set():
+                        self.logger.info(
+                            "Parallel fetch: cancelled — stopping with %d/%d pages collected",
+                            len(page_sections), len(urls),
+                        )
+                        break
                     title, url = future_to_info[future]
                     try:
                         result = future.result(timeout=0.5)
