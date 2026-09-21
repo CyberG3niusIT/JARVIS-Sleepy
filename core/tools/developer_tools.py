@@ -1,6 +1,7 @@
 """Tool definition: developer_tools — git, codebase search, system admin."""
 
 import logging
+import os
 import shlex
 import subprocess
 import time as _time
@@ -128,6 +129,24 @@ logger = get_logger("jarvis.tools.developer_tools")
 # ---------------------------------------------------------------------------
 
 _config = None
+
+
+# ---------------------------------------------------------------------------
+# Real working directory for run_command/confirm_pending
+# ---------------------------------------------------------------------------
+#
+# Session #8 fix (agentic-audit finding #2): run_command/confirm_pending
+# used to cwd into a hardcoded '/home/user/jarvis' — stale and wrong on
+# the real Sleepy deployment, where config.yaml's own paths (e.g.
+# skill_manager.skills_path='/home/alex/jarvis/skills') show the actual
+# install root is elsewhere. There is no single "jarvis home" key in
+# config.yaml to read this from, so rather than hardcode a second guess,
+# this derives the real root from where this module itself is actually
+# running from: core/tools/developer_tools.py's own location, two
+# directories up, is always the checkout/install root the code is
+# executing from — correct in this sandbox AND on real hardware, with
+# nothing to keep in sync by hand.
+_JARVIS_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ---------------------------------------------------------------------------
@@ -460,7 +479,7 @@ def _devtools_run_command(args: dict) -> str:
             _pending_command = (command, _time.time() + 30)
         return f"CONFIRMATION REQUIRED: `{command}` — {reason}. Shall I proceed?"
     # Tier 1 (allowed) or Tier 2 (safe_write) — execute
-    output = _run_cmd(command, cwd='/home/user/jarvis', timeout=30)
+    output = _run_cmd(command, cwd=_JARVIS_ROOT, timeout=30)
     return safety.sanitize_output(output)
 
 
@@ -476,5 +495,5 @@ def _devtools_confirm_pending(args: dict) -> str:
             return "That confirmation has expired. Please issue the command again."
         _pending_command = None
     safety = _get_safety()
-    output = _run_cmd(command, cwd='/home/user/jarvis', timeout=30)
+    output = _run_cmd(command, cwd=_JARVIS_ROOT, timeout=30)
     return safety.sanitize_output(output)
