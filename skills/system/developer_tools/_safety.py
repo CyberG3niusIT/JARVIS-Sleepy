@@ -83,20 +83,34 @@ BLOCKED_PATTERNS = [
 ]
 
 
-def classify_command(command: str) -> Tuple[str, str]:
-    """
-    Classify a command into a safety tier.
+# Command-chaining operators: ;  &&  ||  newline  or a lone backgrounding
+# & (not part of &&). Found by an agentic-system audit (session #7):
+# classify_command() only ever inspected parts[0]/the first two words, so
+# "git status ; cat /etc/shadow" or "git log && rm important_file.txt"
+# classified as 'allowed'/Tier-1 (matching "git status"/"git log") while
+# _run_cmd() (core/tools/developer_tools.py) executes the ENTIRE string
+# via subprocess.run(..., shell=True) — the chained command actually ran,
+# completely bypassing the tier system. This is deliberately a coarse,
+# conservative detector rather than a full shell parser: a false
+# positive (e.g. a `;` that's actually inside a quoted argument) just
+# means a simple command gets asked for confirmation instead of
+# auto-allowed — a safe degradation, not a functionality break — whereas
+# a false negative here is an actual security hole. Does NOT match a
+# bare `|` (pipe) — piping Tier-1 command output through another command
+# for filtering, e.g. "ps aux | grep foo", is ordinary intended usage;
+# pipe-to-a-shell specifically is still caught by BLOCKED_PATTERNS below
+# regardless of this chaining check.
+_CHAIN_OPERATOR_RE = re.compile(r';|&&|\|\||\n|(?<!&)&(?!&)')
 
-    Returns:
-        Tuple of (tier, reason) where tier is one of:
-        'allowed', 'safe_write', 'confirmation', 'blocked'
-    """
+_TIER_SEVERITY = {'allowed': 0, 'safe_write': 1, 'confirmation': 2, 'blocked': 3}
+
+
+def _classify_single_command(command: str) -> Tuple[str, str]:
+    """Classify ONE simple (non-chained) command. Extracted from the old
+    classify_command() body — see classify_command()'s docstring for why
+    chained commands are handled separately, never falling through to
+    this function's 'allowed'/'safe_write' results directly."""
     stripped = command.strip()
-
-    # Check blocked patterns first
-    for pattern in BLOCKED_PATTERNS:
-        if re.search(pattern, stripped):
-            return ('blocked', f'Blocked pattern detected: {pattern}')
 
     # Extract the base command (first word or first two words for compound commands)
     parts = stripped.split()
@@ -130,6 +144,47 @@ def classify_command(command: str) -> Tuple[str, str]:
 
     # Unknown command — treat as confirmation required for safety
     return ('confirmation', f'Unknown command "{base_cmd}" — requires confirmation')
+
+
+def classify_command(command: str) -> Tuple[str, str]:
+    """
+    Classify a command into a safety tier.
+
+    Returns:
+        Tuple of (tier, reason) where tier is one of:
+        'allowed', 'safe_write', 'confirmation', 'blocked'
+    """
+    stripped = command.strip()
+
+    # Check blocked patterns first — against the FULL string, so this
+    # still catches e.g. pipe-to-bash regardless of chaining below.
+    for pattern in BLOCKED_PATTERNS:
+        if re.search(pattern, stripped):
+            return ('blocked', f'Blocked pattern detected: {pattern}')
+
+    if not stripped:
+        return ('blocked', 'Empty command')
+
+    if _CHAIN_OPERATOR_RE.search(stripped):
+        # Chained/compound command: classify every segment independently
+        # and never report anything better than 'confirmation' for the
+        # whole thing, regardless of what any individual segment's own
+        # classification would have been — a chain of all-Tier-1 reads
+        # is almost certainly harmless, but this function's job is to be
+        # the safety boundary, not to prove harmlessness perfectly.
+        segments = [s.strip() for s in _CHAIN_OPERATOR_RE.split(stripped) if s.strip()]
+        segment_results = [_classify_single_command(seg) for seg in segments] or [
+            ('confirmation', 'Unparseable chained command')
+        ]
+        worst = max(segment_results, key=lambda r: _TIER_SEVERITY[r[0]])
+        if worst[0] == 'blocked':
+            return ('blocked', f'Chained command contains a blocked segment: {worst[1]}')
+        return (
+            'confirmation',
+            f'Chained/compound command requires confirmation (worst segment: {worst[1]})',
+        )
+
+    return _classify_single_command(stripped)
 
 
 def sanitize_output(output: str, max_lines: int = 200, max_chars: int = 8000) -> str:
