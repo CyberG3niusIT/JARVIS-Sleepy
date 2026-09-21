@@ -1112,7 +1112,21 @@ class JarvisContinuous:
                 self.listener.stop()
                 self.logger.info("Jarvis stopped")
         else:
-            # Legacy mode — sleep loop
+            # Legacy mode — sleep loop. Mic/STT gating itself lives in
+            # core/continuous_listener.py, shared by both modes, so
+            # PRIVACY still blocks ingestion correctly here — but
+            # PrivacyControlWatcher (the only reliable way to EXIT
+            # privacy once STT is blocked, see its module docstring) was
+            # only ever started in the event_mode branch above. Started
+            # here too (session #7 finding) so legacy mode isn't a
+            # privacy-exit dead end — config.yaml commits
+            # pipeline.event_mode: true, so this branch isn't the real
+            # deployed default, but it's a reachable configuration and
+            # the gap was real either way.
+            from core.privacy_control_watcher import PrivacyControlWatcher
+            self.privacy_control_watcher = PrivacyControlWatcher(self.config)
+            self.privacy_control_watcher.start()
+
             try:
                 # Stay alive even in degraded mode (no mic) — device
                 # monitor will reconnect when mic appears
@@ -1122,6 +1136,8 @@ class JarvisContinuous:
                 print("\n\nShutdown signal received...")
                 self.logger.info("Shutdown requested")
             finally:
+                if hasattr(self, 'privacy_control_watcher') and self.privacy_control_watcher:
+                    self.privacy_control_watcher.stop()
                 if self.presence_detector:
                     self.presence_detector.stop()
                 if hasattr(self, '_async_loop') and self._async_loop.is_running():

@@ -200,7 +200,17 @@ class ConversationManager:
             except Exception as e:
                 self.logger.warning(f"Context window hook failed (non-fatal): {e}")
 
-        self.logger.debug(f"Added {role} message: {content[:50]}...")
+        if self._privacy_gate.allow(Capability.CONTENT_LOGGING):
+            self.logger.debug(f"Added {role} message: {content[:50]}...")
+        else:
+            # Found this session: this debug line went to core/logger.py's
+            # standard logging output unconditionally, regardless of
+            # privacy mode — core/logger.py itself has no PrivacyGate
+            # awareness (and shouldn't; content-safety is each caller's
+            # responsibility, same as debug_logger.py's own _write()
+            # gate). Metadata only during privacy, matching the
+            # CONTENT_LOGGING rule everywhere else in this file.
+            self.logger.debug(f"Added {role} message (length={len(content)}, privacy active)")
     
     def _append_to_history_file(self, message: Dict):
         """Append message to JSONL history file"""

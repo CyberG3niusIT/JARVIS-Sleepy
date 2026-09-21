@@ -107,6 +107,51 @@ class TestChatHistoryJsonlDeniedDuringPrivacy:
         assert any(m["content"] == "während privacy gesagt" for m in conv.session_history)
 
 
+class TestDebugLoggerContentDuringPrivacy:
+    """Session #7 finding: add_message()'s own debug log —
+    self.logger.debug(f"Added {role} message: {content[:50]}...") — went
+    through core/logger.py's standard logging output unconditionally.
+    core/logger.py has no PrivacyGate awareness (and shouldn't — content
+    safety is each caller's responsibility, same as debug_logger.py's
+    own gate), so this was a real content leak into log files during
+    privacy, separate from the already-gated chat_history.jsonl write."""
+
+    def test_debug_log_omits_content_during_privacy(self, conv, conv_cfg):
+        gate = get_privacy_gate(conv_cfg)
+        gate.enter(PrivacyMode.PRIVACY, actor="test")
+
+        calls = []
+        conv.logger.debug = lambda msg, *a, **k: calls.append(msg)
+
+        conv.add_message("user", "geheimer Inhalt der nirgendwo auftauchen darf")
+
+        assert calls  # still logs something (metadata)
+        assert all("geheimer Inhalt" not in c for c in calls)
+
+    def test_debug_log_includes_content_outside_privacy(self, conv):
+        calls = []
+        conv.logger.debug = lambda msg, *a, **k: calls.append(msg)
+
+        conv.add_message("user", "normaler Inhalt sichtbar im Log")
+
+        assert any("normaler Inhalt" in c for c in calls)
+
+    def test_debug_log_metadata_only_has_no_content_after_exit_either(self, conv, conv_cfg):
+        gate = get_privacy_gate(conv_cfg)
+        gate.enter(PrivacyMode.PRIVACY, actor="test")
+        calls = []
+        conv.logger.debug = lambda msg, *a, **k: calls.append(msg)
+
+        conv.add_message("user", "während privacy")
+        gate.exit(actor="test")
+        conv.add_message("user", "nach exit sichtbar")
+
+        privacy_call = calls[0]
+        post_exit_call = calls[1]
+        assert "während privacy" not in privacy_call
+        assert "nach exit sichtbar" in post_exit_call
+
+
 @pytest.fixture
 def ctx_cfg(tmp_path):
     return _FakeConfig({

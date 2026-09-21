@@ -77,14 +77,26 @@ class PrivacyControlWatcher(threading.Thread):
         )
         self._write_status(self._gate.mode())
         while not self._stop_event.is_set():
-            # Exit is checked LAST deliberately: if multiple sentinels
-            # somehow exist at once (race between two `touch` calls), the
-            # more protective outcome (staying/entering privacy) wins
-            # over the less protective one (exiting) — fail closed, not
-            # fail open.
-            self._consume(self.LOCK_SENTINEL, self._handle_lock)
-            self._consume(self.ENTER_SENTINEL, self._handle_enter)
+            # Session #7 fix: each _consume() call is a plain state
+            # assignment (gate.enter()/exit()), so within one poll
+            # iteration the LAST one applied is what the mode ends up
+            # as — "checked last" and "wins" are opposite things, and
+            # the previous order (LOCK, ENTER, EXIT — i.e. EXIT applied
+            # last) actually made EXIT win any collision, the exact
+            # opposite of the "protective outcome wins" comment that
+            # used to be here (confirmed by the old
+            # test_lock_wins_over_simultaneous_exit, which asserted
+            # NORMAL as the outcome while its own docstring claimed
+            # "lock wins" — the test and the comment were both
+            # documenting the bug, not the intended behavior). To make
+            # PRIVACY_LOCK > PRIVACY > EXIT actually hold when multiple
+            # sentinels collide, the more protective state must be
+            # applied LAST: EXIT first (weakest, overwritten by
+            # anything after it), then ENTER, then LOCK (strongest,
+            # applied last so it's the final state).
             self._consume(self.EXIT_SENTINEL, self._handle_exit)
+            self._consume(self.ENTER_SENTINEL, self._handle_enter)
+            self._consume(self.LOCK_SENTINEL, self._handle_lock)
             self._stop_event.wait(self._poll_interval)
         logger.info("PrivacyControlWatcher stopped")
 

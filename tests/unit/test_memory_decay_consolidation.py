@@ -187,6 +187,135 @@ class TestBoundedConsolidation:
         assert mm._consolidation_runs == 1
 
 
+class TestMergeDuplicateExcludedCandidates:
+    """Session #7 finding: run_consolidation() claimed to be
+    "decay only" while being named as if it did full consolidation.
+    Rather than just renaming, this adds a real, bounded, deterministic
+    MERGE step: repeated identical conflicting inferences (see the
+    excluded_from_matching fix) each create their own row by design —
+    this collapses exact duplicates into one, summing evidence_count as
+    an observation counter, WITHOUT ever letting that sum affect
+    confidence or re-enable matching (which would reopen the escalation
+    bug that fix closed).
+
+    Uses its own fixture with a high consolidation_interval_candidates
+    so the "N new candidates" auto-trigger (tested separately above)
+    doesn't fire mid-test and merge things before the explicit
+    run_consolidation() call these tests are checking."""
+
+    @pytest.fixture
+    def mm(self, tmp_path):
+        cfg = _FakeConfig({
+            "conversational_memory": {
+                "db_path": str(tmp_path / "memory_merge.db"),
+                "faiss_index_path": str(tmp_path / "faiss_merge"),
+                "autonomy_budget": {
+                    "decay_days": 14,
+                    "max_new_candidates": 500,
+                    "max_consolidation_runs": 50,
+                    "consolidation_interval_candidates": 1000,
+                },
+            },
+        })
+        return MemoryManager(cfg, conversation=None, embedding_model=None)
+
+    def test_exact_duplicate_conflicting_candidates_get_merged(self, mm):
+        fid_explicit = mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza", source="explicit",
+        ))
+        fids = []
+        for _ in range(5):
+            fid = mm.store_fact(_fact(
+                "Alex liebt Pizza", subject="pizza", value="pizza",
+                source="inferred", confidence=0.70,
+            ))
+            fids.append(fid)
+        assert len(set(fids)) == 5  # each conflict created its own row, as designed
+
+        result = mm.run_consolidation()
+
+        assert result["merged_count"] == 4  # 5 rows -> 1 canonical + 4 merged-away
+        canonical = _raw_fact(mm, fids[0])  # oldest survives
+        assert canonical["evidence_count"] == 5
+        assert canonical["superseded_by"] is None
+        for fid in fids[1:]:
+            assert _raw_fact(mm, fid)["superseded_by"] == fids[0]
+
+    def test_merge_never_changes_confidence(self, mm):
+        mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza", source="explicit",
+        ))
+        fids = [mm.store_fact(_fact(
+            "Alex liebt Pizza", subject="pizza", value="pizza",
+            source="inferred", confidence=0.70,
+        )) for _ in range(6)]
+
+        mm.run_consolidation()
+
+        canonical = _raw_fact(mm, fids[0])
+        assert canonical["confidence"] == pytest.approx(0.70)  # unchanged despite 6x evidence
+        assert mm.is_candidate(canonical) is True  # still a candidate, never promoted
+
+    def test_merged_row_stays_excluded_from_matching_and_get_facts(self, mm):
+        mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza", source="explicit",
+        ))
+        fids = [mm.store_fact(_fact(
+            "Alex liebt Pizza", subject="pizza", value="pizza",
+            source="inferred", confidence=0.70,
+        )) for _ in range(3)]
+        mm.run_consolidation()
+
+        # A 4th identical conflicting observation must still create its
+        # own new row, not reinforce the merged canonical.
+        fid_new = mm.store_fact(_fact(
+            "Alex liebt Pizza", subject="pizza", value="pizza",
+            source="inferred", confidence=0.70,
+        ))
+        assert fid_new not in fids
+        assert _raw_fact(mm, fids[0])["evidence_count"] == 3  # unchanged by the 4th observation
+
+        facts = mm.get_facts("primary_user", category="preference")
+        merged_away_ids = {fids[1], fids[2]}
+        assert all(f["fact_id"] not in merged_away_ids for f in facts)
+
+    def test_non_duplicate_candidates_not_merged(self, mm):
+        mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza", source="explicit",
+        ))
+        fid1 = mm.store_fact(_fact(
+            "Alex liebt Pizza", subject="pizza", value="pizza",
+            source="inferred", confidence=0.70,
+        ))
+        fid2 = mm.store_fact(_fact(
+            "Alex mag Pizza total gern", subject="pizza", value="pizza",  # different content
+            source="inferred", confidence=0.70,
+        ))
+
+        result = mm.run_consolidation()
+
+        assert result["merged_count"] == 0
+        assert _raw_fact(mm, fid1)["superseded_by"] is None
+        assert _raw_fact(mm, fid2)["superseded_by"] is None
+
+    def test_explicit_facts_never_touched_by_merge(self, mm):
+        """MERGE only ever operates on excluded_from_matching=1 rows —
+        explicit facts (excluded_from_matching=0) must never be
+        candidates for merging even if somehow duplicated."""
+        fid1 = mm.store_fact(_fact(
+            "Alex hasst Pizza", subject="pizza", value="pizza", source="explicit",
+        ))
+        fid2 = mm.store_fact(_fact(  # different value -> real change -> supersede
+            "Alex liebt Pizza", subject="pizza", value="pizza gerne", source="explicit",
+        ))
+        assert fid2 != fid1
+
+        mm.run_consolidation()
+
+        # Superseded via the normal explicit-correction path, not merge.
+        assert _raw_fact(mm, fid1)["superseded_by"] == fid2
+
+
 class TestAutonomyBudgetCapsNewCandidates:
     def test_new_candidates_denied_past_budget(self, mm):
         # fixture caps max_new_candidates at 5

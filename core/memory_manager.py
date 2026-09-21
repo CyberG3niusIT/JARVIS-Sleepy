@@ -2515,7 +2515,9 @@ class MemoryManager:
                 conn.close()
 
     def run_consolidation(self) -> dict:
-        """Bounded maintenance pass: decay only, for now (see docstring).
+        """Bounded maintenance pass: DECAY + MERGE (see below for exactly
+        what each does — this docstring is the accurate scope, not an
+        aspiration).
 
         Call at session-end, after N new candidates, on idle, or from an
         explicit maintenance job — never from a permanent background
@@ -2524,19 +2526,35 @@ class MemoryManager:
         a misbehaving caller (e.g. a retry loop) can't turn this into
         unbounded background work either.
 
-        Consolidation in the fuller sense the task describes (KEEP/
-        REINFORCE/PROMOTE/MERGE/UPDATE/SUPERSEDE/DECAY/ARCHIVE/DELETE/
-        NEEDS_CONFIRMATION as LLM-judged decisions) is NOT implemented —
-        REINFORCE/SUPERSEDE/UPDATE already happen synchronously and
-        deterministically in store_fact() (see _store_fact_locked), and
-        "PROMOTE" isn't a discrete action in this architecture: a fact
-        is "confirmed" purely by confidence crossing
-        CANDIDATE_CONFIDENCE_THRESHOLD (is_candidate()), computed on
-        read, not a stored status transition. What was genuinely missing
-        — decay of stale unreinforced candidates — is what this method
-        adds. A true LLM-judged MERGE/NEEDS_CONFIRMATION pass was
-        explicitly out of scope ("kein autonomer permanenter LLM-
-        Selbstreflexionsloop") and not attempted speculatively.
+        Two of the ten actions from the original consolidation
+        vocabulary (KEEP/REINFORCE/PROMOTE/MERGE/UPDATE/SUPERSEDE/DECAY/
+        ARCHIVE/DELETE/NEEDS_CONFIRMATION) are implemented here, both as
+        plain deterministic SQL, no LLM call:
+          - DECAY (run_decay_pass(), see its own docstring)
+          - MERGE (_merge_duplicate_excluded_candidates(), see its own
+            docstring) — collapses exact-duplicate rows created by
+            repeated identical conflicting inferences (see the
+            "explicit wins" / excluded_from_matching fix in
+            _store_fact_locked): each conflicting observation currently
+            creates its own row rather than reinforcing a prior one
+            (deliberately, to prevent the escalation bug that fix
+            closed), so identical repeats accumulate as separate rows.
+            Merging them into one (summing evidence_count as a visible
+            "observed N times" count, confidence left untouched) cleans
+            that up without reopening the escalation risk: merged rows
+            stay excluded_from_matching, so evidence_count summing here
+            can never let one cross into "confirmed."
+        REINFORCE/SUPERSEDE/UPDATE already happen synchronously in
+        store_fact() (see _store_fact_locked) — not part of this
+        method's job. PROMOTE isn't a discrete action in this
+        architecture: a fact is "confirmed" purely by confidence
+        crossing CANDIDATE_CONFIDENCE_THRESHOLD (is_candidate()),
+        computed on read, not a stored status transition. KEEP,
+        NEEDS_CONFIRMATION, and any judgment call between competing
+        interpretations of ambiguous data would need an LLM (or at
+        least a heuristic well beyond "is this row an exact duplicate")
+        and were explicitly out of scope ("kein autonomer permanenter
+        LLM-Selbstreflexionsloop") — not attempted speculatively.
         """
         if self._consolidation_runs >= self.max_consolidation_runs:
             self.logger.warning(
@@ -2548,7 +2566,74 @@ class MemoryManager:
         self._consolidation_runs += 1
         self._last_consolidation_at = time.time()
         decay_result = self.run_decay_pass()
-        return {"skipped": False, **decay_result}
+        merge_result = self._merge_duplicate_excluded_candidates()
+        return {"skipped": False, **decay_result, **merge_result}
+
+    def _merge_duplicate_excluded_candidates(self) -> dict:
+        """MERGE: collapse exact-duplicate excluded_from_matching
+        candidate rows (same user_id, category, subject, value, content)
+        into the oldest one, summing evidence_count as a visible
+        "observed N times" count.
+
+        Only ever touches excluded_from_matching=1 rows — the ones
+        created by _store_fact_locked's "explicit wins" branch, which
+        deliberately creates a fresh row per conflicting observation
+        rather than reinforcing a prior one (see run_consolidation's
+        docstring for why). Confidence is NEVER changed by this merge —
+        only evidence_count — and merged-away rows are linked via
+        superseded_by to the surviving row (the same mechanism already
+        used everywhere else in this file to mean "no longer an active
+        row, but auditable"), so this can't reopen the escalation bug
+        the excluded_from_matching column exists to prevent: a merged
+        row is still permanently excluded from _find_similar_fact()'s
+        matching pool regardless of its evidence_count.
+        """
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                rows = conn.execute("""
+                    SELECT * FROM facts
+                    WHERE excluded_from_matching = 1
+                          AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                    ORDER BY created_at ASC
+                """).fetchall()
+                rows = [dict(r) for r in rows]
+
+                groups: dict[tuple, list[dict]] = {}
+                for row in rows:
+                    key = (row["user_id"], row["category"], row["subject"],
+                           row.get("value"), row["content"])
+                    groups.setdefault(key, []).append(row)
+
+                merged_count = 0
+                for group in groups.values():
+                    if len(group) < 2:
+                        continue
+                    canonical = group[0]  # oldest, per ORDER BY created_at ASC
+                    duplicates = group[1:]
+                    total_evidence = canonical["evidence_count"] + sum(
+                        d["evidence_count"] for d in duplicates
+                    )
+                    conn.execute(
+                        "UPDATE facts SET evidence_count = ? WHERE fact_id = ?",
+                        (total_evidence, canonical["fact_id"]),
+                    )
+                    conn.executemany(
+                        "UPDATE facts SET superseded_by = ? WHERE fact_id = ?",
+                        [(canonical["fact_id"], d["fact_id"]) for d in duplicates],
+                    )
+                    merged_count += len(duplicates)
+
+                if merged_count:
+                    conn.commit()
+                    self.logger.info(
+                        "Consolidation: merged %d duplicate conflicting "
+                        "candidate(s) into %d canonical row(s)",
+                        merged_count, sum(1 for g in groups.values() if len(g) > 1),
+                    )
+                return {"merged_count": merged_count}
+            finally:
+                conn.close()
 
     def _search_facts_semantic(self, query: str, user_id: str, top_k: int = 3) -> list[dict]:
         """Embed query and compare against stored fact content embeddings."""
