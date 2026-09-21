@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 logger = get_logger("jarvis.tool_registry")
 
 
@@ -281,55 +282,63 @@ def execute_tool(tool_name: str, arguments: dict) -> str | dict:
         _rsize = len(str(result)) if result else 0
         logger.debug("execute_tool: %s returned %s (%d chars) in %.0fms",
                       tool_name, _rtype, _rsize, _elapsed)
-        # Structured event: tool execution
-        try:
-            from core.event_logger import get_event_logger
-            el = get_event_logger()
-            if el:
-                el.emit(
-                    category="tool_execution",
-                    event="tool_completed",
-                    message=f"{tool_name} → {_rsize} chars in {_elapsed:.0f}ms",
-                    severity="info",
-                    source="tool_registry",
-                    stage="tool",
-                    status="success",
-                    latency_ms=round(_elapsed, 1),
-                    metadata={
-                        "tool_name": tool_name,
-                        "arguments": _trunc_args,
-                        "result_type": _rtype,
-                        "result_size": _rsize,
-                    },
-                )
-        except Exception as _evt_err:
-            logger.warning("tool_completed event emit failed: %s", _evt_err)
+        # Structured event: tool execution. Gated on CONTENT_LOGGING
+        # (session #7 — found via the agentic-system audit: this call
+        # persists truncated tool arguments and result size/type to the
+        # event_logger SQLite DB unconditionally, regardless of privacy
+        # mode; skipped entirely during privacy, matching every other
+        # content-logging call site gated this session).
+        if get_privacy_gate().allow(Capability.CONTENT_LOGGING):
+            try:
+                from core.event_logger import get_event_logger
+                el = get_event_logger()
+                if el:
+                    el.emit(
+                        category="tool_execution",
+                        event="tool_completed",
+                        message=f"{tool_name} → {_rsize} chars in {_elapsed:.0f}ms",
+                        severity="info",
+                        source="tool_registry",
+                        stage="tool",
+                        status="success",
+                        latency_ms=round(_elapsed, 1),
+                        metadata={
+                            "tool_name": tool_name,
+                            "arguments": _trunc_args,
+                            "result_type": _rtype,
+                            "result_size": _rsize,
+                        },
+                    )
+            except Exception as _evt_err:
+                logger.warning("tool_completed event emit failed: %s", _evt_err)
         return result
     except Exception as e:
         logger.error(f"Tool execution error ({tool_name}): {e}")
-        # Structured event: tool failure
-        try:
-            from core.event_logger import get_event_logger
-            el = get_event_logger()
-            if el:
-                _elapsed = (time.time() - _t0) * 1000
-                el.emit(
-                    category="tool_execution",
-                    event="tool_completed",
-                    message=f"{tool_name} FAILED: {e}",
-                    severity="error",
-                    source="tool_registry",
-                    stage="tool",
-                    status="error",
-                    latency_ms=round(_elapsed, 1),
-                    metadata={
-                        "tool_name": tool_name,
-                        "arguments": _trunc_args,
-                        "error": str(e),
-                    },
-                )
-        except Exception:
-            pass
+        # Structured event: tool failure (CONTENT_LOGGING-gated, see the
+        # success path above for why).
+        if get_privacy_gate().allow(Capability.CONTENT_LOGGING):
+            try:
+                from core.event_logger import get_event_logger
+                el = get_event_logger()
+                if el:
+                    _elapsed = (time.time() - _t0) * 1000
+                    el.emit(
+                        category="tool_execution",
+                        event="tool_completed",
+                        message=f"{tool_name} FAILED: {e}",
+                        severity="error",
+                        source="tool_registry",
+                        stage="tool",
+                        status="error",
+                        latency_ms=round(_elapsed, 1),
+                        metadata={
+                            "tool_name": tool_name,
+                            "arguments": _trunc_args,
+                            "error": str(e),
+                        },
+                    )
+            except Exception:
+                pass
         return f"Error executing {tool_name}: {e}"
 
 

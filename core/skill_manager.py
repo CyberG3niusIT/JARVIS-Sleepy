@@ -8,6 +8,7 @@ Routes user intents to appropriate skills.
 import os
 import sys
 import inspect
+import time
 import yaml
 import importlib.util
 import re
@@ -17,6 +18,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from core.logger import get_logger
 from core.base_skill import BaseSkill, SkillMetadata
 from core.honorific import resolve_honorific
+from core.privacy_gate import get_privacy_gate, Capability
 
 # Generic keywords too ambiguous for suffix matching or bare-word routing
 _generic_keywords = {"search", "open", "find", "look", "browse", "navigate", "web",
@@ -106,6 +108,7 @@ class SkillManager:
         self.responses = responses
         self.llm = llm
         self.logger = get_logger(__name__, config)
+        self._privacy_gate = get_privacy_gate(config)
         
         # Get skills path from config
         self.skills_path = Path(config.get("skills.skills_path"))
@@ -874,6 +877,53 @@ class SkillManager:
     # execute_intent — main entry point
     # ------------------------------------------------------------------
 
+    def _emit_skill_audit_event(self, skill_name: str, pattern: str, entities: dict,
+                                 t0: float, response, error: Exception = None) -> None:
+        """Structured audit event for a skill intent dispatch — mirrors
+        core/tool_registry.py's execute_tool() audit pattern (session #7
+        agentic-system audit found execute_intent() had NONE at all,
+        despite being the primary dispatch path for most voice commands
+        — tool_registry.execute_tool() only covers LLM function-calling,
+        which most skills never go through).
+
+        Stricter than tool_registry's own pattern about content: only
+        entity KEY NAMES and response LENGTH are recorded, never entity
+        values or response text — and the whole emission is skipped
+        during privacy (Capability.CONTENT_LOGGING), matching every
+        other content-logging call site gated this session.
+        """
+        if not self._privacy_gate.allow(Capability.CONTENT_LOGGING):
+            return
+        try:
+            from core.event_logger import get_event_logger
+            el = get_event_logger()
+            if not el:
+                return
+            elapsed_ms = (time.time() - t0) * 1000
+            response_len = len(response) if isinstance(response, str) else None
+            el.emit(
+                category="tool_execution",
+                event="skill_intent_completed",
+                message=(
+                    f"{skill_name}.{pattern} FAILED: {error}" if error
+                    else f"{skill_name}.{pattern} in {elapsed_ms:.0f}ms"
+                ),
+                severity="error" if error else "info",
+                source="skill_manager",
+                stage="skill",
+                status="error" if error else "success",
+                latency_ms=round(elapsed_ms, 1),
+                metadata={
+                    "skill_name": skill_name,
+                    "pattern": pattern,
+                    "entity_keys": sorted(entities.keys()) if entities else [],
+                    "response_length": response_len,
+                    "error": str(error) if error else None,
+                },
+            )
+        except Exception as e:
+            self.logger.warning("skill_intent_completed event emit failed: %s", e)
+
     def execute_intent(self, user_text: str) -> Optional[str]:
         """Match and execute an intent.
 
@@ -902,6 +952,7 @@ class SkillManager:
             self.logger.error("Skill %s not found", skill_name)
             return None
 
+        _t0 = time.time()
         try:
             skill._last_user_text = user_text
             if entities is None:
@@ -919,6 +970,7 @@ class SkillManager:
                 response = self._invoke_handler(handler, entities)
                 if isinstance(response, str):
                     response = resolve_honorific(response)
+                self._emit_skill_audit_event(skill_name, pattern, entities, _t0, response)
                 return response
 
             # 4a + 4b. Keyword-based routing with semantic fallbacks.
@@ -931,6 +983,7 @@ class SkillManager:
                     skill, skill_name, user_text, entities,
                 )
                 if result is not None:
+                    self._emit_skill_audit_event(skill_name, pattern, entities, _t0, result)
                     return result
 
                 result = self._try_keyword_semantic_fallback(
@@ -938,18 +991,21 @@ class SkillManager:
                 )
                 # Whether matched or not, this block is terminal for
                 # keyword-routed skills with semantic intents.
+                self._emit_skill_audit_event(skill_name, pattern, entities, _t0, result)
                 return result
 
             # 6. Pattern-based skill handler (skills without semantic intents)
             response = skill.handle_intent(pattern, entities)
             if isinstance(response, str):
                 response = resolve_honorific(response)
+            self._emit_skill_audit_event(skill_name, pattern, entities, _t0, response)
             return response
 
         except Exception as e:
             self.logger.error("Error executing skill %s: %s", skill_name, e)
             import traceback
             traceback.print_exc()
+            self._emit_skill_audit_event(skill_name, pattern, entities, _t0, None, error=e)
             return "I'm sorry, I encountered an error processing that request."
     
     def register_virtual_skill(self, name: str, intent_examples: list):
