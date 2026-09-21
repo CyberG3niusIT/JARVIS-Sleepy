@@ -7,42 +7,93 @@ way, and what's known to be broken or half-done*. Keep it current: when you
 make an architectural decision or find a real bug, write it here, not just
 in a commit message.
 
-Last major update: 2026-09-20 (Claude session #6, same branch
-`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `4991633` —
+Last major update: 2026-09-21 (Claude session #7, same branch
+`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `ddb49c9` —
 verified via `git fetch --all --prune` + `git log` + diff against
-`origin/main` before any change, not assumed; working tree was clean).
-Session #6 scope: backend-only, same constraint as prior sessions. Ran
-with **no shell access to the real Sleepy machine**, same as session
-#5 — every "NEEDS HW VERIFY" tag still means exactly that.
+`origin/main` before any change; working tree was clean). Ran with **no
+shell access to the real Sleepy machine**, same as sessions #5/#6 —
+every "NEEDS HW VERIFY" tag still means exactly that.
 
-Session #6 found and fixed real gaps in session #5's own PrivacyGate
-work — not just new features. Most notably: the mic-privacy fix only
-gated the speech-collection handoff, not the underlying VAD ring buffer
-(§11); the "explicit fact wins over inference" fix only worked for the
-FIRST conflicting observation, and a second one could reinforce the
-losing candidate right past the explicit fact's own confidence (§5d) —
-both reproduced with a failing test before being fixed, per the task's
-own instruction. Full list: audio ring-buffer/Silero-state privacy leak
-closed, webcam capture-teardown on privacy enter, conversation
-JSONL/topic-segment/session-summarization persistence gated, a real
-local privacy-exit control path (voice cannot reliably exit PRIVACY —
-architectural, not a bug to paper over), the memory escalation bug
-above, a stale-Piper-ack-after-Chatterbox-failure fix, FILESYSTEM_OBSERVATION/
-REMOTE_TOOL wired to their real call sites, memory decay/bounded-
-consolidation/autonomy-budget (the one item session #5 explicitly
-deferred), and a systemd --user-vs-system install-strategy
-inconsistency resolved in documentation. See §11 (privacy, rewritten
-significantly this session), §5d (memory), §3.4 (ack), §13 (systemd).
+Session #7 opened with five findings from an external review of session
+#6's own work — all real, all fixed:
+1. `PrivacyControlWatcher`'s poll order (LOCK, ENTER, EXIT) actually made
+   EXIT win any sentinel collision, backwards from the "protective
+   outcome wins" comment sitting right above it (the old test even
+   asserted the buggy outcome while calling it "lock wins" in its own
+   name). Reordered to EXIT, ENTER, LOCK — see §11.
+2. `ConversationManager.add_message()`'s own debug log leaked message
+   content into `core/logger.py`'s output regardless of privacy mode —
+   a gap separate from the already-gated `chat_history.jsonl` write.
+   Gated on `CONTENT_LOGGING`.
+3. `run_consolidation()`'s docstring admitted "decay only" while its
+   name implied full consolidation — implemented a real second action
+   (MERGE: collapse exact-duplicate conflicting-candidate rows) instead
+   of just renaming. See §5d.
+4. The systemd docs recommended system-level units, but the REAL
+   control plane (`start.sh`/`stop.sh`/`killswitch.sh`/aliases, already
+   in daily use) was entirely user-level for `jarvis.service` — session
+   #6's "system-level primary" recommendation was an architectural guess
+   that never checked for an existing convention. Corrected to the real,
+   evidence-based mixed strategy and wired the control-plane scripts to
+   also manage the two system-level model services they'd never touched.
+   See §13.
+5. `PrivacyControlWatcher` was only started in `jarvis_continuous.py`'s
+   event_mode branch, leaving the legacy branch a privacy-exit dead end
+   even though mic/STT gating itself (shared code) still worked there.
+   Started in both branches now.
 
-Not attempted this session, flagged rather than silently skipped: the
-XTTSv2-Streaming-ONNX/Windows-Audio voice target (needs the actual
-ONNX model files and a Windows environment neither of which this
-sandbox has — implementing it blind would mean shipping unverified
-code against a path this session couldn't even confirm exists), a full
-agentic/skill-system dead-path audit, a generic proactive/event-
-notification layer, and the German-first string backlog. Each is a
-substantial standalone piece of work better done with a fresh session's
-full budget than squeezed in superficially — see the updated §14.
+After the review fixes, a background agent ran a full agentic-system
+audit (skill system, tools, MCP, task planner, background jobs, audit
+logging, dead code). Of its ~10 findings, the highest-value ones were
+acted on this session:
+- **CRITICAL, fixed**: `skills/system/developer_tools/_safety.py`'s
+  `classify_command()` only ever inspected the first word/two words of
+  a command string — `"git status ; cat /etc/shadow"` and
+  `"git log && rm important_file.txt"` both classified as `'allowed'`
+  (no confirmation) purely because their first segment matched a
+  Tier-1 command, while `_run_cmd()` executes the ENTIRE string via
+  `shell=True`. This was the one path in the codebase where LLM/voice-
+  controlled tool arguments become a shell command, effectively
+  unguarded against basic command chaining. Fixed with a conservative
+  chain-operator detector that never lets a compound command auto-allow.
+- MCP tool-call timeouts didn't actually cancel the underlying
+  coroutine (a `future.result(timeout=...)` gotcha) — it kept running
+  on the shared event-loop thread, able to race the next call over
+  `self._sessions`. Fixed with `asyncio.wait_for()` inside the
+  coroutine itself.
+- `skill_manager.execute_intent()` — the dispatch path for most voice
+  commands — had zero structured audit logging, unlike
+  `tool_registry.execute_tool()` (the separate LLM-function-calling
+  path). Added, and found the existing `tool_registry` audit logging
+  had no PrivacyGate awareness either — both now gated on
+  `CONTENT_LOGGING`.
+- `developer_tools`' pending-confirmation mechanism was a single global
+  slot that silently overwrote an unresolved confirmation — fixed to
+  refuse instead.
+- Confirmed-dead prototype skill (`skills/system/_in_development/
+  web_navigation/`, unreachable by directory-depth, a stale v1.0.0 fork
+  of the real v2.0.0 skill) deleted.
+- Also investigated: the documented latency-chain turn-id-handoff
+  blocker. Found the real integration seam (STTWorker's
+  TRANSCRIPTION_READY event already carries a dict payload in some
+  cases) but the full wiring requires a breaking change to the
+  audio_queue contract between two files neither importable in this
+  sandbox — implemented only the safe, fully-tested half
+  (`LatencyTracker.mark(stage, at=...)` backfill capability) rather
+  than push an untestable change to the live audio pipeline. See §8.
+
+Not attempted this session, same reasoning as session #6 for most:
+XTTSv2-Streaming-ONNX/Windows-Audio (still no Windows/model access), a
+generic proactive/event-notification layer (the audit's background-jobs
+findings suggested existing pieces — reminder_manager, watchdog,
+event_logger — already cover real needs; building a new layer without
+finishing that audit first risked the "zweite konkurrierende Engine"
+earlier sessions were told to avoid), the German-first backlog, and the
+remaining ~6 smaller/architectural agentic-audit findings (tool_gate.py
+not actually being a permission gate despite its name; no skill-level
+capability manifest; TaskPlanner can't cancel a step already mid-
+execution; Watchdog has no visibility into background-job health) — see
+the updated §14.
 
 **Persona note (clarified explicitly by the user this session, don't
 "fix" this again):** German-first does NOT mean removing "Sir"/"Ma'am".
@@ -918,23 +969,32 @@ reinforced back to life). Rows are archived, never hard-deleted, so
 decay stays auditable; explicit facts and anything reinforced even once
 are never touched regardless of age.
 
-**Consolidation** (`run_consolidation()`): bounded, deterministic —
-currently just the decay pass, with its own budget
-(`autonomy_budget.max_consolidation_runs`, default 50 per process
-lifetime). Deliberately NOT a KEEP/REINFORCE/PROMOTE/MERGE/.../LLM-judged
-pipeline: REINFORCE/SUPERSEDE/UPDATE already happen synchronously in
-`store_fact()`, and "PROMOTE" isn't a discrete action in this
-architecture (confirmed-vs-candidate is computed on read from
-confidence, not a stored status). A real LLM-judged MERGE/
-NEEDS_CONFIRMATION pass was explicitly out of scope ("kein autonomer
-permanenter LLM-Selbstreflexionsloop") and not attempted speculatively.
-Wired at two trigger points: session-end (`jarvis_continuous.py`'s
-shutdown, before `memory_manager.save()`) and "N new candidates"
-(every `autonomy_budget.consolidation_interval_candidates`, default 50,
-checked inside `store_fact()`). Idle and "explicit maintenance job"
-triggers are NOT wired to anything — `run_consolidation()` is a plain
-public method either could call, but no idle-detection or maintenance-
-job caller was added this session.
+**Consolidation** (`run_consolidation()`): bounded, deterministic, with
+its own budget (`autonomy_budget.max_consolidation_runs`, default 50
+per process lifetime). Wired at two trigger points: session-end
+(`jarvis_continuous.py`'s shutdown, before `memory_manager.save()`) and
+"N new candidates" (every `autonomy_budget.consolidation_interval_
+candidates`, default 50, checked inside `store_fact()`). Idle and
+"explicit maintenance job" triggers are NOT wired to anything —
+`run_consolidation()` is a plain public method either could call, but
+no idle-detection or maintenance-job caller was added.
+
+~~Currently just the decay pass~~ **Session #7: implemented a real
+second action instead of leaving the name/docstring mismatched.** An
+external review caught that the docstring admitted "decay only" while
+the method's name implied full consolidation. Rather than just
+renaming, `_merge_duplicate_excluded_candidates()` (MERGE, one of the
+ten actions from the original consolidation vocabulary) now also runs:
+it collapses exact-duplicate `excluded_from_matching` rows — created
+because each conflicting inference intentionally gets its own row (the
+fix for the escalation bug above) — into one canonical row, summing
+`evidence_count` as a visible "observed N times" counter. Confidence is
+never touched by the merge and merged rows stay
+`excluded_from_matching`, so this can't reopen the escalation risk that
+column exists to prevent. The docstring now names exactly which two of
+the ten actions are implemented (DECAY, MERGE) instead of "decay only."
+REINFORCE/SUPERSEDE/UPDATE/PROMOTE/KEEP/NEEDS_CONFIRMATION remain out
+of scope for the same reason as before (no LLM self-reflection loop).
 
 **Autonomy budget**: `max_new_candidates` (default 500) caps genuinely
 NEW candidate rows per `MemoryManager` instance lifetime — not
@@ -1039,6 +1099,17 @@ this session's docs/DEVELOPMENT.md note calling it "(DISABLED)" is stale.
   `tests/unit/`.
 
 ## 8. Latency instrumentation (`core/latency_tracker.py`, session #4)
+
+**Session #7**: `mark(stage, at=...)` now accepts an explicit
+`time.monotonic()` value to backfill a stage that happened before the
+tracker existed (e.g. `speech_end`/`stt_start`/`stt_end`, which happen
+on `continuous_listener.py`'s/`STTWorker`'s own thread before
+`_handle_command()` creates the tracker) — see this section's own
+open-work item for why the actual pipeline wiring (a breaking change to
+the `audio_queue` payload contract between two files neither importable
+in this sandbox) wasn't done, just the tracker-side capability. Existing
+callers/behavior are completely unaffected (`at` defaults to `None` →
+"mark now," same as before).
 
 Real per-turn monotonic checkpoints — implemented, not just documented,
 per the explicit ask. One `LatencyTracker` instance per voice-command turn,
@@ -1279,11 +1350,25 @@ a daemon thread polling three sentinel files
 (`/tmp/.jarvis_privacy_enter|_lock|_exit`, existence-only, same trust
 model as the existing `core/debug_logger.py` sentinel convention),
 wired into `jarvis_continuous.py` (the one entrypoint with genuinely no
-interactive text input) alongside `Watchdog`. Fail-closed by design:
-lock/enter are checked before exit in the poll order, so a sentinel
-collision favors staying protected. Also maintains
+interactive text input) alongside `Watchdog`. Also maintains
 `/tmp/.jarvis_privacy_status` (mode + timestamp only) via the gate's
 own enter/exit callbacks, regardless of what triggered the transition.
+
+~~Fail-closed by design: lock/enter checked before exit~~ **Session #7
+found this backwards and fixed it.** Each `_consume()` call is a plain
+state assignment (`gate.enter()`/`gate.exit()`), so within one poll
+iteration whichever runs LAST is the actual final mode — the original
+order (LOCK, ENTER, EXIT, i.e. EXIT applied last) meant EXIT actually
+won any sentinel collision, the opposite of "the protective outcome
+wins." The old regression test even asserted the buggy outcome (NORMAL
+after a LOCK+EXIT collision) while calling it `test_lock_wins_over_
+simultaneous_exit` — the bug was written into both the code and its own
+test. Corrected order: EXIT, ENTER, LOCK (weakest first, strongest
+applied last), so `PRIVACY_LOCK > PRIVACY > EXIT` now actually holds.
+Also: `PrivacyControlWatcher` was only started in the event_mode branch
+of `jarvis_continuous.py` — the legacy branch (mic/STT gating itself
+still worked there, shared code in `continuous_listener.py`) had no way
+to exit privacy at all. Started in both branches now.
 
 **Memory escalation bug** (found while implementing the above,
 confirmed with a repro script before fixing): session #5's "explicit
@@ -1377,25 +1462,55 @@ installable here (confirmed: `pip install sounddevice` succeeds but
 `import sounddevice` raises `OSError: PortAudio library not found`).
 Verified by code inspection and `python3 -m py_compile` only.
 
-## 13. Sleepy systemd units (session #5, NEEDS HW VERIFY)
+## 13. Sleepy systemd units (sessions #5-#7, NEEDS HW VERIFY)
 
 `systemd/llama-server.service`, `systemd/chatterbox.service` (new — no
-Chatterbox unit existed anywhere in the repo before this session,
-confirmed by grep), and `systemd/jarvis.service` were written this
-session using the real `/home/alex/...` paths already present in
-`config.yaml` (which `core/config.py` actually loads at runtime — not a
-placeholder file), replacing the stale `/home/user/...` and
-`/mnt/models/...` paths in the old root-level `jarvis.service`/
-`llama-server.service` (left in place, not deleted, each with a
-one-line header pointing at the replacement). Also fixed:
-`--ctx-size 32768` (was `8192`, now matches `config.yaml`'s
-`llm.local.context_size`), `EnvironmentFile=-/home/alex/jarvis/.env` for
-secrets instead of an inline placeholder value, `Restart=on-failure` +
-sensible `TimeoutStopSec`, `ExecStartPre` existence checks, and
-`jarvis.service` soft-depending (`Wants=`/`After=`, not `Requires=`) on
-the other two — matching the fallback logic that already exists in code
+Chatterbox unit existed anywhere in the repo before session #5,
+confirmed by grep), and `systemd/jarvis.service` use the real
+`/home/alex/...` paths already present in `config.yaml` (which
+`core/config.py` actually loads at runtime — not a placeholder file),
+replacing the stale `/home/user/...` and `/mnt/models/...` paths in the
+old root-level `jarvis.service`/`llama-server.service` (left in place,
+not deleted, each with a one-line header pointing at the replacement).
+Also fixed: `--ctx-size 32768` (was `8192`, now matches `config.yaml`'s
+`llm.local.context_size`), `EnvironmentFile` for secrets instead of an
+inline placeholder value, `Restart=on-failure` + sensible
+`TimeoutStopSec`, `ExecStartPre` existence checks, and `jarvis.service`
+soft-depending (`Wants=`/`After=`, not `Requires=`) on the other two —
+matching the fallback logic that already exists in code
 (`llm_router.py`'s cloud fallback, `tts.py`'s Piper fallback), so a down
 llama-server/Chatterbox doesn't block JARVIS starting in degraded mode.
+
+**Session #6 got the install strategy wrong; session #7 corrected it
+with real evidence.** Session #6 recommended system-level units for
+everything, based on architectural reasoning alone ("always-on services
+should start before login") — without first checking whether an
+established, working convention already existed. Session #7 grepped the
+repo and found a complete, real, already-in-use control plane at the
+root: `start.sh`/`stop.sh`/`restart.sh`/`status.sh`/`killswitch.sh`/
+`jarvis_aliases.sh`, all built around `systemctl --user ...
+jarvis.service`, plus `core/health_check.py`/`core/tools/developer_tools.py`
+querying it the same way. **`jarvis.service` is a user unit — settled
+by evidence, not a preference.** `llama-server.service`/
+`chatterbox.service` stay system units (headless GPU servers, no
+session/audio dependency of their own) — a reasoned guess, not
+confirmed the way `jarvis.service` now is:
+`developer_tools.py`'s own status check hedges on `llama-server`'s
+scope (tries `--user`, falls back to system), so the codebase itself
+isn't fully sure either. This split also converges with the Windows-
+Audio target: a system-level unit starting before login has no path to
+WSLg/Windows-Audio's session-tied forwarding — only a user unit
+(running as that session) can reach it. `systemd/jarvis.service` was
+rewritten as a proper user unit (`%h`-relative paths, no `User=` line).
+The control-plane scripts themselves were the deeper gap: they never
+managed `llama-server`/`chatterbox` at all (added session #5/#6, never
+wired in) — `start.sh` now also enables+starts them (sudo, skipped
+cleanly without passwordless sudo), `status.sh` reports all three
+services, and `killswitch.sh` — an "emergency, stop everything" switch
+that left the GPU servers running was a real functional gap — now stops
+both and `pkill`s their process names directly as a second line of
+defense. Full detail and the corrected install/verify steps are in
+`systemd/README.md`.
 
 **This session had no shell access to Sleepy** — no `whoami`, no
 `realpath`, no way to confirm the venv, the `llama-server` binary, or
@@ -1422,7 +1537,7 @@ bestimmt werden kann."
 Roughly in priority order — see §3.4/§3.5 for TTS specifics, §5a-e for
 German-first/memory specifics, §8/§9 for instrumentation/preflight.
 
-**Resolved across sessions #3-6 (previously listed here, no longer open):**
+**Resolved across sessions #3-7 (previously listed here, no longer open):**
 honorific-default question · Chatterbox connection reuse/circuit
 breaker/connect-timeout · streaming queue backpressure · sentence-final
 numbers · ports/phone numbers · memory candidate/confirmed tiers +
@@ -1430,14 +1545,21 @@ reinforcement · value-based reinforcement-vs-supersede · sensitive-topic
 risk gate · German memory rendering/commands/why-query · TTS startup
 warmup contention · 3 CRITICAL bugs from the memory/concurrency reviews
 (§5d/§5e) · real latency instrumentation (§8) · startup preflight script
-(§9) · cancellable/bounded contextual-ack synthesis + its session #6
+(§9) · cancellable/bounded contextual-ack synthesis + its session #6/#7
 stale-Piper-fallback gap (§3.4) · polarity-reversal memory bug + its
 session #6 escalation gap (§5d) · central PrivacyGate P0 + its session
-#6 audio-ring-buffer/webcam/conversation-persistence/voice-exit gaps
-(§11) · watchdog/Chatterbox-session shutdown gaps (§12) · memory
-decay/consolidation/autonomy-budget (§5d) · FILESYSTEM_OBSERVATION/
-REMOTE_TOOL call-site audit (§11) · systemd --user-vs-system
-inconsistency, resolved in documentation (§13).
+#6/#7 audio-ring-buffer/webcam/conversation-persistence/voice-exit/
+watcher-priority/legacy-mode gaps (§11) · watchdog/Chatterbox-session
+shutdown gaps (§12) · memory decay/consolidation/autonomy-budget +
+session #7's real MERGE addition (§5d) · FILESYSTEM_OBSERVATION/
+REMOTE_TOOL call-site audit (§11) · systemd --user-vs-system install
+strategy, corrected with real evidence and wired into the actual
+control-plane scripts (§13) · **session #7 additions**: shell-command-
+chaining bypass in developer_tools' safety classifier (CRITICAL) ·
+MCP tool-call timeout not cancelling its coroutine · skill_manager
+audit-logging gap + PrivacyGate awareness for it and the pre-existing
+tool_registry audit log · developer_tools confirmation-slot race ·
+confirmed-dead prototype skill deleted.
 
 1. **German-first backlog — ~330-340 strings across ~12 files, see the
    table in §5a.** The single largest remaining piece of work. Still not
@@ -1509,18 +1631,39 @@ inconsistency, resolved in documentation (§13).
     Genuinely needs a session with access to that Windows machine (or
     at minimum the ONNX model files and a way to exercise ONNX Runtime)
     to do responsibly.
-13. **Agentic system audit — skill system, tools, task planner, agents,
-    background tasks, permissions, audit logging, remote/local
-    boundaries, dead/duplicate/prototype paths.** Named this session,
-    not done: this is a substantial standalone research+fix workstream
-    (comparable in scope to the privacy call-site audit, which took
-    most of a session on its own) and squeezing a shallow pass into
-    what remained of this session's budget would have meant either
-    incomplete findings or unverified fixes — neither acceptable per
-    this document's own standards. `skills/system/_in_development/`
-    (currently just `web_navigation`) is the one obvious "not yet
-    active" marker found via a quick grep; no other dead-code markers
-    turned up, but that grep was not a substitute for the real audit.
+13. **Agentic system audit — done in session #7, ~10 findings, the
+    highest-priority ones acted on (see the session #7 summary at the
+    top of this doc and the "resolved" line above); ~6 remain open:**
+    - `core/tool_gate.py` is not actually a permission/security gate
+      despite its name — it only decides whether tool *schemas* are
+      included in the LLM prompt (token-saving), with no authorization/
+      allowlist/capability check anywhere. Any tool the LLM calls
+      executes via `tool_registry.execute_tool()` unconditionally.
+      Rename or build the permission layer the name implies — currently
+      neither has happened.
+    - No skill-level capability/permission model at all —
+      `core/base_skill.py`/`core/skill_manager.py` give every skill full
+      access to `config`/`conversation`/`tts`/`responses` and skills
+      freely `import subprocess`/`os`. Any dropped-in skill directory
+      with a valid manifest loads at the same trust level as core
+      skills. Architectural root cause underlying the chaining bypass
+      fixed this session — that fix closes the one exploitable path
+      found, not the underlying lack of containment.
+    - MCP server config (`config.yaml`'s `mcp_servers` section) is
+      fully trusted — subprocess command/args taken verbatim, full
+      `os.environ` inherited before per-server overrides. Fine for a
+      config file only the local admin edits; no guard if `config.yaml`
+      were ever machine-written by a future self-modification feature.
+    - `TaskPlanner.execute_plan()` can only cancel *between* steps, not
+      a step already mid-execution (e.g. a long web-research fetch) —
+      `cancel()` sets a flag checked at the next loop iteration only.
+    - `Watchdog._run_checks()` has no visibility into `TaskPlanner`'s
+      active plan, or whether `reminder_manager`/`weather_poller`/
+      `news_manager`'s poll threads are still alive — a silently-dead
+      background thread (unhandled exception outside its own try/except)
+      has nothing that detects or restarts it.
+    `skills/system/_in_development/web_navigation/` (confirmed dead by
+    directory-depth, a stale v1.0.0 fork) was deleted this session.
 14. **Generic proactive/event-notification layer** (service/hardware/
     security events, reminders, background-task results, scheduled
     tasks, with policy/severity/destination/channel-adapter concepts,
