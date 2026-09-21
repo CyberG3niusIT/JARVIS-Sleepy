@@ -169,8 +169,8 @@ fun JarvisPermissionRequiredState(
 @Composable
 fun JarvisNotImplementedState(
     modifier: Modifier = Modifier,
-    title: String = "Noch nicht implementiert",
-    body: String = "Diese Fähigkeit ist geplant, aber im Prototyp nicht angebunden.",
+    title: String = "Derzeit nicht verfügbar",
+    body: String = "Diese Funktion ist in dieser App-Version noch nicht verfügbar.",
 ) {
     JarvisStatePanel(
         icon = Icons.Filled.Info,

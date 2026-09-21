@@ -82,9 +82,8 @@ fun MemoryScreen(onBack: () -> Unit) {
         JarvisSectionHeader("Aktueller Zustand")
         JarvisEmptyState(
             modifier = Modifier.padding(horizontal = 16.dp),
-            title = "Keine Memory-Daten angebunden",
-            body = "Der Memory-Speicher ist im Entwurfszustand noch nicht an eine Runtime " +
-                "gebunden. Einträge, Herkunft und Bestätigung werden später hier verwaltet.",
+            title = "Memory derzeit nicht verfügbar",
+            body = "Ein Memory-Speicher ist noch nicht eingerichtet. Es werden keine persönlichen Einträge gespeichert.",
         )
 
         JarvisSectionHeader("Herkunft")
@@ -98,46 +97,8 @@ fun MemoryScreen(onBack: () -> Unit) {
             memoryRules.forEach { (title, detail) -> JarvisListRow(title = title, subtitle = detail) }
         }
 
-        JarvisSectionHeader("Zustandsdemonstration")
-        FootNote("Zustandsdemonstration der Oberfläche. Beispielwerte, keine Gerätedaten und kein Inventar.")
-        JarvisListGroup {
-            demoEntries.forEach { entry ->
-                JarvisListRow(
-                    title = entry.subject?.let { "$it: ${entry.summary}" } ?: entry.summary,
-                    subtitle = memoryProvenanceLabel.getValue(entry.provenance),
-                    trailing = { JarvisStatusTag(state = entry.state, dot = false) },
-                    chevron = true,
-                    onClick = { selectedId = entry.id },
-                )
-            }
-        }
-        FootNote("Antippen öffnet das Detailmuster mit Aktionen zum Ausprobieren, ohne echten Memory-Zugriff.")
-        JarvisActionResultText(message = actionResult.message)
-
-        JarvisSectionHeader("Weiterentwicklung")
-        JarvisListGroup {
-            JarvisListRow(
-                title = "Konsolidierung",
-                subtitle = "Zusammenführen und Bereinigen bestätigter Inhalte.",
-                trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = "Noch nicht vollständig implementiert", dot = false) },
-            )
-            JarvisListRow(title = "Decay", subtitle = "Alterung und Abwertung nicht mehr belegter Inhalte.", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, dot = false) })
-            JarvisListRow(title = "Autonomie-Budget", subtitle = "Grenze dafür, wie viel JARVIS selbstständig merken darf.", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, dot = false) })
-        }
-        FootNote("Zielarchitektur, im Entwurfszustand noch keine bedienbaren Regler.")
     }
 
-    MemoryDetailSheet(
-        entry = selected,
-        onClose = { selectedId = null },
-        onConfirm = { id -> update(id) { it.copy(confirmationStatus = MemoryConfirmationStatus.CONFIRMED, layer = MemoryLayer.CONFIRMED) }; report("Kandidat als bestätigt markiert.") },
-        onCorrect = { id, next -> update(id) { it.copy(summary = next, confirmationStatus = MemoryConfirmationStatus.CORRECTED) }; report("Wert lokal korrigiert.") },
-        onDiscard = { id -> update(id) { it.copy(confirmationStatus = MemoryConfirmationStatus.DISCARDED) }; report("Eintrag als verworfen markiert.") },
-        onSupersede = { id, note ->
-            update(id) { it.copy(confirmationStatus = MemoryConfirmationStatus.CORRECTED, supersedeNote = note.ifBlank { "Ohne zusätzliche Notiz." }, updatedAt = "gerade eben") }
-            report("Eintrag als ersetzt markiert.")
-        },
-    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

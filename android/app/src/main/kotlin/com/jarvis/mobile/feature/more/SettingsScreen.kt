@@ -11,7 +11,6 @@ import androidx.compose.ui.unit.sp
 import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
 import com.jarvis.mobile.core.designsystem.JarvisSpacing
 import com.jarvis.mobile.core.designsystem.component.JARVIS_MORE_BACK_LABEL
-import com.jarvis.mobile.core.designsystem.component.JarvisExecutionTag
 import com.jarvis.mobile.core.designsystem.component.JarvisListGroup
 import com.jarvis.mobile.core.designsystem.component.JarvisListRow
 import com.jarvis.mobile.core.designsystem.component.JarvisPrivacyTag
@@ -23,7 +22,7 @@ import com.jarvis.mobile.feature.common.DetailScaffold
 import androidx.compose.material3.Text
 
 private const val FIXED = "Festgelegt"
-private const val UNBOUND_STATUS = "Status nicht gebunden"
+private const val UNBOUND_STATUS = "Status nicht verfügbar"
 private const val MANAGED_MODELS = "Verwaltung in Modelle"
 private const val MANAGED_PRIVACY = "Verwaltung in Privacy"
 private const val MANAGED_RUNTIMES = "Verwaltung in Runtimes"
@@ -56,10 +55,10 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         JarvisSectionHeader("Darstellung")
         JarvisListGroup {
-            JarvisListRow(title = "Design", subtitle = "Festgelegtes Designsystem des Prototyps.", trailing = { MarkerRow("Dunkel", FIXED) })
+            JarvisListRow(title = "Design", subtitle = "Die Darstellung ist derzeit nicht änderbar.", trailing = { MarkerRow("Dunkel", FIXED) })
             JarvisListRow(title = "Dichte", subtitle = "Kompakte Systemdichte des festgelegten Designsystems.", trailing = { MarkerRow("Kompakt", FIXED) })
         }
-        FootNote("Festgelegte Darstellung des Prototyps. Es gibt hier keinen Schalter, der eine Einstellung dauerhaft speichern würde.")
+        FootNote("Darstellung und Dichte sind in dieser App-Version festgelegt.")
 
         JarvisSectionHeader("Speicher")
         JarvisListGroup {
@@ -74,28 +73,17 @@ fun SettingsScreen(onBack: () -> Unit) {
         JarvisListGroup {
             JarvisListRow(
                 title = "Hintergrunddienst des Assistenten",
-                subtitle = "Der Assistenzdienst ist technisch vorgesehen, sein Laufzeitzustand ist hier nicht gebunden.",
+                subtitle = "Der Assistenzdienst ist noch nicht eingerichtet.",
                 trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = UNBOUND_STATUS, dot = false) },
             )
         }
 
-        JarvisSectionHeader("Allgemein")
+        JarvisSectionHeader("Verwaltung")
         JarvisListGroup {
             JarvisListRow(
-                title = "Lokale Standardausführung",
-                subtitle = "Anzeige des aktuellen Ausführungsorts der Vergleichsgrundlage.",
-                trailing = { JarvisExecutionTag(where = comparisonBaseline.execution) },
-            )
-            JarvisListRow(
                 title = "Privacy-Modus",
-                subtitle = "Wird vollständig in Privacy verwaltet, hier nur zur Einordnung angezeigt.",
-                trailing = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        JarvisPrivacyTag(mode = comparisonBaseline.privacyMode)
-                        androidx.compose.foundation.layout.Spacer(Modifier.padding(start = JarvisSpacing.sm))
-                        JarvisStatusTag(state = SystemState.DESIGN_STATE, label = MANAGED_PRIVACY, dot = false)
-                    }
-                },
+                subtitle = "Schutzregeln werden unter Privacy verwaltet.",
+                trailing = { JarvisStatusTag(state = SystemState.UNAVAILABLE, label = "Nicht eingerichtet", dot = false) },
             )
             JarvisListRow(
                 title = "Cloud- und Runtime-Auswahl",

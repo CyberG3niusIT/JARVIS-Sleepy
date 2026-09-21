@@ -30,12 +30,8 @@ import com.jarvis.mobile.core.designsystem.component.JarvisListGroup
 import com.jarvis.mobile.core.designsystem.component.JarvisListRow
 import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
 import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
-import com.jarvis.mobile.core.designsystem.component.PrivacyBlock
-import com.jarvis.mobile.core.designsystem.component.RoutingLadderBlock
 import com.jarvis.mobile.core.model.SystemState
 import com.jarvis.mobile.core.model.comparisonBaseline
-import com.jarvis.mobile.core.model.routingLadderShort
-import com.jarvis.mobile.core.model.stateLabel
 
 /**
  * Ported 1:1 from src/components/jarvis/screens/start-screen.tsx.
@@ -48,11 +44,7 @@ import com.jarvis.mobile.core.model.stateLabel
  */
 @Composable
 fun StartScreen(onOpenChat: () -> Unit, onOpenSystem: (() -> Unit)? = null) {
-    val overall = if (comparisonBaseline.runtimeBound) {
-        "Lokale Runtime bereit"
-    } else {
-        "Lokale Runtime noch nicht vollständig eingerichtet"
-    }
+    val overall = if (comparisonBaseline.runtimeBound) "Bereit" else "Lokale KI nicht verfügbar"
 
     Column(
         modifier = Modifier
@@ -61,42 +53,30 @@ fun StartScreen(onOpenChat: () -> Unit, onOpenSystem: (() -> Unit)? = null) {
     ) {
         StatusSummary(headline = overall)
 
-        JarvisSectionHeader("Aktuelle Blocker")
+        JarvisSectionHeader("Einrichtung")
         JarvisListGroup {
             JarvisListRow(
                 title = "Lokales Modell",
-                subtitle = "Modellgestützte lokale Antworten sind erst nach dem Laden eines Modells verfügbar.",
-                trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.localModel) },
+                subtitle = "Lokale Modellantworten sind in dieser App-Version nicht verfügbar.",
+                trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = comparisonBaseline.labels.localModel) },
             )
             JarvisListRow(
                 title = "Berechtigungen",
-                subtitle = "Benötigte Android-Berechtigungen sind noch nicht vollständig freigegeben.",
-                trailing = { JarvisStatusTag(state = SystemState.PERMISSION_REQUIRED, label = comparisonBaseline.labels.permissions) },
+                subtitle = "Die benötigten Android-Zugriffe werden noch nicht vom System geprüft.",
+                trailing = { JarvisStatusTag(state = SystemState.UNAVAILABLE, label = "Status nicht verfügbar") },
             )
         }
-        FootNote("Beides betrifft die volle lokale Fähigkeit. Verwaltet wird es unter System.")
+        FootNote("Modelle und Zugriffe lassen sich unter System einsehen.")
 
-        JarvisSectionHeader("Optionale Runtimes")
+        JarvisSectionHeader("Sleepy-Verbindung")
         JarvisListGroup {
             JarvisListRow(
                 title = "Sleepy",
-                subtitle = "Optionale vertraute Runtime für begrenzte Übergaben.",
-                trailing = { JarvisStatusTag(state = SystemState.UNAVAILABLE, label = comparisonBaseline.labels.sleepy) },
-            )
-            JarvisListRow(
-                title = "Cloud",
-                subtitle = "Optional und nur nach ausdrücklicher Freigabe.",
-                trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.cloud) },
+                subtitle = "Für eine Übergabe muss Sleepy zuerst sicher gekoppelt werden.",
+                trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = "Nicht verfügbar") },
             )
         }
-        FootNote("Sleepy und Cloud sind für den lokalen Betrieb nicht grundsätzlich erforderlich.")
-
-        JarvisSectionHeader("Privacy")
-        PrivacyBlock()
-
-        JarvisSectionHeader("Entscheidungsreihenfolge")
-        RoutingLadderBlock(steps = routingLadderShort, localSteps = 3)
-        FootNote("Kurzform. Die vollständige Reihenfolge steht unter System.")
+        FootNote("Kopplung und Übergabe sind in dieser App-Version noch nicht verfügbar.")
 
         Column(
             modifier = Modifier
@@ -143,11 +123,10 @@ private fun StatusSummary(headline: String) {
                     modifier = Modifier.padding(top = JarvisSpacing.xs),
                 )
             }
-            JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.runtime)
+            JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = "Nicht verfügbar")
         }
         Text(
-            text = "${stateLabel.getValue(SystemState.DESIGN_STATE)}. Keine gemessenen Laufzeitwerte. " +
-                "Standardausführung: ${comparisonBaseline.execution}.",
+            text = "Es sind noch keine verlässlichen Laufzeit- oder Modellinformationen verfügbar.",
             color = JarvisSemanticColor.mutedForeground,
             fontSize = 11.sp,
             lineHeight = 16.sp,

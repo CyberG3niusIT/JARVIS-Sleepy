@@ -89,28 +89,8 @@ fun AgentsScreen(onBack: () -> Unit) {
         JarvisEmptyState(
             modifier = Modifier.padding(horizontal = 16.dp),
             title = "Keine Laufzeitdaten verfügbar",
-            body = "Die Agentenausführung ist im Entwurfszustand nicht an eine Runtime gebunden. " +
-                "Aufgaben, Schritte und Limits erscheinen hier, sobald sie aus der Runtime gelesen werden.",
+            body = "Eine Agenten-Runtime ist noch nicht eingerichtet. Aufgaben, Schritte und Limits erscheinen hier erst, wenn sie aus einer realen Runtime gelesen werden können.",
         )
-
-        JarvisSectionHeader("Zustandsdemonstration")
-        JarvisInlineNotice(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            text = "Zustandsdemonstration der Oberfläche. Beispielwerte, keine Gerätedaten und kein Inventar.",
-        )
-        JarvisListGroup {
-            JarvisListRow(
-                title = demo.name,
-                subtitle = listOfNotNull(demo.purpose, demo.currentTask).joinToString(", "),
-                trailing = { JarvisStatusTag(state = demo.state, dot = false) },
-                chevron = true,
-                onClick = { sheetView = AgentSheetView.DETAIL },
-            )
-        }
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
-            JarvisButton(text = "Demo als fehlgeschlagen markieren", onClick = ::failDemo)
-        }
-        JarvisActionResultText(message = actionResult.message)
 
         JarvisSectionHeader("Sicherheitsgrenzen")
         JarvisListGroup {
@@ -118,16 +98,6 @@ fun AgentsScreen(onBack: () -> Unit) {
         }
     }
 
-    AgentDetailSheet(
-        agent = demo,
-        view = sheetView,
-        onShowDetail = { sheetView = AgentSheetView.DETAIL },
-        onShowError = { sheetView = AgentSheetView.ERROR },
-        onShowActivity = { sheetView = AgentSheetView.ACTIVITY },
-        onClose = { sheetView = AgentSheetView.CLOSED },
-        onCancel = ::cancelTask,
-        onRetry = ::retryTask,
-    )
 }
 
 private enum class AgentSheetView { CLOSED, DETAIL, ERROR, ACTIVITY }

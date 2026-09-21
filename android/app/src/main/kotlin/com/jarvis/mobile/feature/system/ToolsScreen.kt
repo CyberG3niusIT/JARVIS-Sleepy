@@ -21,6 +21,7 @@ import com.jarvis.mobile.core.designsystem.component.JarvisListRow
 import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
 import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
 import com.jarvis.mobile.core.model.CapabilityRow
+import com.jarvis.mobile.core.model.SystemState
 import com.jarvis.mobile.core.model.capabilityRows
 import com.jarvis.mobile.core.model.stateLabel
 import com.jarvis.mobile.feature.common.DetailScaffold
@@ -71,19 +72,12 @@ fun ToolsScreen(onBack: () -> Unit) {
                     title = row.name,
                     subtitle = row.detail,
                     onClick = { selected = row },
-                    trailing = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            JarvisExecutionTag(where = row.execution)
-                            Spacer(Modifier.padding(start = 8.dp))
-                            JarvisStatusTag(state = row.state, label = row.statusLabel, dot = false)
-                        }
-                    },
+                    trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = "Nicht geprüft", dot = false) },
                 )
             }
         }
         Text(
-            text = "Zustände stammen aus der Fähigkeitsprüfung des Projekts, nicht aus einer laufenden " +
-                "Runtime. Eine Fähigkeit antippen zeigt die geprüften Details.",
+            text = "Die technische Verfügbarkeit wird erst angezeigt, sobald die jeweilige Android- oder Runtime-Anbindung eingerichtet ist.",
             color = JarvisSemanticColor.mutedForeground,
             fontSize = 11.sp,
             lineHeight = 16.sp,
@@ -100,15 +94,12 @@ fun ToolsScreen(onBack: () -> Unit) {
         val row = selected
         if (row != null) {
             JarvisDetailField(label = "Beschreibung", value = row.detail)
-            JarvisDetailFieldTag("Ausführungsort") { JarvisExecutionTag(where = row.execution) }
-            JarvisDetailFieldTag("Prüfzustand") { JarvisStatusTag(state = row.state, label = row.statusLabel, dot = false) }
-            JarvisDetailField(label = "Statusbezeichnung", value = row.statusLabel ?: stateLabel.getValue(row.state))
+            JarvisDetailFieldTag("Vorgesehener Ausführungsort") { JarvisExecutionTag(where = row.execution) }
+            JarvisDetailFieldTag("Verfügbarkeit") { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = "Nicht geprüft", dot = false) }
             JarvisDetailField(label = "Berechtigungsabhängigkeit", value = NOT_SET)
             JarvisDetailField(label = "Privacy-Sensibilität", value = NOT_SET)
-            JarvisDetailField(label = "Audit-Entscheidung", value = row.decision.name)
             Text(
-                text = "Diese Ansicht zeigt ausschließlich geprüfte Angaben aus der Fähigkeitsprüfung. " +
-                    "Es gibt hier keinen Schalter und keine Ausführungsfunktion.",
+                text = "Diese Ansicht beschreibt die geplante Fähigkeit. Sie führt keine Aktion aus.",
                 color = JarvisSemanticColor.mutedForeground,
                 fontSize = 11.sp,
                 lineHeight = 16.sp,

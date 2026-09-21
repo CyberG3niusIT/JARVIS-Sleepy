@@ -16,11 +16,18 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -131,7 +138,13 @@ fun JarvisTextField(
     modifier: Modifier = Modifier,
     label: String? = null,
     placeholder: String? = null,
+    minLines: Int = 1,
+    maxLines: Int = Int.MAX_VALUE,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    accessibilityLabel: String? = null,
 ) {
+    var isFocused by remember { mutableStateOf(false) }
     androidx.compose.foundation.layout.Column(modifier = modifier.fillMaxWidth()) {
         if (label != null) {
             Text(
@@ -147,18 +160,34 @@ fun JarvisTextField(
                 .defaultMinSize(minHeight = 48.dp)
                 .clip(RoundedCornerShape(JarvisRadii.sm))
                 .background(JarvisSemanticColor.surface)
-                .border(1.dp, JarvisSemanticColor.border, RoundedCornerShape(JarvisRadii.sm))
+                .border(
+                    if (isFocused) 2.dp else 1.dp,
+                    if (isFocused) JarvisSemanticColor.primary else JarvisSemanticColor.subtleForeground,
+                    RoundedCornerShape(JarvisRadii.sm),
+                )
                 .padding(horizontal = JarvisSpacing.md),
             contentAlignment = Alignment.CenterStart,
         ) {
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
-                textStyle = TextStyle(color = JarvisSemanticColor.foreground, fontSize = 13.sp),
+                textStyle = TextStyle(color = JarvisSemanticColor.foreground, fontSize = 13.sp, lineHeight = 20.sp),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(JarvisSemanticColor.primary),
+                minLines = minLines,
+                maxLines = maxLines,
+                keyboardOptions = keyboardOptions,
+                keyboardActions = keyboardActions,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .defaultMinSize(minHeight = 48.dp),
+                    .defaultMinSize(minHeight = 48.dp)
+                    .onFocusChanged { isFocused = it.isFocused }
+                    .then(
+                        if (accessibilityLabel != null) {
+                            Modifier.semantics { contentDescription = accessibilityLabel }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 decorationBox = { innerTextField ->
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty() && placeholder != null) {

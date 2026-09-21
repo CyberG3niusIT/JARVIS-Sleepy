@@ -8,15 +8,15 @@ package com.jarvis.mobile.core.model
  */
 
 data class ComparisonLabels(
-    val runtime: String = "Runtime nicht gebunden",
-    val localModel: String = "Kein Modell geladen",
+    val runtime: String = "Nicht verfügbar",
+    val localModel: String = "Nicht verfügbar",
     val modelRuntime: String = "LiteRT-LM",
     val execution: String = "LOKAL",
     val sleepy: String = "Nicht verbunden",
-    val sleepyHandoff: String = "Noch nicht implementiert",
+    val sleepyHandoff: String = "Nicht verfügbar",
     val cloud: String = "Nicht konfiguriert",
     val permissions: String = "Berechtigung erforderlich",
-    val backgroundService: String = "Entwurfszustand",
+    val backgroundService: String = "Nicht verfügbar",
 )
 
 data class ComparisonBaseline(

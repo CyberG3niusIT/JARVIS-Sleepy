@@ -8,7 +8,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
-import com.jarvis.mobile.core.designsystem.component.JarvisExecutionTag
 import com.jarvis.mobile.core.designsystem.component.JarvisListGroup
 import com.jarvis.mobile.core.designsystem.component.JarvisListRow
 import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
@@ -39,11 +38,10 @@ fun RuntimesScreen(onBack: () -> Unit) {
         JarvisListGroup {
             JarvisListRow(
                 title = "J.A.R.V.I.S Mobile",
-                subtitle = "Vorgesehene lokale Runtime auf diesem Android-Gerät.",
+                subtitle = "Lokale Ausführung auf diesem Android-Gerät.",
                 trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = labels.runtime, dot = false) },
             )
-            JarvisListRow(title = "Standardausführung", trailing = { JarvisExecutionTag(where = comparisonBaseline.execution) })
-            JarvisListRow(title = "Vorgesehene Inferenz", trailing = { MonoValue(labels.modelRuntime) })
+            JarvisListRow(title = "Geplante Modell-Runtime", trailing = { MonoValue(labels.modelRuntime) })
         }
 
         JarvisSectionHeader("Vertraute Runtime")
@@ -77,9 +75,6 @@ fun RuntimesScreen(onBack: () -> Unit) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
 
-        SleepyPairingSection()
-        TrustInspectionSection()
-        HandoffReviewSection()
     }
 }
 

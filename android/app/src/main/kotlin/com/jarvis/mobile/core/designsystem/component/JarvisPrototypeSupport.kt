@@ -24,11 +24,11 @@ import kotlinx.coroutines.delay
  */
 
 /** Standard closing sentence after a completed prototype interaction. */
-const val JARVIS_DESIGN_STATE_ACTION = "Entwurfszustand, keine Runtime-Aktion ausgeführt."
+const val JARVIS_DESIGN_STATE_ACTION = "Nur lokal vorgemerkt. Es wurde nichts auf dem Gerät ausgeführt."
 
 /** Used where a demo area shows example entries instead of device data. */
 const val JARVIS_DEMO_AREA_NOTE =
-    "Zustandsdemonstration der Oberfläche. Beispielwerte, keine Gerätedaten und kein Inventar."
+    "Lokale Funktionsvorschau mit Beispieldaten. Es werden keine Daten dieses Geräts verwendet."
 
 /** Banner for a screen whose controls are frontend specification only. */
 @Composable

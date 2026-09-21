@@ -90,92 +90,33 @@ fun VoiceScreen(onBack: () -> Unit) {
         JarvisListGroup {
             JarvisListRow(
                 title = "Voice",
-                subtitle = "Die mobile Sprachschicht wird neu aufgebaut und ist noch nicht angebunden.",
+                subtitle = "Sprachfunktionen sind in dieser App-Version derzeit nicht verfügbar.",
                 trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED) },
             )
             JarvisListRow(title = "Mikrofonstatus", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = VOICE_UNBOUND_STATUS, dot = false) })
         }
 
-        JarvisSectionHeader("Zustandsdemonstration")
-        JarvisPrototypeBanner(
-            text = "Zustandsdemonstration der Oberfläche. Beispielwerte, keine Gerätedaten und kein " +
-                "Inventar. Kein Mikrofon, keine STT und keine TTS werden verwendet.",
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = "Aktueller Beispielzustand", color = JarvisSemanticColor.foreground, fontSize = 13.sp)
-            JarvisStatusTag(state = currentConfig.tag, label = currentConfig.label)
-        }
-        FootNote(currentConfig.desc)
-
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm),
-        ) {
-            JarvisButton(text = "Sprachinteraktion starten", variant = JarvisButtonVariant.PRIMARY, onClick = {
-                if (voiceState == VoiceState.PERMISSION_REQUIRED || voiceState == VoiceState.PRIVACY_BLOCKED || voiceState == VoiceState.UNAVAILABLE) {
-                    report("Sprachinteraktion kann in diesem Beispielzustand nicht gestartet werden.")
-                } else {
-                    goTo(VoiceState.LISTENING, "Sprachinteraktion gestartet (simuliert).")
-                }
-            })
-            JarvisButton(text = "Zuhören beenden", enabled = voiceState == VoiceState.LISTENING, onClick = {
-                if (voiceState != VoiceState.LISTENING) report("Kein aktives Zuhören zum Beenden.") else goTo(VoiceState.PROCESSING, "Zuhören beendet, Verarbeitung simuliert.")
-            })
-            JarvisButton(text = "Verarbeitung abbrechen", enabled = voiceState == VoiceState.PROCESSING || voiceState == VoiceState.LISTENING, onClick = {
-                if (voiceState != VoiceState.PROCESSING && voiceState != VoiceState.LISTENING) report("Keine laufende Verarbeitung zum Abbrechen.") else goTo(VoiceState.CANCELLED, "Verarbeitung abgebrochen.")
-            })
-            JarvisButton(text = "Sprachausgabe stoppen", enabled = voiceState == VoiceState.SPEAKING, onClick = {
-                if (voiceState != VoiceState.SPEAKING) report("Keine laufende Sprachausgabe zum Stoppen.") else goTo(VoiceState.IDLE, "Sprachausgabe gestoppt.")
-            })
-        }
-        JarvisActionResultText(message = actionResult.message)
-
-        JarvisSectionHeader("Zustand wählen")
-        JarvisListGroup(modifier = Modifier.selectableGroup()) {
-            voiceStateOrder.forEach { id ->
-                val cfg = voiceStateConfig.getValue(id)
-                JarvisListRow(
-                    title = cfg.label,
-                    subtitle = cfg.desc,
-                    selected = id == voiceState,
-                    trailing = { JarvisStatusTag(state = cfg.tag, label = cfg.label, dot = false) },
-                    onClick = { goTo(id, "Beispielzustand \"${cfg.label}\" ausgewählt.") },
-                )
-            }
-        }
-        FootNote("Die Auswahl dient allein der Ansicht jedes möglichen Zustands und verändert nur den lokalen Vorschauzustand dieser Ansicht.")
-
-        JarvisSectionHeader("Wake Word") { JarvisButton(text = "Konfigurieren", onClick = { wakeWordSheetOpen = true }) }
+        JarvisSectionHeader("Wake Word")
         JarvisListGroup {
-            JarvisListRow(title = "Aktivierung", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = if (wakeWordEnabled) "Aktiviert (Entwurf)" else "Deaktiviert", dot = false) })
-            JarvisListRow(title = "Engine", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = VOICE_UNBOUND, dot = false) })
-            JarvisListRow(title = "Schlüsselwort", trailing = { MonoValue(keyword.ifBlank { VOICE_UNBOUND }) })
+            JarvisListRow(title = "Wake Word", trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, dot = false) })
         }
-        FootNote("Die Erkennung des Schlüsselworts soll lokal auf dem Gerät laufen. Engine wird erst festgelegt, wenn die mobile Sprachschicht steht. Die Werte hier sind reine Oberflächen-Beispiele.")
+        FootNote("Eine lokale Wake-Word-Engine ist noch nicht eingerichtet.")
 
-        JarvisSectionHeader("Spracherkennung") { JarvisButton(text = "Konfigurieren", onClick = { sttSheetOpen = true }) }
+        JarvisSectionHeader("Spracherkennung")
         JarvisListGroup {
             JarvisListRow(title = "STT", trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, dot = false) })
-            JarvisListRow(title = "Sprache", subtitle = "Produktsprache der Anwendung, kein erkannter Laufzeitwert.", trailing = { MonoValue(sttLanguage) })
         }
-        FootNote("Ziel ist eine lokale Transkription auf dem Gerät. Modell, Laufzeit und Güte werden erst angezeigt, wenn sie wirklich gemessen werden.")
+        FootNote("Modell, Laufzeit und Qualität werden erst angezeigt, wenn eine reale Spracherkennung verfügbar ist.")
 
-        JarvisSectionHeader("Sprachausgabe") { JarvisButton(text = "Konfigurieren", onClick = { ttsSheetOpen = true }) }
+        JarvisSectionHeader("Sprachausgabe")
         JarvisListGroup {
             JarvisListRow(title = "TTS", trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, dot = false) })
-            JarvisListRow(title = "Stimme", subtitle = "Oberflächen-Beispiel, kein echtes Stimmprofil.", trailing = { MonoValue(ttsVoice) })
         }
 
         JarvisSectionHeader("Privacy")
         JarvisInlineNotice(
             modifier = Modifier.padding(horizontal = 16.dp),
-            text = "Sprachaufnahme muss dem zentralen PrivacyGate folgen. In PRIVACY sind " +
-                "geschützte Mikrofon- und STT-Pfade gesperrt, PRIVACY_LOCK kann strengere Grenzen " +
-                "erzwingen. Das Gate ist im Entwurfszustand noch nicht verdrahtet.",
+            text = "Sprachfunktionen bleiben deaktiviert, bis Mikrofonzugriff und verbindliche Privacy-Regeln eingerichtet sind.",
         )
     }
 

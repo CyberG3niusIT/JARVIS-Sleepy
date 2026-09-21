@@ -2,9 +2,7 @@ package com.jarvis.mobile.feature.system
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,18 +15,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
 import com.jarvis.mobile.core.designsystem.JarvisSpacing
-import com.jarvis.mobile.core.designsystem.component.JarvisExecutionTag
 import com.jarvis.mobile.core.designsystem.component.JarvisListGroup
 import com.jarvis.mobile.core.designsystem.component.JarvisListRow
-import com.jarvis.mobile.core.designsystem.component.JarvisPrivacyTag
 import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
 import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
-import com.jarvis.mobile.core.designsystem.component.PrivacyBlock
-import com.jarvis.mobile.core.designsystem.component.RoutingLadderBlock
 import com.jarvis.mobile.core.model.AreaId
 import com.jarvis.mobile.core.model.SystemState
 import com.jarvis.mobile.core.model.comparisonBaseline
-import com.jarvis.mobile.core.model.stateLabel
 import com.jarvis.mobile.core.model.systemDestinations
 import com.jarvis.mobile.navigation.JarvisRoute
 
@@ -50,17 +43,9 @@ private val systemDetailRoutes: Map<AreaId, String> = mapOf(
     AreaId.DIAGNOSTICS to JarvisRoute.SYSTEM_DIAGNOSTICS,
 )
 
-private val areaStatusLabel: Map<AreaId, String> = mapOf(
-    AreaId.MODELS to comparisonBaseline.labels.localModel,
-    AreaId.PERMISSIONS to comparisonBaseline.labels.permissions,
-    AreaId.PRIVACY to comparisonBaseline.privacyMode.name,
-    AreaId.RUNTIMES to comparisonBaseline.labels.runtime,
-    AreaId.DIAGNOSTICS to "Keine Runtime-Daten",
-)
-
-private val areaDisplayState: Map<AreaId, SystemState> = mapOf(
-    AreaId.RUNTIMES to SystemState.DESIGN_STATE,
-)
+private val setupAreas = setOf(AreaId.MODELS, AreaId.PERMISSIONS, AreaId.RUNTIMES)
+private val operationAreas = setOf(AreaId.DEVICE, AreaId.PRIVACY, AreaId.DIAGNOSTICS)
+private val capabilityAreas = setOf(AreaId.TOOLS, AreaId.AGENTS)
 
 @Composable
 fun SystemOverviewScreen(onOpenArea: (String) -> Unit) {
@@ -86,80 +71,39 @@ fun SystemOverviewScreen(onOpenArea: (String) -> Unit) {
             )
         }
 
-        JarvisSectionHeader("Systemzustand")
+        JarvisSectionHeader("Einrichtung")
         JarvisListGroup {
-            JarvisListRow(title = "Lokale Runtime", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.runtime) })
-            JarvisListRow(title = "Standardausführung", trailing = { JarvisExecutionTag(where = comparisonBaseline.execution) })
-            JarvisListRow(title = "Privacy", trailing = { JarvisPrivacyTag(mode = comparisonBaseline.privacyMode) })
-            JarvisListRow(title = "Berechtigungen", trailing = { JarvisStatusTag(state = SystemState.PERMISSION_REQUIRED, label = comparisonBaseline.labels.permissions) })
-            JarvisListRow(title = "Lokales Modell", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.localModel) })
+            JarvisListRow(title = "Lokale Runtime", trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = "Nicht verfügbar") })
+            JarvisListRow(title = "Lokales Modell", trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = comparisonBaseline.labels.localModel) })
+            JarvisListRow(title = "Berechtigungen", trailing = { JarvisStatusTag(state = SystemState.UNAVAILABLE, label = "Status nicht verfügbar") })
+            JarvisListRow(title = "Sleepy", trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = "Nicht verfügbar") })
         }
 
-        JarvisSectionHeader("Kontrollbereiche")
+        JarvisSectionHeader("Modelle & Verbindungen")
         JarvisListGroup {
-            systemDestinations.forEach { area ->
-                val display = areaDisplayState[area.id] ?: area.state
+            systemDestinations.filter { it.id in setupAreas }.forEach { area ->
                 val route = systemDetailRoutes[area.id]
                 JarvisListRow(
                     title = area.label,
                     subtitle = area.purpose,
-                    trailing = { JarvisStatusTag(state = display, label = areaStatusLabel[area.id] ?: stateLabel.getValue(display), dot = false) },
                     chevron = route != null,
                     onClick = route?.let { { onOpenArea(it) } },
                 )
             }
         }
-        Text(
-            text = "Teile der Tools und Android-Aktionen hängen von freigegebenen Berechtigungen ab.",
-            color = JarvisSemanticColor.mutedForeground,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = JarvisSpacing.lg, vertical = JarvisSpacing.sm),
-        )
-
-        JarvisSectionHeader("Benötigt Aufmerksamkeit")
+        JarvisSectionHeader("Gerät & Betrieb")
         JarvisListGroup {
-            JarvisListRow(
-                title = "Lokales Modell",
-                subtitle = "Modellgestützte lokale Antworten sind erst nach dem Laden eines Modells verfügbar.",
-                trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.localModel) },
-            )
-            JarvisListRow(
-                title = "Berechtigungen",
-                subtitle = "Benötigte Android-Berechtigungen sind noch nicht vollständig freigegeben.",
-                trailing = { JarvisStatusTag(state = SystemState.PERMISSION_REQUIRED, label = comparisonBaseline.labels.permissions) },
-            )
+            systemDestinations.filter { it.id in operationAreas }.forEach { area ->
+                val route = systemDetailRoutes[area.id]
+                JarvisListRow(title = area.label, subtitle = area.purpose, chevron = route != null, onClick = route?.let { { onOpenArea(it) } })
+            }
         }
-        Text(
-            text = "Sleepy und Cloud sind optional und zählen deshalb nicht als Blocker.",
-            color = JarvisSemanticColor.mutedForeground,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = JarvisSpacing.lg, vertical = JarvisSpacing.sm),
-        )
-
-        JarvisSectionHeader("Privacy")
-        PrivacyBlock()
-
-        JarvisSectionHeader("Vollständige Entscheidungsreihenfolge")
-        RoutingLadderBlock()
-        Text(
-            text = "Deterministische Android-Aktionen zuerst, lokale Skills und Tools vor generativer " +
-                "Antwort, lokales Modell vor vertrauenswürdiger Runtime. Sleepy bleibt optional, ein " +
-                "Cloud-Fallback nur nach Freigabe. Kein stiller Fallback.",
-            color = JarvisSemanticColor.mutedForeground,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = JarvisSpacing.lg, vertical = JarvisSpacing.sm),
-        )
-
-        Text(
-            text = "${stateLabel.getValue(SystemState.DESIGN_STATE)}. Angezeigte Zustände stammen aus der " +
-                "aktuellen Projektbasis, nicht aus gemessener Laufzeittelemetrie.",
-            color = JarvisSemanticColor.mutedForeground,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = JarvisSpacing.lg, vertical = JarvisSpacing.xl),
-        )
+        JarvisSectionHeader("Funktionen")
+        JarvisListGroup {
+            systemDestinations.filter { it.id in capabilityAreas }.forEach { area ->
+                val route = systemDetailRoutes[area.id]
+                JarvisListRow(title = area.label, subtitle = area.purpose, chevron = route != null, onClick = route?.let { { onOpenArea(it) } })
+            }
+        }
     }
 }

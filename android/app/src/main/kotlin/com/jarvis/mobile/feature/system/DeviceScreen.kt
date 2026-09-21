@@ -17,7 +17,7 @@ import com.jarvis.mobile.core.model.comparisonBaseline
 import com.jarvis.mobile.feature.common.DetailScaffold
 import androidx.compose.material3.Text
 
-private const val UNBOUND = "Nicht gebunden"
+private const val UNBOUND = "Status nicht verfügbar"
 
 private val androidCapabilities = listOf(
     "Systemsteuerung" to "Systemnahe Einstellungen und Schalter.",
@@ -67,12 +67,10 @@ fun DeviceScreen(onBack: () -> Unit) {
             }
         }
 
-        JarvisSectionHeader("Prüfprinzip")
+        JarvisSectionHeader("Datengrundlage")
         JarvisInlineNotice(
             modifier = Modifier.padding(horizontal = 16.dp),
-            text = "Geräte- und Hardwareeigenschaften werden ausschließlich über echte Android-APIs " +
-                "ermittelt. Es wird nichts als unterstützt angenommen, und fehlende Werte bleiben " +
-                "sichtbar ungebunden.",
+            text = "Geräte- und Hardwareeigenschaften erscheinen erst, wenn sie über Android zuverlässig gelesen werden können.",
         )
     }
 }

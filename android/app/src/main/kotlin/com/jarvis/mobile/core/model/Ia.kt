@@ -35,9 +35,9 @@ val stateLabel: Map<SystemState, String> = mapOf(
     SystemState.PERMISSION_REQUIRED to "Berechtigung erforderlich",
     SystemState.PRIVACY_BLOCKED to "Durch Privacy Mode blockiert",
     SystemState.ERROR to "Fehler",
-    SystemState.NOT_IMPLEMENTED to "Noch nicht implementiert",
+    SystemState.NOT_IMPLEMENTED to "Derzeit nicht verfügbar",
     SystemState.DEGRADED to "Degradiert",
-    SystemState.DESIGN_STATE to "Entwurfszustand",
+    SystemState.DESIGN_STATE to "Nicht eingerichtet",
 )
 
 /** Brand Spec Sec.16 - Execution Location. */
@@ -306,7 +306,7 @@ val capabilityRows: List<CapabilityRow> = listOf(
         execution = ExecutionLocation.LOKAL,
         decision = CapabilityDecision.MODIFY,
         state = SystemState.DESIGN_STATE,
-        statusLabel = "Status nicht gebunden",
+        statusLabel = "Status nicht verfügbar",
     ),
     CapabilityRow(
         name = "Handoff an Sleepy",

@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jarvis.mobile.core.model.comparisonBaseline
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,9 +15,8 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 data class ChatUiState(
-    val messages: List<ChatMessage> = demoConversation,
-    /** Static part of the transcript, matching the web reference's baseCount. */
-    val baseCount: Int = demoConversation.size,
+    val messages: List<ChatMessage> = emptyList(),
+    val baseCount: Int = 0,
     val draft: String = "",
     val attachments: List<ChatAttachment> = emptyList(),
     val attachmentError: String? = null,
@@ -127,12 +125,9 @@ class ChatViewModel @Inject constructor(
         val stamp = System.currentTimeMillis()
         val note = if (sent.isNotEmpty()) {
             val countLabel = if (sent.size == 1) "1 Datei angehängt" else "${sent.size} Dateien angehängt"
-            "$countLabel. Analyse ist erst nach Runtime-Anbindung verfügbar. " +
-                "${comparisonBaseline.labels.runtime}, ${comparisonBaseline.labels.localModel}."
+            "$countLabel. Eine Inhaltsanalyse ist derzeit nicht verfügbar."
         } else {
-            "Keine Antwort erzeugt. ${comparisonBaseline.labels.runtime}, " +
-                "${comparisonBaseline.labels.localModel}. Der Prototyp übernimmt die Eingabe " +
-                "nur als Entwurfszustand."
+            "Deine Nachricht wurde übernommen. Antworten sind in dieser App-Version derzeit nicht verfügbar."
         }
         _uiState.value = state.copy(
             messages = state.messages +

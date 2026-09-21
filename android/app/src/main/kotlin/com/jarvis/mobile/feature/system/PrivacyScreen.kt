@@ -94,63 +94,28 @@ fun PrivacyScreen(onBack: () -> Unit) {
     ) {
         JarvisInlineNotice(
             modifier = Modifier.padding(horizontal = 16.dp),
-            text = "Das echte PrivacyGate ist hier nicht gebunden. Diese Auswahl ist eine " +
-                "lokale Vorschau der Moduswechsel-Abfolge und ändert keine Laufzeit-Policy.",
+            text = "Privacy-Regeln sind noch nicht technisch aktiviert. Die App zeigt deshalb keinen aktiven Schutzmodus an.",
         )
 
-        JarvisSectionHeader("Modus auswählen")
-        JarvisListGroup(modifier = Modifier.selectableGroup()) {
-            privacyModes.forEach { mode ->
-                JarvisListRow(
-                    title = mode.name,
-                    subtitle = privacyModeCopy.getValue(mode),
-                    selected = mode == selectedMode,
-                    onClick = { requestMode(mode) },
-                    trailing = {
-                        if (mode == selectedMode) {
-                            JarvisStatusTag(state = SystemState.DESIGN_STATE, label = "Ausgewählt (Entwurf)", dot = false)
-                        } else {
-                            JarvisPrivacyTag(mode = mode)
-                        }
-                    },
-                )
-            }
+        JarvisSectionHeader("Status")
+        JarvisListGroup {
+            JarvisListRow(
+                title = "Zentrale Schutzregeln",
+                subtitle = "Eine verbindliche Zuordnung von Fähigkeiten zu Privacy-Modi steht noch aus.",
+                trailing = { JarvisStatusTag(state = SystemState.UNAVAILABLE, label = "Nicht eingerichtet", dot = false) },
+            )
         }
-        Text(
-            text = "Ein Wechsel in einen strengeren Modus zeigt zuerst eine Erklärung der " +
-                "betroffenen Fähigkeiten. PRIVACY_LOCK und die Rückkehr zu NORMAL verlangen " +
-                "zusätzlich eine ausdrückliche Bestätigung.",
-            color = JarvisSemanticColor.mutedForeground,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        JarvisActionResultText(message = actionResult.message)
-        Text(
-            text = "Referenzwert der Projektbasis: ${baseline.name} (unverändert, unabhängig von dieser Auswahl).",
-            color = JarvisSemanticColor.mutedForeground,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-        )
 
         JarvisSectionHeader("Geschützte Fähigkeiten")
         JarvisListGroup {
             protectedGroups.forEach { JarvisListRow(title = it.title, subtitle = it.detail) }
         }
 
-        JarvisSectionHeader("Garantien")
+        JarvisSectionHeader("Vorgesehene Schutzprinzipien")
         JarvisListGroup {
             privacyGuarantees.forEach { JarvisListRow(title = it) }
         }
 
-        JarvisSectionHeader("Status")
-        JarvisInlineNotice(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            text = "Das zentrale Privacy-Gate ist noch nicht implementiert. Beschrieben ist die " +
-                "Zielarchitektur: eine einzige Prüfstelle, die geschützte Fähigkeiten vor der " +
-                "Ausführung sperrt, statt sie nachträglich zu filtern.",
-        )
     }
 
     val explainTarget = (overlay as? PrivacyOverlay.Explain)?.target

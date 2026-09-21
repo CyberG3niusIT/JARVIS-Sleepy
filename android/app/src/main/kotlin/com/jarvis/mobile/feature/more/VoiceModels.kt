@@ -5,7 +5,7 @@ import com.jarvis.mobile.core.model.SystemState
 /** Ported 1:1 from src/components/jarvis/screens/voice-screen.tsx. */
 
 const val VOICE_UNBOUND = "Nicht gebunden"
-const val VOICE_UNBOUND_STATUS = "Status nicht gebunden"
+const val VOICE_UNBOUND_STATUS = "Status nicht verfügbar"
 
 enum class VoiceState { IDLE, LISTENING, PROCESSING, SPEAKING, CANCELLED, PERMISSION_REQUIRED, PRIVACY_BLOCKED, UNAVAILABLE, ERROR }
 

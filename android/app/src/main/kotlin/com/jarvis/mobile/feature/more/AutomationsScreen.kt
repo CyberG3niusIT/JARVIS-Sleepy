@@ -102,37 +102,6 @@ private val EditorSessionSaver = androidx.compose.runtime.saveable.Saver<EditorS
  */
 @Composable
 fun AutomationsScreen(onBack: () -> Unit) {
-    var automations by rememberSaveable(stateSaver = AutomationsListSaver) { mutableStateOf(emptyList()) }
-    var editorSession by rememberSaveable(stateSaver = EditorSessionSaver) { mutableStateOf(null) }
-    var sheetOpen by rememberSaveable { mutableStateOf(false) }
-    val actionResult = rememberJarvisActionResult()
-    val scope = rememberCoroutineScope()
-
-    val session = editorSession
-    if (session != null) {
-        AutomationEditorScreen(
-            mode = session.mode,
-            initial = session.draft,
-            onSave = { saved ->
-                automations = if (automations.any { it.id == saved.id }) {
-                    automations.map { if (it.id == saved.id) saved else it }
-                } else {
-                    automations + saved
-                }
-                editorSession = EditorSession(AutomationEditorMode.EDIT, saved)
-            },
-            onDelete = if (session.mode == AutomationEditorMode.EDIT) {
-                {
-                    automations = automations.filterNot { it.id == session.draft.id }
-                    editorSession = null
-                    scope.launch { actionResult.report("Automation lokal entfernt. Entwurfszustand, keine Runtime-Aktion ausgeführt.") }
-                }
-            } else null,
-            onClose = { editorSession = null },
-        )
-        return
-    }
-
     DetailScaffold(
         title = "Automationen",
         subtitle = "Makros, Zeitpläne und Routinen",
@@ -140,37 +109,11 @@ fun AutomationsScreen(onBack: () -> Unit) {
         backLabel = JARVIS_MORE_BACK_LABEL,
     ) {
         JarvisSectionHeader("Automationen")
-        if (automations.isEmpty()) {
-            JarvisEmptyState(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                title = "Keine Automationsdaten angebunden",
-                body = "Die Automationsverwaltung ist im Entwurfszustand noch nicht an eine Runtime " +
-                    "gebunden. Der Editor unten legt Einträge nur lokal in dieser Sitzung an.",
-            )
-        } else {
-            JarvisInlineNotice(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                text = "Zustandsdemonstration der Oberfläche. Beispielwerte, keine Gerätedaten und " +
-                    "kein Inventar. Liste unten ist lokaler Editor-Zustand.",
-            )
-            JarvisListGroup {
-                automations.forEach { a ->
-                    JarvisListRow(
-                        title = a.name.ifBlank { "Ohne Namen" },
-                        subtitle = "${automationTypeLabel.getValue(a.type)}, ${draftSummary(a)}",
-                        leading = { JarvisStatusTag(state = if (a.enabled) SystemState.READY else SystemState.OFFLINE, label = if (a.enabled) "Aktiviert" else "Deaktiviert") },
-                        trailing = { JarvisExecutionTag(where = a.runtime) },
-                        chevron = true,
-                        onClick = { editorSession = EditorSession(AutomationEditorMode.EDIT, a) },
-                    )
-                }
-            }
-        }
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.lg)) {
-            JarvisButton(text = "Neue Automation", variant = JarvisButtonVariant.PRIMARY, fullWidth = true, onClick = { sheetOpen = true })
-        }
-        JarvisActionResultText(message = actionResult.message)
-
+        JarvisEmptyState(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            title = "Automationen nicht verfügbar",
+            body = "Diese App-Version führt noch keine Makros, Zeitpläne oder Routinen aus.",
+        )
         JarvisSectionHeader("Typen")
         JarvisListGroup {
             automationTypeRows.forEach { (type, detail) -> JarvisListRow(title = automationTypeLabel.getValue(type), subtitle = detail) }
@@ -182,14 +125,6 @@ fun AutomationsScreen(onBack: () -> Unit) {
         }
     }
 
-    NewAutomationSheet(
-        open = sheetOpen,
-        onClose = { sheetOpen = false },
-        onOpenEditor = { type ->
-            sheetOpen = false
-            editorSession = EditorSession(AutomationEditorMode.CREATE, createEmptyDraft(type))
-        },
-    )
 }
 
 @Composable

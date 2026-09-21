@@ -60,7 +60,7 @@ fun ModelsScreen(onBack: () -> Unit) {
         JarvisListGroup {
             JarvisListRow(
                 title = "Geladenes Modell",
-                trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.localModel) },
+                trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = comparisonBaseline.labels.localModel) },
             )
             JarvisListRow(
                 title = "Lokale Runtime",
@@ -69,29 +69,16 @@ fun ModelsScreen(onBack: () -> Unit) {
             )
             JarvisListRow(
                 title = "Runtime-Bindung",
-                trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = comparisonBaseline.labels.runtime) },
+                trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = comparisonBaseline.labels.runtime) },
             )
         }
 
         JarvisSectionHeader("Lokale Modelle")
         JarvisEmptyState(
             modifier = Modifier.padding(horizontal = 16.dp),
-            title = "Keine Modelldaten verfügbar",
-            body = "Die lokale Modellregistrierung ist im Prototyp noch nicht an eine Runtime " +
-                "gebunden. Modelle können später lokal importiert oder über den Modellkatalog " +
-                "verwaltet werden.",
+            title = "Modellverwaltung nicht verfügbar",
+            body = "Eine lokale Modell-Runtime ist in dieser App-Version nicht verfügbar. Deshalb können Modelle derzeit weder geprüft noch importiert oder geladen werden.",
         )
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
-            JarvisButton(
-                text = "Modell hinzufügen",
-                variant = JarvisButtonVariant.PRIMARY,
-                fullWidth = true,
-                onClick = { sheetOpen = true },
-            )
-        }
-        JarvisActionResultText(message = actionResult.message)
-
-        ModelsDemoSection()
 
         JarvisSectionHeader("Verwaltung")
         JarvisListGroup {
@@ -100,7 +87,7 @@ fun ModelsScreen(onBack: () -> Unit) {
             }
         }
         Text(
-            text = "Fähigkeiten der Modellverwaltung. Es werden hier keine laufenden Runtime-Vorgänge simuliert.",
+            text = "Diese Funktionen benötigen zuerst eine unterstützte lokale Modell-Runtime und ein festgelegtes Modellformat.",
             color = JarvisSemanticColor.mutedForeground,
             fontSize = 11.sp,
             lineHeight = 16.sp,
@@ -108,44 +95,6 @@ fun ModelsScreen(onBack: () -> Unit) {
         )
     }
 
-    JarvisBottomSheet(
-        open = sheetOpen,
-        onClose = ::closeSheet,
-        title = when (choice) {
-            AddModelChoice.IMPORT -> "Lokale Datei importieren"
-            AddModelChoice.KATALOG -> "Modellkatalog"
-            null -> "Modell hinzufügen"
-        },
-    ) {
-        when (choice) {
-            AddModelChoice.IMPORT -> Column {
-                ModelImportFlow(onDone = { report(it); closeSheet() })
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
-                    JarvisButton(text = "Zurück", onClick = { choice = null })
-                }
-            }
-            AddModelChoice.KATALOG -> Column {
-                ModelCatalogBrowser(onDone = { report(it); closeSheet() })
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = JarvisSpacing.sm)) {
-                    JarvisButton(text = "Zurück", onClick = { choice = null })
-                }
-            }
-            null -> JarvisListGroup {
-                JarvisListRow(
-                    title = "Lokale Datei importieren",
-                    subtitle = "Unterstützte lokale Modelldatei auswählen.",
-                    chevron = true,
-                    onClick = { choice = AddModelChoice.IMPORT },
-                )
-                JarvisListRow(
-                    title = "Modellkatalog öffnen",
-                    subtitle = "Kompatibles Modell auswählen und lokal herunterladen.",
-                    chevron = true,
-                    onClick = { choice = AddModelChoice.KATALOG },
-                )
-            }
-        }
-    }
 }
 
 private val managementCapabilities = listOf(

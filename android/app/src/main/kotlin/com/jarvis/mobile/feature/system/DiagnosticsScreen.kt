@@ -27,17 +27,15 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
         JarvisSectionHeader("Ausführungshistorie")
         JarvisEmptyState(
             modifier = Modifier.padding(horizontal = 16.dp),
-            title = "Keine Historiendaten angebunden",
-            body = "Spätere Einträge werden lokal gespeichert und dort redigiert, wo es " +
-                "erforderlich ist. Im Entwurfszustand ist keine Historienquelle angebunden.",
+            title = "Ausführungshistorie nicht verfügbar",
+            body = "Eine Ausführungshistorie ist noch nicht eingerichtet.",
         )
 
         JarvisSectionHeader("Crash-Logs")
         JarvisEmptyState(
             modifier = Modifier.padding(horizontal = 16.dp),
-            title = "Keine Logdaten angebunden",
-            body = "Die Absturzprotokollierung ist technisch vorgesehen, im Entwurfszustand " +
-                "ist jedoch keine Logquelle angebunden.",
+            title = "Crash-Logs nicht verfügbar",
+            body = "Die lokale Absturzprotokollierung ist noch nicht eingerichtet.",
         )
 
         JarvisSectionHeader("Redaktion")
@@ -48,11 +46,8 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
         JarvisSectionHeader("Diagnose")
         JarvisInlineNotice(
             modifier = Modifier.padding(horizontal = 16.dp),
-            text = "Ein lokaler Export ist im Entwurfszustand nicht verfügbar. Sobald er " +
-                "umgesetzt ist, verlässt eine Diagnosedatei das Gerät nur auf ausdrückliche Freigabe.",
+            text = "Ein Diagnoseexport ist derzeit nicht verfügbar. Später verlässt eine Diagnosedatei das Gerät nur nach ausdrücklicher Freigabe.",
         )
-
-        DiagnosticsDemoSection()
     }
 }
 

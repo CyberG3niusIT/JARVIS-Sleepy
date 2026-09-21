@@ -23,13 +23,12 @@ specified anywhere in `src/components/jarvis/` or `src/lib/jarvis/`.
 
 **What was built instead.** `core/runtime/SleepyRuntimeGateway` describes
 only the connection *state* (`SystemState`, paired: Boolean) that the UI
-needs. `RuntimesDemoSections.kt` ports the web reference's full abstract
-pairing state machine (`SleepyPairingSection`), trust inspection and handoff
-review as a clearly labelled Zustandsdemonstration - deliberately without a
-pairing code, QR payload, IP address or certificate fingerprint anywhere, per
-the web reference itself. No transport, discovery or crypto code exists;
-`RuntimesScreen`'s baseline rows and the Sleepy rows on Start/System still
-render `UNAVAILABLE` / `NOT_IMPLEMENTED`, matching the web baseline exactly.
+needs. `RuntimesDemoSections.kt` retains the web reference's abstract pairing
+state machine, trust inspection and handoff review as reference code, but it
+is not mounted in the product screen while no real transport exists. No
+transport, discovery or crypto code exists; `RuntimesScreen` and the Sleepy
+rows on Start/System therefore report the feature as unavailable instead of
+offering a simulated pairing path.
 
 ## 2. Privacy enforcement rules per capability
 
@@ -60,13 +59,12 @@ the request sequence when several are needed for one action?
 
 **What was built instead.** `core/runtime/PermissionGateway` exposes only
 `isGranted(permission: String): Boolean`; `DesignStatePermissionGateway`
-always returns `false`. `PermissionsScreen` shows the overall "Android-
-Berechtigungen" status as `PERMISSION_REQUIRED` and each of the eight
-individual access areas as an unbound design state ("Status nicht
-gebunden"), matching the web reference exactly, without wiring a real
-`ActivityResultContracts.RequestPermission` flow yet. The per-group detail
-sheet's demo-state selector is a local Compose preview only, per the web
-reference's own `DEMO_AREA_NOTE`.
+always returns `false`. Because that result cannot distinguish denied from
+unmeasured permissions, `PermissionsScreen` reports that permission status is
+not available and does not offer a request action. The earlier per-group
+demo-state selector remains reference code only and is not mounted. A real
+`ActivityResultContracts.RequestPermission` and special-access flow is still
+required before the UI may claim that access was checked, granted or denied.
 
 ## 4. Local model runtime binding (LiteRT-LM)
 
@@ -75,7 +73,9 @@ loading API) actually backs "Lokales Modell" / "Modell-Runtime", and where
 do downloaded model files live on disk?
 
 **What was built instead.** `core/runtime/LocalRuntimeGateway` exposes
-`state` and `boundModelName` only; `DesignStateLocalRuntimeGateway` reports
-`DESIGN_STATE` / `null`, matching `comparisonBaseline.runtimeBound = false`.
-No LiteRT dependency was added, since adding one without an actual model
-format decision would just be a placeholder dependency.
+`state` and `boundModelName` only; `DesignStateLocalRuntimeGateway` still
+reports `DESIGN_STATE` / `null` internally. Product screens translate that
+absence into "Nicht verfügbar" and never present the configured local-first
+preference as active execution. No LiteRT dependency was added, since adding
+one without an actual model format decision would just be a placeholder
+dependency.

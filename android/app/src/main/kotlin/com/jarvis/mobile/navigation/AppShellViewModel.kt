@@ -18,8 +18,8 @@ import javax.inject.Inject
 data class AppShellUiState(
     val runtimeState: SystemState = SystemState.DESIGN_STATE,
     val runtimeLabel: String = comparisonBaseline.labels.runtime,
-    val execution: ExecutionLocation = comparisonBaseline.execution,
-    val privacy: PrivacyMode = comparisonBaseline.privacyMode,
+    val execution: ExecutionLocation? = null,
+    val privacy: PrivacyMode? = null,
 )
 
 /**
@@ -36,12 +36,14 @@ class AppShellViewModel @Inject constructor(
     val uiState: StateFlow<AppShellUiState> = combine(
         localRuntimeGateway.state,
         privacyGate.mode,
-    ) { runtimeState, privacy ->
+    ) { runtimeState, _ ->
         AppShellUiState(
             runtimeState = runtimeState,
             runtimeLabel = comparisonBaseline.labels.runtime,
-            execution = comparisonBaseline.execution,
-            privacy = privacy,
+            execution = comparisonBaseline.execution.takeIf {
+                runtimeState == SystemState.READY || runtimeState == SystemState.LOCAL
+            },
+            privacy = null,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppShellUiState())
 }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,6 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -93,7 +99,9 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
         val attachmentError = state.attachmentError
         if (attachmentError != null) {
             JarvisInlineNotice(
-                modifier = Modifier.padding(horizontal = JarvisSpacing.md, vertical = JarvisSpacing.sm),
+                modifier = Modifier
+                    .padding(horizontal = JarvisSpacing.md, vertical = JarvisSpacing.sm)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
                 tone = JarvisNoticeTone.ERROR,
                 text = attachmentError,
             )
@@ -119,7 +127,7 @@ private fun ChatHeader(showReset: Boolean, onReset: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (showReset) "Prototypbeispiel" else "Neue Unterhaltung",
+            text = "Unterhaltung",
             color = JarvisSemanticColor.mutedForeground,
             fontSize = 11.sp,
         )
@@ -147,7 +155,7 @@ private fun EmptyConversation(onPick: (String) -> Unit) {
     ) {
         Text(text = "Was soll ich erledigen?", color = JarvisSemanticColor.foreground, fontSize = 15.sp, lineHeight = 20.sp)
         Text(
-            text = "Lokale Aktionen, Fragen oder Abläufe. Standardausführung: LOKAL.",
+            text = "Nachrichten und Anhänge können vorbereitet werden. Antworten und Aktionen sind derzeit nicht verfügbar.",
             color = JarvisSemanticColor.mutedForeground,
             fontSize = 12.sp,
             lineHeight = 18.sp,
@@ -204,9 +212,10 @@ private fun ChatMessageItem(message: ChatMessage) {
             modifier = Modifier
                 .fillMaxWidth()
                 .border(1.dp, JarvisSemanticColor.border, RoundedCornerShape(JarvisRadii.sm))
+                .semantics { liveRegion = LiveRegionMode.Polite }
                 .padding(horizontal = JarvisSpacing.md, vertical = JarvisSpacing.sm),
         ) {
-            JarvisStatusTag(state = SystemState.DESIGN_STATE)
+            JarvisStatusTag(state = SystemState.UNAVAILABLE, label = "Antwort nicht verfügbar")
             Text(
                 text = message.text,
                 color = JarvisSemanticColor.mutedForeground,
@@ -271,7 +280,7 @@ private fun ChatTaskStateView(state: ChatTaskState) {
         ChatTaskState.WAITING_FOR_REMOTE -> TaskCopy(
             SystemState.WAITING_REMOTE,
             "Wartet",
-            "Übergabe an Sleepy: noch nicht implementiert. Aktuell: nicht verbunden.",
+            "Sleepy ist nicht eingerichtet. Die Aufgabe wurde nicht übergeben.",
             ExecutionLocation.SLEEPY,
         )
         ChatTaskState.BLOCKED_BY_PRIVACY -> TaskCopy(
@@ -331,32 +340,38 @@ private fun ChatComposer(
             .fillMaxWidth()
             .border(BorderStroke(0.5.dp, JarvisSemanticColor.borderSoft))
             .background(JarvisSemanticColor.surface)
-            .padding(horizontal = JarvisSpacing.md, vertical = JarvisSpacing.sm),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(JarvisSpacing.sm),
+            .padding(horizontal = JarvisSpacing.xs, vertical = JarvisSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(JarvisSpacing.xs),
     ) {
-        IconButton(onClick = { pickFiles.launch("*/*") }) {
+        IconButton(
+            onClick = { pickFiles.launch("*/*") },
+            modifier = Modifier.size(JarvisLayout.touchTargetMin),
+        ) {
             Icon(
                 Icons.Filled.AttachFile,
-                contentDescription = "Bild oder PDF anhängen",
+                contentDescription = "Datei anhängen",
                 tint = JarvisSemanticColor.mutedForeground,
             )
         }
-        Box(modifier = Modifier.weight(1f)) {
-            JarvisTextField(
-                value = value,
-                onValueChange = onChange,
-                placeholder = "Lokal fragen oder Aktion nennen",
-            )
-        }
-        IconButton(onClick = {}, enabled = false) {
+        JarvisTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.weight(1f),
+            placeholder = "Nachricht eingeben",
+            minLines = 1,
+            maxLines = 5,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            accessibilityLabel = "Nachricht",
+        )
+        IconButton(onClick = {}, enabled = false, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
             Icon(
                 Icons.Filled.Mic,
-                contentDescription = "Spracheingabe, noch nicht implementiert",
+                contentDescription = "Spracheingabe nicht verfügbar",
                 tint = JarvisSemanticColor.disabled,
             )
         }
-        IconButton(onClick = onSend, enabled = canSend) {
+        IconButton(onClick = onSend, enabled = canSend, modifier = Modifier.size(JarvisLayout.touchTargetMin)) {
             Icon(
                 Icons.AutoMirrored.Filled.Send,
                 contentDescription = "Senden",

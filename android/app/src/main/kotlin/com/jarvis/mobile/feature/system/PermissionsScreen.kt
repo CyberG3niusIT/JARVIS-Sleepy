@@ -56,8 +56,8 @@ fun PermissionsScreen(onBack: () -> Unit) {
         JarvisListGroup {
             JarvisListRow(
                 title = "Android-Berechtigungen",
-                subtitle = "Der tatsächliche Systemzustand ist im Entwurfszustand noch nicht angebunden.",
-                trailing = { JarvisStatusTag(state = SystemState.PERMISSION_REQUIRED, label = comparisonBaseline.labels.permissions) },
+                subtitle = "Die App liest den tatsächlichen Android-Berechtigungsstatus noch nicht aus.",
+                trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = "Status nicht verfügbar") },
             )
         }
 
@@ -77,10 +77,7 @@ fun PermissionsScreen(onBack: () -> Unit) {
         JarvisSectionHeader("Freigabe")
         JarvisInlineNotice(
             modifier = Modifier.padding(horizontal = 16.dp),
-            text = "Die Freigabe erfolgt später über den jeweils passenden Android-Berechtigungsablauf. " +
-                "Ein Widerruf bleibt dort, wo Android das unterstützt, über die Systemeinstellungen " +
-                "möglich. Im Entwurfszustand gibt es hier keine Schaltfläche, die eine Freigabe " +
-                "auslösen könnte.",
+            text = "Berechtigungen können hier noch nicht angefragt oder geprüft werden. Bestehende Freigaben verwaltet Android in den Systemeinstellungen.",
         )
     }
 
@@ -89,18 +86,6 @@ fun PermissionsScreen(onBack: () -> Unit) {
 
 @Composable
 private fun PermissionDetailSheet(group: PermissionGroup?, onClose: () -> Unit) {
-    var demoState by rememberSaveable(group?.id) { mutableStateOf(PermissionGrantState.NOT_REQUESTED) }
-    val actionResult = rememberJarvisActionResult()
-    val scope = rememberCoroutineScope()
-
-    fun report(message: String) {
-        scope.launch { actionResult.report(message) }
-    }
-
-    val canRequest = demoState == PermissionGrantState.NOT_REQUESTED ||
-        demoState == PermissionGrantState.DENIED ||
-        demoState == PermissionGrantState.REVOKED
-
     JarvisBottomSheet(
         open = group != null,
         onClose = onClose,
@@ -112,75 +97,10 @@ private fun PermissionDetailSheet(group: PermissionGroup?, onClose: () -> Unit) 
             JarvisDetailField(label = "Freigeschaltete Fähigkeiten", value = group.capabilities.joinToString("\n"))
             JarvisDetailField(label = "Erforderlichkeit", value = group.requirement)
 
-            JarvisSectionHeader("Zustandsdemonstration")
             JarvisInlineNotice(
                 modifier = Modifier.padding(horizontal = 16.dp),
-                text = "Zustandsdemonstration der Oberfläche. Beispielwerte, keine Gerätedaten und kein Inventar.",
+                text = "Der aktuelle Freigabestatus ist nicht verfügbar. Diese Ansicht erklärt nur, wofür der Zugriff benötigt wird.",
             )
-
-            JarvisDetailField(label = "Demo-Zustand", value = permissionGrantLabel.getValue(demoState))
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = JarvisSpacing.sm)
-                    .selectableGroup()
-                    .background(JarvisSemanticColor.surface)
-                    .border(androidx.compose.foundation.BorderStroke(0.5.dp, JarvisSemanticColor.borderSoft)),
-            ) {
-                demoStateOrder.forEach { state ->
-                    val checked = state == demoState
-                    JarvisListRow(
-                        title = permissionGrantLabel.getValue(state),
-                        selected = checked,
-                        trailing = { JarvisStatusTag(state = permissionGrantTone.getValue(state), label = if (checked) "Ausgewählt" else "", dot = !checked) },
-                        onClick = {
-                            demoState = state
-                            report("Demo-Zustand auf \"${permissionGrantLabel.getValue(state)}\" gesetzt. Entwurfszustand, keine Runtime-Aktion ausgeführt.")
-                        },
-                    )
-                }
-            }
-
-            if (demoState == PermissionGrantState.DENIED_PERMANENTLY) {
-                JarvisInlineNotice(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    tone = JarvisNoticeTone.WARNING,
-                    text = "Bei dauerhafter Ablehnung führt die spätere Route direkt in die " +
-                        "Android-Systemeinstellungen. In diesem Entwurf wird nichts geöffnet.",
-                )
-            }
-            if (demoState == PermissionGrantState.NOT_APPLICABLE) {
-                JarvisInlineNotice(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    text = "Diese Berechtigung ist im Demo-Zustand nicht zutreffend, eine Anfrage ist hier nicht verfügbar.",
-                )
-            }
-
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                if (canRequest) {
-                    JarvisButton(
-                        text = "Berechtigung anfragen",
-                        variant = JarvisButtonVariant.PRIMARY,
-                        fullWidth = true,
-                        onClick = {
-                            demoState = PermissionGrantState.GRANTED
-                            report("Berechtigung angefragt, Demo-Zustand auf \"Erteilt\" gesetzt. Entwurfszustand, keine Runtime-Aktion ausgeführt.")
-                        },
-                    )
-                }
-                JarvisButton(
-                    text = "Demo-Zustand zurücksetzen",
-                    fullWidth = true,
-                    modifier = Modifier.padding(top = JarvisSpacing.sm),
-                    onClick = {
-                        demoState = PermissionGrantState.NOT_REQUESTED
-                        report("Demo-Zustand zurückgesetzt. Entwurfszustand, keine Runtime-Aktion ausgeführt.")
-                    },
-                )
-            }
-
-            JarvisActionResultText(message = actionResult.message)
         }
     }
 }

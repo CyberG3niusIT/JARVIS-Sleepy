@@ -61,16 +61,3 @@ fun JarvisDetailHeader(
         }
     }
 }
-
-/** Shared closing note: states come from the project base, not from telemetry. */
-@Composable
-fun JarvisDesignStateNote(modifier: Modifier = Modifier) {
-    Text(
-        text = "Entwurfszustand. Angezeigte Zustände stammen aus der aktuellen Projektbasis, " +
-            "nicht aus gemessener Laufzeittelemetrie.",
-        color = JarvisSemanticColor.mutedForeground,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-    )
-}

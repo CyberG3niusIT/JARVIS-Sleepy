@@ -14,6 +14,7 @@ import com.jarvis.mobile.core.designsystem.component.JarvisListRow
 import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
 import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
 import com.jarvis.mobile.core.model.SystemState
+import com.jarvis.mobile.BuildConfig
 import com.jarvis.mobile.feature.common.DetailScaffold
 
 /**
@@ -37,16 +38,9 @@ fun AboutScreen(onBack: () -> Unit) {
 
         JarvisSectionHeader("Version")
         JarvisListGroup {
-            JarvisListRow(title = "Version", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, dot = false) })
-            JarvisListRow(title = "Build-Version", trailing = { JarvisStatusTag(state = SystemState.DESIGN_STATE, label = "Nicht gebunden", dot = false) })
+            JarvisListRow(title = "Version", trailing = { MonoValue(BuildConfig.VERSION_NAME) })
+            JarvisListRow(title = "Build", trailing = { MonoValue(BuildConfig.VERSION_CODE.toString()) })
         }
-        Text(
-            text = "Für J.A.R.V.I.S Mobile ist im Entwurfszustand noch keine geprüfte Release-Version hinterlegt.",
-            color = JarvisSemanticColor.mutedForeground,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
 
         JarvisSectionHeader("Lizenzen")
         JarvisListGroup {

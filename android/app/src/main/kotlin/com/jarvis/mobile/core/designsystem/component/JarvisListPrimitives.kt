@@ -22,6 +22,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,6 +56,7 @@ fun JarvisSectionHeader(
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
             letterSpacing = 0.6.sp,
+            modifier = Modifier.semantics { heading() },
         )
         action?.invoke(this)
     }
@@ -95,7 +98,7 @@ fun JarvisListRow(
                 color = JarvisSemanticColor.foreground,
                 fontSize = 13.sp,
                 lineHeight = 20.sp,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             if (subtitle != null) {
@@ -104,7 +107,7 @@ fun JarvisListRow(
                     color = JarvisSemanticColor.mutedForeground,
                     fontSize = 11.sp,
                     lineHeight = 16.sp,
-                    maxLines = 2,
+                    maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
                 )

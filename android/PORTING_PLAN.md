@@ -5,6 +5,23 @@ Web-Spezifikation unter `src/components/jarvis/` und `src/lib/jarvis/` bleibt
 verbindliche Quelle fuer Inhalte, Reihenfolge und Verhalten. Diese Datei
 dokumentiert nur die technische Uebersetzung, keine neuen Entscheidungen.
 
+## Product UI pass after device testing
+
+The Android app now deliberately differs from the web prototype where the
+prototype exposed development language or interactive sample runtime states
+inside normal user flows. Start contains only setup readiness, model/access
+availability and Sleepy setup. System owns operational navigation and truthful
+availability; Mehr is navigation only. Preview state machines for models,
+agents, permissions, diagnostics, Sleepy, voice, memory and automations remain
+available as reference code but are no longer mounted from the corresponding
+product screens while their real runtime bindings are absent.
+
+The persistent shell shows an execution location or Privacy mode only when the
+respective value is backed by an active runtime/policy. A configured local-first
+preference is not presented as current execution. Chat starts without fixture
+history; its composer grows from one to five lines and scrolls internally after
+that limit.
+
 ## Design tokens
 
 | Web | Android |

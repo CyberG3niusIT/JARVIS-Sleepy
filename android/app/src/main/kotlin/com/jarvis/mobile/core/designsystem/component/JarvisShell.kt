@@ -80,8 +80,8 @@ fun JarvisTopBar(
 fun JarvisRuntimeStrip(
     runtimeState: SystemState,
     runtimeLabel: String,
-    execution: ExecutionLocation,
-    privacy: PrivacyMode,
+    execution: ExecutionLocation?,
+    privacy: PrivacyMode?,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -95,9 +95,13 @@ fun JarvisRuntimeStrip(
     ) {
         JarvisStatusTag(state = runtimeState, label = runtimeLabel)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            JarvisExecutionTag(where = execution)
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(start = JarvisSpacing.sm))
-            JarvisPrivacyTag(mode = privacy)
+            if (execution != null) {
+                JarvisExecutionTag(where = execution)
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(start = JarvisSpacing.sm))
+            }
+            if (privacy != null) {
+                JarvisPrivacyTag(mode = privacy)
+            }
         }
     }
 }
