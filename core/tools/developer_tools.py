@@ -322,14 +322,26 @@ def _devtools_service_status(args: dict) -> str:
         if "could not be found" in output.lower() or "not loaded" in output.lower():
             output = _run_cmd(f"systemctl status {shlex.quote(service_name)}")
         return output
-    # List JARVIS-related services
+    # List JARVIS-related services. jarvis.service is confirmed a user
+    # unit (start.sh/stop.sh/etc. and this file's own is-active check
+    # below all use --user for it — see systemd/README.md for the full
+    # evidence trail from session #7). llama-server/chatterbox are
+    # checked under both scopes since their real scope isn't as firmly
+    # established — session #6/#7 wrote them as system units, but that
+    # was a reasoned guess, not confirmed the way jarvis.service is.
+    # jarvis-web is referenced here historically but has no
+    # systemd/*.service file in this repo — flagged, not silently
+    # assumed to exist.
     lines = ["User services:"]
-    for svc in ["jarvis", "jarvis-web", "llama-server"]:
+    for svc in ["jarvis", "jarvis-web"]:
         status = _run_cmd(f"systemctl --user is-active {svc} 2>/dev/null")
+        lines.append(f"  {svc}: {status}" + (" (no unit file in repo)" if svc == "jarvis-web" else ""))
+    lines.append("\nModel services (checked --user then system, scope not firmly confirmed):")
+    for svc in ["llama-server", "chatterbox"]:
+        status = _run_cmd(f"systemctl --user is-active {svc} 2>/dev/null")
+        if not status.strip() or status.strip() in ("unknown", "inactive"):
+            status = _run_cmd(f"systemctl is-active {svc} 2>/dev/null")
         lines.append(f"  {svc}: {status}")
-    lines.append("\nSystem services:")
-    status = _run_cmd("systemctl is-active llama-server 2>/dev/null")
-    lines.append(f"  llama-server: {status}")
     return "\n".join(lines)
 
 

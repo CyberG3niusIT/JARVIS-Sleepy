@@ -52,81 +52,94 @@ venv. If the `import chatterbox.mtl_tts` check above fails in
 `jarvis-venv`'s pins to make it fit without checking why they were pinned
 that way.
 
-## Install strategy: system-level is primary, user-level is the fallback
+## Install strategy: MIXED — jarvis.service is a user unit, llama-server/chatterbox are system units
 
-Session #6 found the repo carrying **both** conventions unreconciled: the
-old root `jarvis.service` documents `~/.config/systemd/user/` +
-`systemctl --user`, while these `systemd/*.service` files (written in
-session #5) target `/etc/systemd/system` + plain `systemctl`. Only one
-should actually be used — running the same service both ways (e.g. a
-leftover user-level unit alongside a new system-level one) means two
-JARVIS processes fighting over the mic, port 8080, and port 8765.
+**Session #6 got this wrong** — it recommended system-level for
+everything based on architectural reasoning alone ("always-on services
+should start before login"), without first checking whether an
+established, *working* convention already existed in this repo. It did:
+`start.sh`, `stop.sh`, `restart.sh`, `status.sh`, `killswitch.sh`,
+`jarvis_aliases.sh` (all at the repo root) call `systemctl --user ...
+jarvis.service` and `journalctl --user -u jarvis.service` throughout —
+including a real emergency kill switch with a working `killjarvis`
+alias — and `core/health_check.py` / `core/tools/developer_tools.py`
+both query `jarvis` the same way. That's not a stale leftover to
+reconcile away; it's the real, in-use control plane for this service,
+confirmed by `core/tools/developer_tools.py`'s own
+`_devtools_service_status()`, which lists `jarvis`/`jarvis-web` under
+"User services" unconditionally. **`jarvis.service` is a user unit.
+This is settled by evidence, not a preference.**
 
-**Recommendation: system-level (`/etc/systemd/system`), with `User=alex`,
-is the one to use**, for a concrete architectural reason, not just
-preference: `jarvis.service`, `llama-server.service`, and
-`chatterbox.service` are meant to be always-on background services that
-start at boot with nobody logged in. System-level units do that natively.
-User-level units only start at boot if `loginctl enable-linger alex` is
-also set up — which exists specifically to make user units behave like
-system units for exactly this case. Reaching for that workaround when a
-native system-level unit is available and no permission blocker has
-actually been confirmed is the less direct path, so system-level is
-primary here.
+This also converges with the Windows-Audio target named in later
+sessions' tasks: a system-level unit starting before any login has no
+path to Windows Audio / WSLg's audio forwarding, which is tied to an
+active logged-in session — only a user unit (running as that session)
+can reach it. So the correction isn't just "match existing scripts," it
+also happens to be the architecturally right call once real audio
+output is in scope.
 
-**Use the user-level fallback only if system-level installation is
-confirmed blocked** (no sudo/root in whatever session does the install —
-an actual permission fact, not assumed) — full instructions in that case
-are in the second block below, not just "drop two lines": the unit files
-would need `User=alex` and `EnvironmentFile=-/home/alex/jarvis/.env`
-removed (user units already run as that user and typically source their
-environment differently — e.g. via `~/.config/environment.d/` or a
-`systemctl --user import-environment` step, itself unverified without
-Sleepy access) and every `%h`-relative path double-checked.
+`llama-server.service` and `chatterbox.service` stay **system units**
+— headless GPU HTTP servers with no session/audio dependency of their
+own (only `jarvis.service` itself needs to reach the audio session).
+This part is a reasoned best guess, not confirmed the way
+`jarvis.service` is: `developer_tools.py`'s own status check hedges on
+`llama-server` (`systemctl --user is-active` first, falls back to plain
+`systemctl` on failure) — the codebase itself isn't fully sure either.
+**NEEDS HW VERIFY**: confirm on Sleepy which scope `llama-server`/
+`chatterbox` actually run under today, if anything already manages them,
+before installing `systemd/llama-server.service`/`chatterbox.service`
+as written.
 
-### Primary: system-level install
+`systemd/jarvis.service` was rewritten this session to be a proper user
+unit (`%h`-relative paths, no `User=` line — user units already run as
+the invoking user). `llama-server.service`/`chatterbox.service` are
+unchanged from session #6 (already system units).
+
+**Cross-manager caveat**: `jarvis.service`'s `After=`/`Wants=` naming
+the two system units are not reliably enforced by systemd across the
+user/system manager boundary — `systemctl --user start jarvis.service`
+will NOT reliably also start them. Start/enable them independently (the
+updated `start.sh` below does this, with a passwordless-sudo check
+rather than hanging on a password prompt).
+
+### Install
 
 ```bash
-sudo cp systemd/llama-server.service systemd/chatterbox.service systemd/jarvis.service /etc/systemd/system/
+# System units (llama-server, chatterbox) — need root
+sudo cp systemd/llama-server.service systemd/chatterbox.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now llama-server.service
 sudo systemctl enable --now chatterbox.service
-sudo systemctl enable --now jarvis.service
 
-systemctl status --no-pager llama-server.service chatterbox.service jarvis.service
-journalctl -u llama-server.service --no-pager -n 50
-journalctl -u chatterbox.service --no-pager -n 50
-journalctl -u jarvis.service --no-pager -n 50
+# User unit (jarvis) — runs as the invoking user, no sudo
+mkdir -p ~/.config/systemd/user
+cp systemd/jarvis.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now jarvis.service
+loginctl enable-linger "$USER"   # so jarvis.service can start before login too
+
+# Or, once installed once: ./start.sh does all of the above each time
 ```
 
-### Fallback: user-level install (only if system-level is confirmed blocked)
+### Verify
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp systemd/llama-server.service systemd/chatterbox.service systemd/jarvis.service ~/.config/systemd/user/
-# In each copied file: remove the `User=alex` line, and replace
-# `EnvironmentFile=-/home/alex/jarvis/.env` with whatever this Sleepy
-# session's actual environment-sourcing convention turns out to be —
-# NOT verified here, must be confirmed on the real machine.
-sed -i '/^User=/d' ~/.config/systemd/user/{llama-server,chatterbox,jarvis}.service
+systemctl status --no-pager llama-server.service chatterbox.service
+journalctl -u llama-server.service --no-pager -n 50
+journalctl -u chatterbox.service --no-pager -n 50
 
-systemctl --user daemon-reload
-systemctl --user enable --now llama-server.service
-systemctl --user enable --now chatterbox.service
-systemctl --user enable --now jarvis.service
-loginctl enable-linger alex   # required for user units to start before login
-
-systemctl --user status --no-pager llama-server.service chatterbox.service jarvis.service
-journalctl --user -u llama-server.service --no-pager -n 50
-journalctl --user -u chatterbox.service --no-pager -n 50
+systemctl --user status --no-pager jarvis.service
 journalctl --user -u jarvis.service --no-pager -n 50
+
+# Or: ./status.sh (updated this session to check all three)
 ```
 
-Whichever strategy is used, **use only that one** — before installing,
-confirm the other convention isn't already active
+Before installing, confirm nothing is already running under the other
+scope for the same service name
 (`systemctl list-units | grep -i jarvis` AND
-`systemctl --user list-units | grep -i jarvis`) to avoid two instances
-running at once.
+`systemctl --user list-units | grep -i jarvis`) — two instances fighting
+over the mic, port 8080, or port 8765 is exactly the failure mode this
+mixed strategy has to avoid getting backwards.
 
 ## What's deliberately NOT included
 
@@ -140,3 +153,31 @@ running at once.
   for the reason stated at the top of this file. Do not mark this
   workstream's systemd items as verified until someone actually runs the
   checklist and install steps above and records the real output.
+- **jarvis-web.service**: `core/tools/developer_tools.py`'s service
+  listing references a `jarvis-web` unit, but no `jarvis-web.service`
+  file exists anywhere in this repo (checked this session). Either it
+  was never written, or it's managed some other way on Sleepy — not
+  investigated further; flagged rather than guessed at.
+
+## Control-plane scripts (repo root) — updated session #7
+
+`start.sh`/`stop.sh`/`restart.sh`/`status.sh`/`killswitch.sh`/
+`jarvis_aliases.sh` previously only knew about `jarvis.service` —
+`llama-server.service`/`chatterbox.service` (added session #5/#6) were
+never wired in, a real gap beyond just documentation:
+- `start.sh` now also enables+starts the two system units first
+  (sudo, skipped with a clear message if no passwordless sudo).
+- `status.sh` now reports all three services, not just `jarvis`.
+- `killswitch.sh` — an *emergency, stop everything* switch that left
+  the local LLM/TTS GPU servers running was a real gap in what it
+  promises — now also stops+disables both system units and adds
+  `llama-server`/`chatterbox_server.py` to its direct `pkill` list as a
+  second line of defense if systemd itself couldn't reach them (no
+  sudo, or a process started outside systemd).
+- `stop.sh`/`restart.sh` deliberately still only touch `jarvis.service`
+  (a graceful pause/restart of JARVIS shouldn't tear down slow-to-reload
+  GPU models) — this is a documented choice in each script now, not
+  silent scope-narrowing.
+- `jarvis_aliases.sh` gained `llamalogs`/`chatterboxlogs`/
+  `restartllama`/`restartchatterbox` for bouncing a model service
+  directly without going through `start.sh`'s full sequence.
