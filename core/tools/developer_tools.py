@@ -438,6 +438,25 @@ def _devtools_run_command(args: dict) -> str:
         return f"BLOCKED: {reason}. This command is not allowed."
     if tier == 'confirmation':
         with _pending_lock:
+            # Session #7 fix (agentic-system audit finding #10): this is
+            # a single global slot — a second confirmation-tier command
+            # arriving while one is already pending used to silently
+            # overwrite it. A user confirming "yes" to what they believe
+            # is the first command would then actually run the second
+            # one instead — a real "confirm the wrong thing" hazard, not
+            # just theoretical: the LLM itself can issue a second
+            # run_command call mid-conversation while a first
+            # confirmation is still outstanding. Now refuses to
+            # overwrite an unexpired pending command instead.
+            if _pending_command is not None:
+                existing_command, existing_expiry = _pending_command
+                if _time.time() <= existing_expiry:
+                    return (
+                        f"A different command is already awaiting confirmation: "
+                        f"`{existing_command}`. Please confirm or dismiss that one "
+                        f"(it expires in {existing_expiry - _time.time():.0f}s) "
+                        f"before requesting a new one."
+                    )
             _pending_command = (command, _time.time() + 30)
         return f"CONFIRMATION REQUIRED: `{command}` — {reason}. Shall I proceed?"
     # Tier 1 (allowed) or Tier 2 (safe_write) — execute
