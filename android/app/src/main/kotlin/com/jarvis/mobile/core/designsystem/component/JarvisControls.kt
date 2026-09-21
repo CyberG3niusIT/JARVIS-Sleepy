@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -189,7 +188,7 @@ fun JarvisTextField(
                         },
                     ),
                 decorationBox = { innerTextField ->
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty() && placeholder != null) {
                             Text(text = placeholder, color = JarvisSemanticColor.mutedForeground, fontSize = 13.sp)
                         }
