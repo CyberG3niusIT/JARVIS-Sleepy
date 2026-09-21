@@ -189,11 +189,44 @@ class MCPBridge:
                 # denies this; plain PRIVACY does not (see
                 # core/privacy_gate.py's capability matrix).
                 return "Das ist während der Privatsphäre-Einstellung nicht verfügbar."
+            tool_call_timeout = self._timeouts.get("tool_call", 30)
+            # Session #7 fix (agentic-system audit finding #4): wrap the
+            # coroutine itself in asyncio.wait_for() so a timeout is
+            # enforced ON THE EVENT LOOP, guaranteeing _call_tool()
+            # (and any _reconnect_server() backoff it triggers — up to
+            # 5 attempts with exponential backoff, which alone can
+            # exceed 60s) actually stops running. The previous version
+            # only put a timeout on the outer future.result(), which
+            # does NOT cancel the underlying coroutine on a plain
+            # concurrent.futures.TimeoutError — it kept running on the
+            # shared mcp-bridge event-loop thread in the background,
+            # able to race the *next* tool call over self._sessions
+            # (mutated with no lock) after this call had already
+            # "returned" an error to its caller.
             future = asyncio.run_coroutine_threadsafe(
-                self._call_tool(server_name, tool_name, args),
+                asyncio.wait_for(
+                    self._call_tool(server_name, tool_name, args),
+                    timeout=tool_call_timeout,
+                ),
                 self._loop,
             )
-            return future.result(timeout=self._timeouts.get("tool_call", 30))
+            try:
+                # A few seconds of slack over the asyncio-side timeout,
+                # so the coroutine's own wait_for() is what actually
+                # fires and cancels it (deterministic), rather than
+                # racing this outer timeout against it.
+                return future.result(timeout=tool_call_timeout + 5)
+            except TimeoutError:
+                # Both asyncio.TimeoutError and concurrent.futures.TimeoutError
+                # are aliases of the builtin TimeoutError on this project's
+                # Python (3.11+) — catching the builtin covers both the
+                # asyncio.wait_for() timeout and the future.result() one.
+                future.cancel()
+                logger.warning(
+                    "MCP tool call '%s.%s' timed out after %ss — cancelled",
+                    server_name, tool_name, tool_call_timeout,
+                )
+                return f"Error: MCP tool '{tool_name}' on '{server_name}' timed out"
         return handler
 
     async def _reconnect_server(self, server_name: str) -> bool:
