@@ -19,11 +19,14 @@ class WeatherSkill(BaseSkill):
 
     def initialize(self) -> bool:
         """Initialize the skill"""
-        # Get API key from environment (needed for fallback + location queries)
-        self.api_key = os.environ.get('OPENWEATHER_API_KEY')
+        # API key is optional for the native skill itself.
+        # Local cached weather remains usable without OpenWeather access;
+        # only live fallback/location requests are unavailable.
+        self.api_key = os.environ.get("OPENWEATHER_API_KEY")
         if not self.api_key:
-            self.logger.warning("OPENWEATHER_API_KEY not set - weather skill disabled")
-            return False
+            self.logger.warning(
+                "OPENWEATHER_API_KEY not set - live weather fallback disabled"
+            )
 
         # Default location (Gardendale, Alabama)
         self.default_location = "Gardendale,AL,US"
@@ -285,6 +288,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_current_live(self) -> str:
         """Fallback: fetch current weather from live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/weather"
             params = {
@@ -317,6 +325,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_current_for_coords(self, lat: float, lon: float) -> str:
         """Fetch current weather for arbitrary coordinates via live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/weather"
             params = {
@@ -350,6 +363,11 @@ class WeatherSkill(BaseSkill):
 
     def get_weather_for_location(self, location: str = None) -> str:
         """Get weather for a specific location"""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         if not location:
             return self.get_current_weather()
 
@@ -465,6 +483,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_forecast_live(self) -> str:
         """Fallback: fetch forecast from live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/forecast"
             params = {
@@ -552,6 +575,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_forecast_for_coords(self, lat: float, lon: float) -> str:
         """Fetch forecast for arbitrary coordinates via live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/forecast"
             params = {
@@ -794,6 +822,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_rain_live(self) -> str:
         """Fallback: fetch rain check from live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/forecast"
             params = {
@@ -849,6 +882,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_rain_for_coords(self, lat: float, lon: float) -> str:
         """Fetch rain check for arbitrary coordinates via live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/forecast"
             params = {
@@ -967,6 +1005,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_tomorrow_live(self) -> str:
         """Fallback: fetch tomorrow's weather from live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/forecast"
             params = {
@@ -1004,6 +1047,11 @@ class WeatherSkill(BaseSkill):
 
     def _fetch_tomorrow_for_coords(self, lat: float, lon: float) -> str:
         """Fetch tomorrow's weather for arbitrary coordinates via live API."""
+        if not self.api_key:
+            return self.respond(
+                f"Live weather data is unavailable right now, {self.honorific}."
+            )
+
         try:
             url = "https://api.openweathermap.org/data/2.5/forecast"
             params = {
