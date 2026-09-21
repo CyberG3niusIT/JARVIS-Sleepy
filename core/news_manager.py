@@ -110,6 +110,13 @@ class NewsManager:
         # Background thread
         self._running = False
         self._poll_thread: Optional[threading.Thread] = None
+        # Session #8 (agentic-audit): timestamp of the last poll-loop
+        # ITERATION START, set before _poll_once() runs — lets
+        # core/watchdog.py detect a hung poll loop (thread alive but
+        # stuck inside one call, so this never advances) as well as a
+        # dead one (thread not alive at all), rather than seeing
+        # neither.
+        self._last_poll_ts: float = 0.0
 
         # Callbacks (set by jarvis_continuous.py)
         self._pause_listener_callback: Optional[Callable] = None
@@ -524,6 +531,7 @@ class NewsManager:
             time.sleep(5)
 
         while self._running:
+            self._last_poll_ts = time.time()
             try:
                 self._poll_once()
             except Exception as e:

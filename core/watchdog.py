@@ -33,7 +33,9 @@ class Watchdog(threading.Thread):
     """Background self-healing monitor for the JARVIS voice pipeline."""
 
     def __init__(self, *, config, coordinator, listener, tts,
-                 event_queue, audio_queue, tts_queue):
+                 event_queue, audio_queue, tts_queue,
+                 task_planner=None, reminder_manager=None,
+                 weather_poller=None, news_manager=None):
         super().__init__(daemon=True, name="watchdog")
         self.logger = get_logger("core.watchdog", config)
 
@@ -44,6 +46,23 @@ class Watchdog(threading.Thread):
         self._audio_queue = audio_queue
         self._tts_queue = tts_queue
 
+        # Session #8 (agentic-audit open finding): the watchdog previously
+        # had zero visibility into anything outside the voice pipeline
+        # itself — a dead reminder/weather/news poll thread, or a
+        # TaskPlanner plan stuck mid-step, would never be noticed. These
+        # are all optional (default None) so existing call sites that
+        # don't pass them keep working exactly as before — a caller
+        # simply gets no visibility into whichever ones it omits, not an
+        # error.
+        self._task_planner = task_planner
+        self._background_managers = {
+            name: mgr for name, mgr in {
+                "reminder_manager": reminder_manager,
+                "weather_poller": weather_poller,
+                "news_manager": news_manager,
+            }.items() if mgr is not None
+        }
+
         # Configuration
         self._check_interval = config.get("watchdog.check_interval", 10)
         self._listener_stuck_threshold = config.get("watchdog.listener_stuck_threshold", 60)
@@ -53,6 +72,11 @@ class Watchdog(threading.Thread):
         self._recovery_cooldown = config.get("watchdog.recovery_cooldown", 300)
         self._announce_failures = config.get("watchdog.announce_failures", True)
         self._max_announcements_per_hour = config.get("watchdog.max_announcements_per_hour", 3)
+        # A poll thread that hasn't started a new iteration within this
+        # many multiples of its OWN poll_interval is considered stuck —
+        # generous, so a slow-but-fine iteration (e.g. a slow RSS feed)
+        # never false-positives.
+        self._poll_stuck_multiplier = config.get("watchdog.poll_stuck_multiplier", 3)
 
         # Internal state
         self._recovery_log: dict[str, float] = {}        # check_name → last recovery time
@@ -63,6 +87,11 @@ class Watchdog(threading.Thread):
         self._flux_detected_ts: float = 0.0
         self._flux_grace_period: int = 400  # seconds — covers 300s generation + 90s startup + buffer
         self._stop_event = threading.Event()
+
+        # Background-worker visibility state (session #8)
+        self._worker_status: dict[str, str] = {}   # name -> "healthy"|"dead"|"stuck"|"unknown"
+        self._plan_step_seen: tuple | None = None   # ((plan_id, step_id), first_seen_monotonic)
+        self._plan_stuck_logged: bool = False
 
     # ------------------------------------------------------------------
     # Main loop
@@ -111,6 +140,7 @@ class Watchdog(threading.Thread):
             self._recover_stt_backlog()
 
         self._check_llm_health()
+        self._check_background_workers()
 
     # ------------------------------------------------------------------
     # Check 1: Streaming orphan — _streaming_active=True but IDLE
@@ -358,6 +388,120 @@ class Watchdog(threading.Thread):
     def llm_status(self) -> str | None:
         """Current LLM status. None = healthy."""
         return self._llm_status
+
+    # ------------------------------------------------------------------
+    # Check 7: background worker visibility (session #8 agentic-audit
+    # open finding — the watchdog previously had zero visibility into
+    # anything outside the voice pipeline: a reminder/weather/news poll
+    # thread crashing silently, or a TaskPlanner step running forever,
+    # went completely unnoticed. Detection only — no auto-restart: a
+    # blind restart of one of these threads could have side effects
+    # (e.g. re-firing a reminder mid-cycle) this watchdog can't reason
+    # about safely, so it logs + emits a structured event and leaves
+    # recovery to a human or a future, better-informed mechanism.
+    # ------------------------------------------------------------------
+
+    def _check_background_workers(self):
+        for name, mgr in self._background_managers.items():
+            self._check_one_poll_worker(name, mgr)
+        self._check_task_planner_stuck()
+
+    def _check_one_poll_worker(self, name: str, mgr) -> None:
+        thread = getattr(mgr, "_poll_thread", None)
+        if thread is None:
+            return  # never started (e.g. disabled in config) — not an error
+        previous = self._worker_status.get(name)
+
+        if not thread.is_alive():
+            status = "dead"
+        else:
+            last_poll = getattr(mgr, "_last_poll_ts", 0.0)
+            poll_interval = getattr(mgr, "poll_interval", None)
+            if last_poll and poll_interval:
+                stale_for = time.time() - last_poll
+                status = "stuck" if stale_for > poll_interval * self._poll_stuck_multiplier else "healthy"
+            else:
+                status = "healthy"  # can't evaluate staleness — don't false-positive
+
+        if status == previous:
+            return
+        self._worker_status[name] = status
+        if status == "healthy":
+            self.logger.info("Background worker '%s' recovered (was: %s)", name, previous)
+        else:
+            self.logger.warning("Background worker '%s' is %s", name, status)
+            self._emit_event(
+                "error_recovery", f"worker_{status}",
+                f"Background worker '{name}' is {status}",
+                severity="warn", metadata={"worker": name, "status": status},
+            )
+
+    def _check_task_planner_stuck(self) -> None:
+        tp = self._task_planner
+        if tp is None:
+            return
+        plan = getattr(tp, "active_plan", None)
+        if plan is None:
+            self._plan_step_seen = None
+            self._plan_stuck_logged = False
+            return
+        running_step = next(
+            (s for s in plan.steps if getattr(s.status, "value", s.status) == "running"),
+            None,
+        )
+        if running_step is None:
+            self._plan_step_seen = None
+            self._plan_stuck_logged = False
+            return
+
+        key = (id(plan), running_step.step_id)
+        now = time.monotonic()
+        if self._plan_step_seen is None or self._plan_step_seen[0] != key:
+            self._plan_step_seen = (key, now)
+            self._plan_stuck_logged = False
+            return
+
+        stuck_for = now - self._plan_step_seen[1]
+        if stuck_for > self._command_hung_threshold:
+            if not self._plan_stuck_logged:
+                self._plan_stuck_logged = True
+                self.logger.warning(
+                    "TaskPlanner step %d ('%s') has been running for %.0fs — possible stuck step",
+                    running_step.step_id, running_step.description, stuck_for,
+                )
+                self._emit_event(
+                    "error_recovery", "task_planner_step_stuck",
+                    f"Plan step {running_step.step_id} stuck for {stuck_for:.0f}s",
+                    severity="warn",
+                    metadata={
+                        "step_id": running_step.step_id,
+                        "skill_name": running_step.skill_name,
+                        "stuck_for_s": round(stuck_for, 1),
+                    },
+                )
+
+    def get_background_health(self) -> dict:
+        """Snapshot of background-worker visibility state — for a future
+        system_health integration or direct inspection. Metadata only
+        (status strings, ids, durations), never user content."""
+        tp = self._task_planner
+        plan_info = None
+        if tp is not None:
+            plan = getattr(tp, "active_plan", None)
+            if plan is not None:
+                running_step = next(
+                    (s for s in plan.steps if getattr(s.status, "value", s.status) == "running"),
+                    None,
+                )
+                plan_info = {
+                    "status": getattr(plan.status, "value", str(plan.status)),
+                    "running_step_id": running_step.step_id if running_step else None,
+                    "stuck": self._plan_stuck_logged,
+                }
+        return {
+            "workers": dict(self._worker_status),
+            "task_planner": plan_info,
+        }
 
     # ------------------------------------------------------------------
     # Recovery cooldown

@@ -92,6 +92,10 @@ class WeatherPoller:
         # Background thread
         self._running = False
         self._poll_thread: Optional[threading.Thread] = None
+        # Session #8 (agentic-audit): see NewsManager's identical field
+        # for why — lets core/watchdog.py distinguish a hung poll loop
+        # from a dead thread.
+        self._last_poll_ts: float = 0.0
 
         # DB reference (must be initialized before poller starts)
         self._db: Optional[WeatherDB] = None
@@ -179,6 +183,7 @@ class WeatherPoller:
             self.logger.error("Sun times pre-population failed: %s", e, exc_info=True)
 
         while self._running:
+            self._last_poll_ts = time.time()
             try:
                 self._poll_once()
             except Exception as e:

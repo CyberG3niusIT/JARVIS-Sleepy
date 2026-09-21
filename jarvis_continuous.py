@@ -1030,6 +1030,15 @@ class JarvisContinuous:
                     event_queue=self.event_queue,
                     audio_queue=self.audio_queue,
                     tts_queue=self.tts_queue,
+                    # Session #8 (agentic-audit): give the watchdog
+                    # visibility into the background managers/planner it
+                    # previously couldn't see at all — detection only,
+                    # each is optional so a missing one just means no
+                    # visibility into it, not an error.
+                    task_planner=getattr(self.coordinator, "task_planner", None),
+                    reminder_manager=self.reminder_manager,
+                    weather_poller=self.weather_poller,
+                    news_manager=self.news_manager,
                 )
                 self.watchdog.start()
 

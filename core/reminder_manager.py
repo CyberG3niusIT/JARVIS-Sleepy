@@ -104,6 +104,10 @@ class ReminderManager:
         self._running = False
         self._poll_thread = None
         self._announcing_missed = False
+        # Session #8 (agentic-audit): see NewsManager's identical field
+        # for why — lets core/watchdog.py distinguish a hung poll loop
+        # from a dead thread.
+        self._last_poll_ts: float = 0.0
 
         # Ack tracking
         self._last_announced_id = None
@@ -1785,6 +1789,7 @@ class ReminderManager:
     def _poll_loop(self):
         """Main polling loop: check for due reminders every poll_interval seconds."""
         while self._running:
+            self._last_poll_ts = time.time()
             try:
                 # Skip if missed-reminder announcement is in progress
                 if self._announcing_missed:
