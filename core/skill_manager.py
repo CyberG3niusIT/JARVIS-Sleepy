@@ -110,7 +110,7 @@ class SkillManager:
         self.logger = get_logger(__name__, config)
         self._privacy_gate = get_privacy_gate(config)
         
-         skills_path = Path(config.get("skills.skills_path"))
+        skills_path = Path(config.get("skills.skills_path"))
 
         if not skills_path.is_absolute():
             repo_root = Path(__file__).resolve().parent.parent
