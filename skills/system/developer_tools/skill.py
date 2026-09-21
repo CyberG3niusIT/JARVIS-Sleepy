@@ -21,6 +21,8 @@ from core.llm_router import LLMRouter
 # Load sibling modules — skill_manager uses importlib.spec_from_file_location
 # which doesn't register subpackages, so relative imports fail.
 _skill_dir = Path(__file__).parent
+_JARVIS_ROOT = _skill_dir.parents[2]
+_MODELS_ROOT = Path("/home/alex/jarvis-data/models")
 _safety = importlib.import_module('_safety', package=None) if '_safety' in sys.modules else None
 if _safety is None:
     import importlib.util
@@ -49,9 +51,9 @@ DisplayRouter = _display.DisplayRouter
 
 # Git repo paths
 GIT_REPOS = {
-    'main': '/home/user/jarvis',
-    'skills': '/mnt/storage/jarvis/skills',
-    'models': '/mnt/models',
+    'main': str(_JARVIS_ROOT),
+    'skills': str(_JARVIS_ROOT / 'skills'),
+    'models': str(_MODELS_ROOT),
 }
 
 # Repo name aliases for natural language matching
@@ -542,7 +544,7 @@ class DeveloperToolsSkill(BaseSkill):
         show_me = self._check_show_me(query)
 
         # Use LLM to extract the search term and build the grep command
-        prompt = query_to_command_prompt(query, context="Searching JARVIS codebase. Use grep -rn for code search. Search both /home/user/jarvis/core/ and /mnt/storage/jarvis/skills/")
+        prompt = query_to_command_prompt(query, context=f"Searching JARVIS codebase. Use grep -rn for code search. Search both {_JARVIS_ROOT / 'core'} and {_JARVIS_ROOT / 'skills'}")
         command = self._llm.generate(prompt, max_tokens=128).strip()
 
         # Validate the generated command
@@ -830,7 +832,7 @@ class DeveloperToolsSkill(BaseSkill):
             query,
             context="File operation (copy, backup, rename, move). Use cp, mkdir, or mv. "
                     "For backups, append .bak or use timestamped copies. "
-                    "JARVIS project root is /home/user/jarvis"
+                    f"JARVIS project root is {_JARVIS_ROOT}"
         )
         command = self._llm.generate(prompt, max_tokens=128).strip()
 
@@ -865,7 +867,7 @@ class DeveloperToolsSkill(BaseSkill):
             query,
             context="File deletion. Use rm for files, rmdir for empty dirs. "
                     "Never use rm -rf. Always target specific files. "
-                    "JARVIS project root is /home/user/jarvis"
+                    f"JARVIS project root is {_JARVIS_ROOT}"
         )
         command = self._llm.generate(prompt, max_tokens=128).strip()
 

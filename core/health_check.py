@@ -209,10 +209,15 @@ def check_bare_metal(config=None):
         results.append(_check("RAM", "red", f"RAM error: {e}"))
 
     # --- Disks ---
+    storage_root = (
+        Path(config.get("system.storage_path", "/home/alex/jarvis-data"))
+        if config
+        else Path("/home/alex/jarvis-data")
+    )
     disk_mounts = {
         "/": "Root",
-        "/mnt/storage": "Storage",
-        "/mnt/models": "Models",
+        str(storage_root): "JARVIS Data",
+        str(storage_root / "models"): "Models",
     }
     for mount, label in disk_mounts.items():
         try:

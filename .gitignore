@@ -1,21 +1,36 @@
-# TLS certs
+﻿# TLS / local certificates
 .certs/
 
-# Python
+# Python bytecode / caches
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 .Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.hypothesis/
+
+# Python packaging / build
 *.so
 *.egg
 *.egg-info/
+.eggs/
 dist/
 build/
+pip-wheel-metadata/
 
-# Logs
-*.log
-logs/
+# Coverage / test artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+tests/iterative_results/
+tests/v3_results/
 
 # Virtual environments
 venv/
@@ -24,7 +39,13 @@ venv-tts/
 env/
 ENV/
 
-# IDE / tools
+# Logs / runtime
+*.log
+logs/
+*.pid
+.console_history
+
+# IDE / editor
 .vscode/
 .idea/
 .claude/plans/
@@ -33,75 +54,63 @@ ENV/
 *.swo
 *~
 
-# Backup files
-*.backup
-*.backup_*
-config.yaml.backup*
-config.yaml.bak
-*.bak
-
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Don't commit models (too large)
-*.gguf
-*.bin
-*.onnx
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+governance/.governance_pw
 
-# Generated images (Flux output)
-generated_images/
-
-# Audio files (generated/test artifacts)
-*.wav
-*.mp3
-wav_files/
-
-# Don't commit user data
-/mnt/storage/jarvis/chat_history/
-*.db
-
-# Runtime artifacts
-reports/
-
-# Google Calendar OAuth (NEVER commit)
+# OAuth / credentials
 credentials.json
 token.json
 google_token.json
 google_sync_token.json
 
-# Experiments / scratch
+# Local databases / user data
+*.db
+*.db-shm
+*.db-wal
+/mnt/storage/jarvis/chat_history/
+
+# Models
+*.gguf
+*.bin
+*.onnx
+
+# Generated media / runtime output
+generated_images/
+wav_files/
+*.wav
+*.mp3
+reports/*
+!reports/journal_audits/
+!reports/journal_audits/**
+
+# Experiments / research / reviews
 experiments/
-
-# Research artifacts (session research, not code)
 research/
-
-# Test results (local run artifacts)
-tests/iterative_results/
-tests/v3_results/
-
-# Code review artifacts
 reviews/
 
-# Local backups & archives
+# Local backups / archives
 .backup/
 .archive/
-share/
-
-# Console history
-.console_history
-
-# PID files
-*.pid
-
-# Memory / handoff notes (personal, never publish)
-memory/
-
-# Environment
-.env
-governance/.governance_pw
-
-# Sleepy/JARVIS local migration backups
 backups/
+share/*
+!share/.gitkeep
+*.backup
+*.backup_*
+*.bak
 *.bak-*
 *.bak-*/
+config.yaml.backup*
+config.yaml.bak
+
+# Local temporary / pre-change copies
+*.before-*
+*.orig
+*.rej

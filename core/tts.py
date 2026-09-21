@@ -106,6 +106,15 @@ class TextToSpeech:
         self.audio_device = resolve_output_device(
             config.get("audio.output_device", "default")
         )
+        self.output_backend = str(
+            config.get("audio.output_backend", "auto")
+        ).lower()
+        self.windows_temp_dir = Path(
+            config.get(
+                "audio.windows_temp_dir",
+                "/mnt/c/Users/Alex/AppData/Local/Temp/JARVIS",
+            )
+        )
 
         # Normalization
         self.normalization_enabled = config.get("tts.normalization_enabled", True)
@@ -318,11 +327,14 @@ class TextToSpeech:
         # a live request only ever waits for the single in-flight warmup
         # phrase to finish, not the whole batch.
         self._cal_l0_generating = False
-        threading.Thread(
-            target=self._run_chatterbox_warmup,
-            daemon=True,
-            name="chatterbox-warmup",
-        ).start()
+        if config.get("tts.chatterbox_warmup_enabled", True):
+            threading.Thread(
+                target=self._run_chatterbox_warmup,
+                daemon=True,
+                name="chatterbox-warmup",
+            ).start()
+        else:
+            self.logger.info("Chatterbox cache warmup disabled")
 
     def _synthesize_short_pcm(self, text: str) -> Optional[bytes]:
         """Engine-dispatching short-phrase synth for the ack/CAL-L0 caches."""
@@ -350,10 +362,8 @@ class TextToSpeech:
             return self._synthesize_short_pcm(text)
 
     def _run_chatterbox_warmup(self):
-        """Background warmup, ack cache first (small, most urgent for
-        perceived responsiveness), then CAL-L0 (large, throttled against
-        live requests) — see the call site's comment for why this
-        replaced two parallel threads."""
+        """Build Chatterbox acknowledgement and CAL-L0 caches in background."""
+
         self._build_ack_cache()
         self._build_cal_l0_cache()
 
@@ -461,48 +471,78 @@ class TextToSpeech:
         if not self._chatterbox_available():
             return False
 
-        read_timeout = timeout_override if timeout_override is not None else self.chatterbox_timeout
+        read_timeout = (
+            timeout_override
+            if timeout_override is not None
+            else self.chatterbox_timeout
+        )
+        player = None
         try:
             t0 = time.time()
+
             response = self._chatterbox_session.post(
                 self.chatterbox_endpoint,
                 json={"text": text},
                 timeout=(self.chatterbox_connect_timeout, read_timeout),
             )
-            wav = response.content
+            response.raise_for_status()
+            wav_bytes = response.content
 
-            if not wav.startswith(b"RIFF"):
+            if not wav_bytes.startswith(b"RIFF"):
                 self.logger.error("Chatterbox returned invalid WAV data")
                 self._chatterbox_record_failure()
                 return False
 
-            aplay = subprocess.Popen(
-                ["aplay", "-q", "-D", self.audio_device],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            self._track_proc(aplay)
+            with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+                sample_rate = wf.getframerate()
+                channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                pcm = wf.readframes(wf.getnframes())
+
+            if channels != 1 or sample_width != 2:
+                self.logger.error(
+                    "Unsupported Chatterbox WAV format: channels=%d width=%d",
+                    channels,
+                    sample_width,
+                )
+                self._chatterbox_record_failure()
+                return False
+
+            saved_rate = self.sample_rate
+            self.sample_rate = sample_rate
 
             try:
-                _, err = aplay.communicate(
-                    input=wav,
-                    timeout=self.chatterbox_timeout
-                )
-            finally:
-                self._untrack_proc(aplay)
+                player = self._open_aplay()
+                if player is None:
+                    self._chatterbox_record_failure()
+                    return False
 
-            if aplay.returncode != 0:
-                self.logger.error(
-                    "Chatterbox playback failed: %s",
-                    err.decode(errors="replace")
-                )
-                return False
+                self._track_proc(player)
+
+                player.stdin.write(pcm)
+                player.stdin.close()
+
+                rc = player.wait(timeout=30)
+
+                if rc != 0:
+                    err = player.stderr.read().decode(errors="replace").strip()
+                    self.logger.error(
+                        "Chatterbox playback failed (%d): %s",
+                        rc,
+                        err,
+                    )
+                    self._chatterbox_record_failure()
+                    return False
+
+            finally:
+                self.sample_rate = saved_rate
+                if player is not None:
+                    self._untrack_proc(player)
 
             self._chatterbox_record_success()
             self.logger.info(
                 "Chatterbox TTS completed in %.2fs",
-                time.time() - t0
+                time.time() - t0,
             )
             return True
 
@@ -612,6 +652,12 @@ class TextToSpeech:
             return False
 
         self.logger.warning("Primary TTS failed - falling back to Piper")
+
+        if self.output_backend == "windows":
+            pcm, sr = self._piper_generate_pcm(text)
+            if pcm is None:
+                return False
+            return self._play_pcm_windows(pcm, sr)
         # _speak_piper opens its own aplay with the correct rate
         saved_rate = self.sample_rate
         self.sample_rate = getattr(self, '_piper_sample_rate', 22050)
@@ -711,6 +757,16 @@ class TextToSpeech:
             # Saves ~300ms per cached phrase. Cache key is the exact text.
             cached_pcm = self._tts_cache.get(text) if hasattr(self, "_tts_cache") else None
             if cached_pcm is not None:
+                if getattr(self, "output_backend", "auto") == "windows":
+                    ok = self._play_pcm_windows(
+                        cached_pcm,
+                        self.sample_rate,
+                    )
+                    if ok:
+                        self.logger.info(
+                            f"CAL-L0 cached Windows playback: '{text[:50]}'"
+                        )
+                        return True
                 try:
                     aplay = self._open_aplay()
                     if aplay:
@@ -760,7 +816,14 @@ class TextToSpeech:
                         return self._fallback_to_piper(text)
                     return result
                 elif self.engine == "chatterbox":
-                    result = self._speak_chatterbox(text, timeout_override=timeout_override)
+                    if getattr(self, "output_backend", "auto") == "windows":
+                        result = self._speak_chatterbox_windows(
+                            text, timeout_override=timeout_override
+                        )
+                    else:
+                        result = self._speak_chatterbox(
+                            text, timeout_override=timeout_override
+                        )
                     if not result:
                         if cancel_check is not None:
                             # Bounded/cancellable call (the contextual-ack
@@ -1127,6 +1190,17 @@ class TextToSpeech:
             return False
 
         with self._tts_lock:
+            if self.output_backend == "windows":
+                ok = self._play_pcm_windows(
+                    pcm,
+                    self.sample_rate,
+                )
+                if ok:
+                    self.logger.info(
+                        f"CAL-L0 cached Windows playback: '{text[:50]}'"
+                    )
+                return ok
+
             try:
                 aplay = self._open_aplay()
                 if aplay is None:
@@ -1241,6 +1315,15 @@ class TextToSpeech:
             pcm, style = cache[phrase]
             self.logger.info(f"Ack: '{phrase}' (style={style})")
 
+            if self.output_backend == "windows":
+                ok = self._play_pcm_windows(
+                    pcm,
+                    self.sample_rate,
+                )
+                if ok:
+                    self._ack_played = True
+                return ok
+
             try:
                 aplay = self._open_aplay()
                 if aplay is None:
@@ -1273,6 +1356,150 @@ class TextToSpeech:
 
     # ── Scoped subprocess control ─────────────────────────────────────
 
+    def _play_wav_windows(self, wav_bytes: bytes) -> bool:
+        """Play a complete WAV through the native Windows audio stack."""
+        import uuid
+
+        if not wav_bytes:
+            return False
+
+        self.windows_temp_dir.mkdir(parents=True, exist_ok=True)
+        wav_path = self.windows_temp_dir / f"jarvis-{uuid.uuid4().hex}.wav"
+        wav_path.write_bytes(wav_bytes)
+
+        proc = None
+        try:
+            result = subprocess.run(
+                ["wslpath", "-w", str(wav_path)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            )
+            windows_path = result.stdout.strip()
+
+            ps_path = windows_path.replace("'", "''")
+            ps = (
+                f"$p='{ps_path}';"
+                "$sp=[System.Media.SoundPlayer]::new($p);"
+                "try{$sp.Load();$sp.PlaySync()}"
+                "finally{$sp.Dispose()}"
+            )
+
+            proc = subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    ps,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            self._track_proc(proc)
+
+            try:
+                rc = proc.wait(timeout=120)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                self.logger.error("Windows audio playback timed out")
+                return False
+
+            if rc != 0:
+                err = proc.stderr.read().decode(errors="replace").strip()
+                self.logger.error(
+                    "Windows audio playback failed (%d): %s",
+                    rc,
+                    err,
+                )
+                return False
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Windows audio playback failed: {e}")
+            return False
+
+        finally:
+            if proc is not None:
+                self._untrack_proc(proc)
+            try:
+                wav_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _play_pcm_windows(
+        self,
+        pcm: bytes,
+        sample_rate: int | None = None,
+        channels: int = 1,
+        sample_width: int = 2,
+    ) -> bool:
+        """Wrap raw PCM as WAV and play it through Windows."""
+        if not pcm:
+            return False
+
+        rate = int(sample_rate or self.sample_rate)
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(sample_width)
+            wf.setframerate(rate)
+            wf.writeframes(pcm)
+
+        return self._play_wav_windows(buf.getvalue())
+
+    def _speak_chatterbox_windows(self, text: str, timeout_override: float = None) -> bool:
+        """Generate with Chatterbox in WSL, play the WAV natively in Windows."""
+        if not self._chatterbox_available():
+            return False
+
+        read_timeout = (
+            timeout_override
+            if timeout_override is not None
+            else self.chatterbox_timeout
+        )
+
+        try:
+            t0 = time.time()
+
+            response = self._chatterbox_session.post(
+                self.chatterbox_endpoint,
+                json={"text": text},
+                timeout=(
+                    self.chatterbox_connect_timeout,
+                    read_timeout,
+                ),
+            )
+            response.raise_for_status()
+            wav_bytes = response.content
+
+            if not wav_bytes.startswith(b"RIFF"):
+                self.logger.error("Chatterbox returned invalid WAV data")
+                self._chatterbox_record_failure()
+                return False
+
+            ok = self._play_wav_windows(wav_bytes)
+
+            if not ok:
+                self._chatterbox_record_failure()
+                return False
+
+            self._chatterbox_record_success()
+            self.logger.info(
+                "Chatterbox Windows TTS completed in %.2fs",
+                time.time() - t0,
+            )
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Chatterbox Windows TTS failed: {e}")
+            self._chatterbox_record_failure()
+            return False
+
     def _track_proc(self, proc):
         """Register an audio subprocess for scoped interrupt control."""
         with self._active_procs_lock:
@@ -1302,64 +1529,81 @@ class TextToSpeech:
 
     # ── Kokoro speak ──────────────────────────────────────────────────
 
+    def _raw_playback_cmd(self, sample_rate: int | None = None) -> list[str]:
+        """Return the native raw-audio playback command for this output."""
+        rate = int(sample_rate or self.sample_rate)
+
+        # WSLg / PulseAudio / PipeWire:
+        # use Pulse natively instead of ALSA -> Pulse emulation.
+        if self.audio_device in ("pulse", "pipewire"):
+            return [
+                "pacat",
+                "--playback",
+                "--raw",
+                f"--rate={rate}",
+                "--channels=1",
+                "--format=s16le",
+            ]
+
+        # Real ALSA device.
+        return [
+            "aplay",
+            "-D", self.audio_device,
+            "-t", "raw",
+            "-r", str(rate),
+            "-c", "1",
+            "-f", "S16_LE",
+        ]
+
     def _open_aplay(self, max_retries: int = 5, retry_delay: float = 0.5):
-        """Open an aplay process, retrying if the device is temporarily busy.
+        """Open the configured raw-audio playback process.
 
-        PipeWire can briefly hold the ALSA device after a previous aplay
-        exits, causing 'Device or resource busy' on immediate re-open.
-        We verify the device actually opened by writing a tiny silent frame;
-        if the write fails (BrokenPipeError), we retry after a delay.
-
-        Returns:
-            subprocess.Popen or None on failure.
+        Pulse/PipeWire uses pacat directly. Real ALSA devices use aplay.
         """
+        cmd = self._raw_playback_cmd()
+
         for attempt in range(max_retries):
-            self.logger.debug("aplay open: attempt %d/%d device=%s",
-                              attempt + 1, max_retries, self.audio_device)
-            proc = subprocess.Popen(
-                ["aplay", "-D", self.audio_device, "-t", "raw",
-                 "-r", str(self.sample_rate), "-c", "1", "-f", "S16_LE"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                bufsize=0,
+            self.logger.debug(
+                "audio open: attempt %d/%d device=%s cmd=%s",
+                attempt + 1,
+                max_retries,
+                self.audio_device,
+                cmd[0],
             )
-            # Verify device opened by writing a silent sample.
-            # The test write can land in the OS pipe buffer BEFORE aplay
-            # actually opens the ALSA device. So after writing, we wait
-            # briefly and check if aplay is still alive — if it exited,
-            # the device open failed (e.g. "Device or resource busy").
+
             try:
-                proc.stdin.write(b'\x00\x00')  # 1 silent S16_LE sample
-                proc.stdin.flush()
-                # Give aplay time to actually open the ALSA device
-                time.sleep(0.15)
-                if proc.poll() is not None:
-                    # aplay exited — device open failed despite test write
-                    err = ""
-                    try:
-                        err = proc.stderr.read().decode().strip()
-                    except Exception:
-                        pass
-                    self.logger.warning(
-                        f"aplay exited after test write (attempt {attempt + 1}/{max_retries}): {err}"
-                    )
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
-                    continue
-                return proc  # aplay still running — device is open
-            except (BrokenPipeError, OSError):
-                err = ""
-                try:
-                    err = proc.stderr.read().decode().strip()
-                except Exception:
-                    pass
-                self.logger.warning(
-                    f"aplay open failed (attempt {attempt + 1}/{max_retries}): {err}"
+                proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
                 )
-                proc.wait()
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
+
+                # Give the backend a moment to fail immediately if the
+                # requested device is unavailable.
+                time.sleep(0.05)
+
+                if proc.poll() is None:
+                    return proc
+
+                err = proc.stderr.read().decode(errors="replace").strip()
+                self.logger.warning(
+                    "Audio backend %s failed to open: %s",
+                    cmd[0],
+                    err or f"exit code {proc.returncode}",
+                )
+
+            except Exception as e:
+                self.logger.warning(
+                    "Audio backend %s open failed: %s",
+                    cmd[0],
+                    e,
+                )
+
+            if attempt + 1 < max_retries:
+                time.sleep(retry_delay)
+
         return None
 
     def _trim_trailing_silence(self, audio_np, threshold=0.01, keep_ms=150):
@@ -1589,14 +1833,7 @@ class TextToSpeech:
             )
             self._track_proc(piper)
 
-            aplay_cmd = [
-                "aplay",
-                "-D", self.audio_device,
-                "-t", "raw",
-                "-r", str(self.sample_rate),
-                "-c", "1",
-                "-f", "S16_LE",
-            ]
+            aplay_cmd = self._raw_playback_cmd(self.sample_rate)
 
             aplay = subprocess.Popen(
                 aplay_cmd,

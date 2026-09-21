@@ -5,6 +5,9 @@ from core.base_skill import BaseSkill
 from core.llm_router import LLMRouter
 from core.privacy_gate import get_privacy_gate, Capability
 
+_JARVIS_ROOT = Path(__file__).resolve().parents[3]
+_DATA_ROOT = Path("/home/alex/jarvis-data")
+
 class FilesystemSkill(BaseSkill):
     _PRIVACY_DENIED_MESSAGE = "Das ist während der Privatsphäre-Einstellung nicht verfügbar."
 
@@ -152,7 +155,7 @@ class FilesystemSkill(BaseSkill):
         if self._privacy_denied():
             return self._PRIVACY_DENIED_MESSAGE
         try:
-            jarvis_path = Path.home() / "jarvis"
+            jarvis_path = _JARVIS_ROOT
             
             # Count Python files
             result = subprocess.run(
@@ -204,10 +207,10 @@ class FilesystemSkill(BaseSkill):
                 'music': Path.home() / 'Music',
                 'scripts': Path.home() / 'scripts',
                 'bin': Path.home() / 'bin',
-                'jarvis': Path.home() / 'jarvis',
-                'core': Path.home() / 'jarvis' / 'core',
-                'skills': Path('/mnt/storage/jarvis/skills'),
-                'models': Path('/mnt/models'),
+                'jarvis': _JARVIS_ROOT,
+                'core': _JARVIS_ROOT / 'core',
+                'skills': _JARVIS_ROOT / 'skills',
+                'models': _DATA_ROOT / 'models',
             }
             
             # Try to find directory in query

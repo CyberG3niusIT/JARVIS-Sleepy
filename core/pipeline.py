@@ -401,6 +401,15 @@ class _ChatterboxAudioWriter:
                 if not pcm:
                     continue
 
+                if getattr(tts, "output_backend", "") == "windows":
+                    rate = sr or tts.sample_rate
+                    if not tts._play_pcm_windows(pcm, rate):
+                        self.error = "Windows audio playback failed"
+                        self._stopped.set()
+                        break
+                    self.total_samples += len(pcm) // 2
+                    continue
+
                 if self.aplay is None:
                     if sr:
                         tts.sample_rate = sr
@@ -449,7 +458,11 @@ class _ChatterboxAudioWriter:
         self._thread.join(timeout=max(30, timeout))
 
         if self.aplay is None:
-            return self.error is None, 0, self.error
+            return (
+                self.error is None,
+                self.total_samples,
+                self.error,
+            )
 
         try:
             rc = self.aplay.wait(timeout=timeout)

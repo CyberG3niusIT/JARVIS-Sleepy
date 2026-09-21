@@ -4,6 +4,11 @@ Developer Tools — LLM Prompt Templates
 Prompts for natural language → shell command translation and output summarization.
 """
 
+from pathlib import Path
+
+_JARVIS_ROOT = Path(__file__).resolve().parents[3]
+_MODELS_ROOT = Path("/home/alex/jarvis-data/models")
+
 
 def query_to_command_prompt(user_query: str, context: str = "") -> str:
     """
@@ -26,9 +31,9 @@ Rules:
 - "git log" or "recent commits" → use: git log (only when the user explicitly asks about commits)
 
 Project paths:
-- Main code: /home/user/jarvis
-- Skills: /mnt/storage/jarvis/skills
-- Models: /mnt/models
+- Main code: {_JARVIS_ROOT}
+- Skills: {_JARVIS_ROOT / 'skills'}
+- Models: {_MODELS_ROOT}
 {f"Additional context: {context}" if context else ""}
 
 User request: {user_query}

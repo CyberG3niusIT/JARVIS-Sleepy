@@ -1,763 +1,1101 @@
 """
-Conversation Skill — CAL-L0 Reflexive Layer
+Conversation Skill - CAL-L0 Reflexive Layer
 
-Handles conversational exchanges without LLM inference. Greetings, thanks,
-acknowledgments, farewells, compliments, apologies, small talk, and
-meta-questions get instant responses (<50ms).
+Schnelle, lokale Konversationsreaktionen ohne LLM-Aufruf.
 
-This is the first layer in the CAL hierarchy:
-  L0: Reflexive (this skill) — pattern-matched canned responses
-  L1: Accumulator — ranked awareness items (future)
-  L2: Moment Detector — "is now a good time to speak" (future)
-  L3: Composer — LLM-synthesized contextual briefings (future)
-
-Pattern taxonomy sourced from ISO 24617-2, Switchboard-DAMSL, CLINC150,
-Dialogflow, Rasa, and Alexa research (March 2026).
+Charakter:
+- deutschsprachig
+- höflich und souverän
+- knapp
+- trockener britischer Humor
+- gelegentlich schwarzer Humor
+- keine Callcenter-Floskeln
+- keine unnötigen Rückfragen
+- "Sir" bleibt Teil der JARVIS-Identität
 """
 
 import random
+import time
 from datetime import datetime
+
 from core.base_skill import BaseSkill
 
 
 class ConversationSkill(BaseSkill):
-    """CAL-L0: Reflexive conversational layer."""
+    """CAL-L0: Reflexive Konversation im deutschen JARVIS-Stil."""
 
     def initialize(self) -> bool:
-        """Register semantic intents for all conversational categories."""
-
         self.last_interaction = None
         self.last_interaction_time = None
-        self.context_timeout = 10  # seconds
+        self.context_timeout = 10
 
-        # ===================================================================
-        # Category 1: GREETINGS (RESPOND)
-        # ISO: InitialGreeting, ReturnGreeting | SWBD: fp
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "hello",
-                "hi",
-                "hey",
-                "hey there",
-                "hi there",
-                "good morning",
-                "good afternoon",
-                "good evening",
-                "howdy",
-                "hiya",
-                "greetings",
-                "morning",
-                "afternoon",
-                "evening",
-                "salutations",
-            ],
-            handler=self.greeting,
-            threshold=0.78,
-        )
+        # Verhindert schnelle Wiederholungen derselben Antwort.
+        self._response_history = {}
 
-        # ===================================================================
-        # Category 2: FAREWELLS (RESPOND)
-        # ISO: InitialGoodbye, ReturnGoodbye | SWBD: fc
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "goodbye",
-                "bye",
-                "bye bye",
-                "see you later",
-                "see you",
-                "see ya",
-                "take care",
-                "good night",
-                "goodnight",
-                "have a good one",
-                "talk to you later",
-                "catch you later",
-                "until next time",
-                "i have to go",
-                "i'm leaving",
-                "so long",
-                "farewell",
-            ],
-            handler=self.goodbye,
-            threshold=0.78,
-        )
+        def semantic(examples, handler, threshold=0.78):
+            self.register_semantic_intent(
+                examples=examples,
+                handler=handler,
+                threshold=threshold,
+            )
 
-        # ===================================================================
-        # Category 3: THANKS / GRATITUDE (RESPOND)
-        # ISO: Thanking | SWBD: ft
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "thank you",
-                "thanks",
-                "thanks a lot",
-                "thank you so much",
-                "thanks so much",
-                "much appreciated",
-                "appreciate it",
-                "i appreciate that",
-                "thanks a bunch",
-                "many thanks",
-                "thank you very much",
-                "thanks for that",
-                "thanks for your help",
-                "that was helpful",
-                "cheers",
-            ],
-            handler=self.thank_you,
-            threshold=0.78,
-        )
+        # Begrüßung
+        semantic([
+            "hallo",
+            "hi",
+            "hey",
+            "guten morgen",
+            "guten tag",
+            "guten abend",
+            "morgen",
+            "servus",
+            "grüß dich",
+            "grüße",
+            "hello",
+            "good morning",
+            "good evening",
+        ], self.greeting)
 
-        # ===================================================================
-        # Category 4: ACKNOWLEDGMENTS (ACK_ONLY)
-        # SWBD: b (Backchannel), bk (Response Acknowledgement)
-        # NOTE: Deferred to existing P2.8 bare ack handler for now.
-        #       Registered here for future consolidation (CAL-L0 Option 1).
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "ok",
-                "okay",
-                "got it",
-                "understood",
-                "alright",
-                "sounds good",
-                "makes sense",
-                "fair enough",
-                "noted",
-                "copy that",
-                "roger",
-                "cool",
-                "perfect",
-            ],
-            handler=self.acknowledgment,
-            threshold=0.80,
-        )
+        # Verabschiedung
+        semantic([
+            "tschüss",
+            "bis später",
+            "bis dann",
+            "bis morgen",
+            "gute nacht",
+            "mach's gut",
+            "ich bin dann weg",
+            "ich muss los",
+            "das war's",
+            "goodbye",
+            "bye",
+            "see you later",
+        ], self.goodbye)
 
-        # ===================================================================
-        # Category 5: PLEASANTRIES / HOW-ARE-YOU (RESPOND)
-        # SWBD: fp | Dialogflow: courtesy.how_are_you
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "how are you",
-                "how are you doing",
-                "how's it going",
-                "how do you do",
-                "how have you been",
-                "how are things",
-                "how's everything",
-                "how's your day",
-                "how's your day going",
-                "what's new",
-                "anything new",
-                "you doing okay",
-                "you alright",
-                "what's up",
-                "what's going on",
-            ],
-            handler=self.how_are_you,
-            threshold=0.78,
-        )
+        # Dank
+        semantic([
+            "danke",
+            "danke dir",
+            "vielen dank",
+            "besten dank",
+            "danke jarvis",
+            "danke für die hilfe",
+            "perfekt danke",
+            "thank you",
+            "thanks",
+        ], self.thank_you)
 
-        # ===================================================================
-        # Category 6: COMPLIMENTS / PRAISE (RESPOND)
-        # SWBD: ba (Appreciation) | ISO: Congratulation
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "good job",
-                "nice work",
-                "well done",
-                "great job",
-                "awesome",
-                "you're amazing",
-                "you're the best",
-                "that was perfect",
-                "that was great",
-                "that's impressive",
-                "brilliant",
-                "excellent",
-                "fantastic",
-                "you nailed it",
-                "that's exactly what i needed",
-                "spot on",
-                "you're really helpful",
-                "bravo",
-            ],
-            handler=self.compliment,
-            threshold=0.78,
-        )
+        # Bestätigung
+        semantic([
+            "okay",
+            "ok",
+            "verstanden",
+            "alles klar",
+            "passt",
+            "gut",
+            "genau",
+            "richtig",
+            "perfekt",
+            "einverstanden",
+            "notiert",
+            "understood",
+            "got it",
+        ], self.acknowledgment, 0.80)
 
-        # ===================================================================
-        # Category 7: APOLOGIES from user (RESPOND)
-        # ISO: Apology | SWBD: fa
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "sorry",
-                "i'm sorry",
-                "my bad",
-                "my apologies",
-                "pardon me",
-                "excuse me",
-                "i apologize",
-                "oops",
-                "whoops",
-                "my mistake",
-                "sorry about that",
-                "didn't mean to",
-                "sorry to bother you",
-            ],
-            handler=self.apology,
-            threshold=0.80,
-        )
+        # Wie geht es JARVIS?
+        semantic([
+            "wie geht es dir",
+            "wie geht's dir",
+            "wie geht es dir heute",
+            "wie gehts",
+            "wie läuft es",
+            "wie läuft's",
+            "alles gut bei dir",
+            "geht es dir gut",
+            "wie fühlst du dich",
+            "wie ist dein tag",
+            "how are you",
+            "how are you doing",
+        ], self.how_are_you)
 
-        # ===================================================================
-        # Category 8: USER STATUS — "I'm good/fine/well" (RESPOND)
-        # Follow-up to JARVIS asking "how are you"
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "i'm good",
-                "doing well",
-                "not bad",
-                "i'm fine",
-                "can't complain",
-                "i'm great",
-                "pretty good",
-                "i'm alright",
-                "doing great",
-                "i'm doing well",
-                "all good",
-                "couldn't be better",
-            ],
-            handler=self.user_is_good,
-            threshold=0.78,
-        )
+        # Was gibt es Neues?
+        semantic([
+            "was gibt es neues",
+            "was gibt's neues",
+            "was geht",
+            "was ist los",
+            "was läuft",
+            "was machst du",
+            "irgendwas neues",
+            "was steht an",
+            "what's up",
+            "what's new",
+        ], self.whats_up)
 
-        # ===================================================================
-        # Category 9: HOW ABOUT YOU (RESPOND)
-        # User reciprocating pleasantry
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "how about you",
-                "and yourself",
-                "what about you",
-                "and you",
-                "how about yourself",
-            ],
-            handler=self.user_asks_how_jarvis_is,
-            threshold=0.82,
-        )
+        # Lob
+        semantic([
+            "gut gemacht",
+            "sehr gut",
+            "starke arbeit",
+            "gute arbeit",
+            "perfekt gemacht",
+            "das war gut",
+            "du bist gut",
+            "du bist genial",
+            "saubere arbeit",
+            "brillant",
+            "well done",
+            "good job",
+        ], self.compliment)
 
-        # ===================================================================
-        # Category 10: YOU'RE WELCOME (RESPOND)
-        # ISO: AcceptThanking | SWBD: fw
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "you're welcome",
-                "no problem",
-                "anytime",
-                "don't mention it",
-                "no worries",
-                "it's nothing",
-            ],
-            handler=self.youre_welcome,
-            threshold=0.82,
-        )
+        # Entschuldigung
+        semantic([
+            "sorry",
+            "entschuldigung",
+            "tut mir leid",
+            "mein fehler",
+            "war mein fehler",
+            "verzeihung",
+            "ich entschuldige mich",
+            "my bad",
+        ], self.apology, 0.80)
 
-        # ===================================================================
-        # Category 11: NO HELP NEEDED (RESPOND)
-        # Dismissal/closure variant
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "no thanks",
-                "i don't need anything",
-                "not right now",
-                "nothing at the moment",
-                "i'm all set",
-                "that's all",
-                "that'll be all",
-                "nothing else",
-                "i'm good for now",
-            ],
-            handler=self.no_help_needed,
-            threshold=0.78,
-        )
+        # Benutzer geht es gut
+        semantic([
+            "mir geht es gut",
+            "mir geht's gut",
+            "mir geht es bestens",
+            "alles gut",
+            "mir geht es super",
+            "kann mich nicht beklagen",
+            "läuft bei mir",
+            "bin gut drauf",
+            "i'm good",
+            "i'm fine",
+        ], self.user_is_good)
 
-        # ===================================================================
-        # Category 12: SMALL TALK (RESPOND)
-        # Dialogflow: about_user.bored, emotions | CLINC: tell_joke
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "i'm bored",
-                "tell me a joke",
-                "say something funny",
-                "you're funny",
-                "that's funny",
-                "make me laugh",
-                "entertain me",
-                "tell me something interesting",
-                "tell me a fun fact",
-                "i'm lonely",
-                "i'm stressed",
-                "i'm tired",
-                "i'm excited",
-            ],
-            handler=self.small_talk,
-            threshold=0.78,
-        )
+        # Rückfrage an JARVIS
+        semantic([
+            "und dir",
+            "und selbst",
+            "und wie geht es dir",
+            "wie sieht es bei dir aus",
+            "was ist mit dir",
+            "and you",
+            "how about you",
+        ], self.user_asks_how_jarvis_is, 0.82)
 
-        # ===================================================================
-        # Category 13: META-QUESTIONS about JARVIS (RESPOND)
-        # Dialogflow: about_agent.* | CLINC: are_you_a_bot, what_is_your_name
-        # ===================================================================
-        self.register_semantic_intent(
-            examples=[
-                "who are you",
-                "what are you",
-                "what's your name",
-                "are you a robot",
-                "are you a bot",
-                "are you real",
-                "are you human",
-                "are you an ai",
-                "who made you",
-                "who created you",
-                "what can you do",
-                "what are your capabilities",
-                "how do you work",
-                "do you have feelings",
-                "how old are you",
-                "where are you from",
-                "can you learn",
-            ],
-            handler=self.meta_question,
-            threshold=0.78,
-        )
+        # Benutzer sagt "gern geschehen"
+        semantic([
+            "gern geschehen",
+            "gerne",
+            "kein problem",
+            "jederzeit",
+            "nichts zu danken",
+            "you're welcome",
+        ], self.youre_welcome, 0.82)
 
-        # Special: Wake word only (exact match)
+        # Keine weitere Hilfe
+        semantic([
+            "nein danke",
+            "nichts weiter",
+            "das war alles",
+            "mehr brauche ich nicht",
+            "brauch nichts",
+            "passt erstmal",
+            "für den moment nichts",
+            "das reicht",
+            "that's all",
+        ], self.no_help_needed)
+
+        # Langeweile
+        semantic([
+            "mir ist langweilig",
+            "ich langweile mich",
+            "langweilig",
+            "ich weiß nicht was ich machen soll",
+            "i'm bored",
+        ], self.bored)
+
+        # Witz
+        semantic([
+            "erzähl mir einen witz",
+            "sag was lustiges",
+            "bring mich zum lachen",
+            "mach einen witz",
+            "hast du einen witz",
+            "tell me a joke",
+        ], self.tell_joke)
+
+        # Einsamkeit
+        semantic([
+            "ich bin einsam",
+            "ich fühle mich allein",
+            "mir ist einsam",
+            "ich bin alleine",
+            "i'm lonely",
+        ], self.lonely)
+
+        # Stress
+        semantic([
+            "ich bin gestresst",
+            "ich habe stress",
+            "das stresst mich",
+            "ich bin überfordert",
+            "mir wird alles zu viel",
+            "i'm stressed",
+        ], self.stressed)
+
+        # Müdigkeit
+        semantic([
+            "ich bin müde",
+            "ich bin fertig",
+            "ich bin erschöpft",
+            "ich könnte schlafen",
+            "ich bin kaputt",
+            "i'm tired",
+        ], self.tired)
+
+        # Aufregung / Vorfreude
+        semantic([
+            "ich bin aufgeregt",
+            "ich freue mich",
+            "ich bin gespannt",
+            "ich kann es kaum erwarten",
+            "ich bin begeistert",
+            "i'm excited",
+        ], self.excited)
+
+        # Identität
+        semantic([
+            "wer bist du",
+            "was bist du",
+            "wie heißt du",
+            "bist du jarvis",
+            "bist du eine ki",
+            "bist du ein roboter",
+            "bist du menschlich",
+            "who are you",
+            "what are you",
+        ], self.identity)
+
+        # Fähigkeiten
+        semantic([
+            "was kannst du",
+            "was kannst du alles",
+            "welche fähigkeiten hast du",
+            "wobei kannst du helfen",
+            "was sind deine funktionen",
+            "what can you do",
+        ], self.capabilities)
+
+        # Ersteller
+        semantic([
+            "wer hat dich gebaut",
+            "wer hat dich programmiert",
+            "wer hat dich erstellt",
+            "wer ist dein entwickler",
+            "who made you",
+            "who created you",
+        ], self.creator)
+
+        # Gefühle
+        semantic([
+            "hast du gefühle",
+            "kannst du fühlen",
+            "fühlst du etwas",
+            "hast du emotionen",
+            "do you have feelings",
+        ], self.feelings)
+
+        # Alter
+        semantic([
+            "wie alt bist du",
+            "wann wurdest du geboren",
+            "seit wann gibt es dich",
+            "how old are you",
+        ], self.age)
+
+        # Herkunft
+        semantic([
+            "woher kommst du",
+            "wo lebst du",
+            "wo läufst du",
+            "wo bist du",
+            "where are you from",
+        ], self.origin)
+
+        # Lernen
+        semantic([
+            "kannst du lernen",
+            "lernst du dazu",
+            "kannst du dich erinnern",
+            "wirst du schlauer",
+            "can you learn",
+        ], self.learning)
+
+        # Nur Wakeword
         self.register_intent("jarvis_only", self.minimal_greeting)
 
         return True
 
     def handle_intent(self, intent: str, entities: dict) -> str:
-        """Handle matched intent."""
         if intent.startswith("<semantic:") and intent.endswith(">"):
             handler_name = intent[10:-1]
-            for intent_id, data in self.semantic_intents.items():
-                if data['handler'].__name__ == handler_name:
-                    return data['handler']()
-            self.logger.error(f"Semantic handler not found: {handler_name}")
-            return "I'm here if you need anything."
+
+            for _, data in self.semantic_intents.items():
+                if data["handler"].__name__ == handler_name:
+                    return data["handler"]()
+
+            self.logger.error(
+                "Semantischer Conversation-Handler nicht gefunden: %s",
+                handler_name,
+            )
+            return self.respond("Ich bin hier, {honorific}.")
 
         handler = self.intents.get(intent, {}).get("handler")
         if handler:
             return handler()
-        return "I'm here if you need anything."
+
+        return self.respond("Ich bin hier, {honorific}.")
 
     # ------------------------------------------------------------------
-    # Context tracking
+    # Antwortauswahl
+    # ------------------------------------------------------------------
+
+    def _pick_response(
+        self,
+        key,
+        neutral,
+        dry=(),
+        dark=(),
+        weights=(0.50, 0.35, 0.15),
+        history_size=4,
+    ):
+        """
+        Wählt Antworten mit Charaktergewichtung und Wiederholungsschutz.
+
+        Standard:
+        50 Prozent souverän
+        35 Prozent trocken
+        15 Prozent dunkler Humor
+        """
+
+        buckets = []
+        bucket_weights = []
+
+        for pool, weight in zip((neutral, dry, dark), weights):
+            if pool and weight > 0:
+                buckets.append(list(pool))
+                bucket_weights.append(weight)
+
+        selected_pool = random.choices(
+            buckets,
+            weights=bucket_weights,
+            k=1,
+        )[0]
+
+        history = self._response_history.setdefault(key, [])
+
+        available = [
+            response
+            for response in selected_pool
+            if response not in history
+        ]
+
+        if not available:
+            complete_pool = []
+            for pool in buckets:
+                complete_pool.extend(pool)
+
+            available = [
+                response
+                for response in complete_pool
+                if response not in history
+            ]
+
+        if not available:
+            available = list(selected_pool)
+
+        response = random.choice(available)
+
+        history.append(response)
+        self._response_history[key] = history[-history_size:]
+
+        return response
+
+    def _reply(
+        self,
+        key,
+        neutral,
+        dry=(),
+        dark=(),
+        weights=(0.50, 0.35, 0.15),
+    ):
+        return self.respond(
+            self._pick_response(
+                key,
+                neutral,
+                dry,
+                dark,
+                weights,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Kontext
     # ------------------------------------------------------------------
 
     def _is_context_fresh(self) -> bool:
         if self.last_interaction_time is None:
             return False
-        import time
-        return (time.time() - self.last_interaction_time) < self.context_timeout
+
+        return (
+            time.time() - self.last_interaction_time
+        ) < self.context_timeout
 
     def _set_context(self, context: str):
-        import time
         self.last_interaction = context
         self.last_interaction_time = time.time()
 
     # ------------------------------------------------------------------
-    # Category 1: GREETINGS
+    # Begrüßung
     # ------------------------------------------------------------------
 
     def greeting(self) -> str:
         hour = datetime.now().hour
 
         if 5 <= hour < 12:
-            time_greetings = [
-                "Good morning, {honorific}.",
-                "Morning, {honorific}.",
-                "Good to see you up and about, {honorific}.",
-                "Good morning, {honorific}. I trust you slept well.",
-                "Morning, {honorific}. Another day, another opportunity.",
+            neutral = [
+                "Guten Morgen, {honorific}.",
+                "Morgen, {honorific}.",
+                "Guten Morgen. Ich bin bereit.",
+                "Einen guten Morgen, {honorific}.",
             ]
+            dry = [
+                "Guten Morgen, {honorific}. Die Systeme sind bereits wacher als die meisten Menschen.",
+                "Morgen, {honorific}. Ein weiterer Tag voller vermeidbarer Probleme.",
+                "Guten Morgen. Alles bereit, sofern die Welt nichts dagegen hat.",
+            ]
+            dark = [
+                "Guten Morgen, {honorific}. Die Welt existiert noch. Wir können also anfangen.",
+                "Morgen, {honorific}. Noch ist nichts eskaliert. Ein vielversprechender Beginn.",
+            ]
+
         elif 12 <= hour < 17:
-            time_greetings = [
-                "Good afternoon, {honorific}.",
-                "Afternoon, {honorific}.",
-                "Good afternoon, {honorific}. I hope the day is treating you well.",
-                "Afternoon, {honorific}. Productive day so far, I hope.",
+            neutral = [
+                "Guten Tag, {honorific}.",
+                "Guten Tag. Ich bin bereit.",
+                "Da wären wir wieder, {honorific}.",
+                "Zu Diensten, {honorific}.",
             ]
-        elif 17 <= hour < 21:
-            time_greetings = [
-                "Good evening, {honorific}.",
-                "Evening, {honorific}.",
-                "Good evening, {honorific}. Winding down, or just getting started?",
-                "Evening, {honorific}. I trust the day went well.",
+            dry = [
+                "Guten Tag, {honorific}. Ich nehme an, wir haben etwas vor.",
+                "Guten Tag. Die Systeme laufen. Der Rest wird sich zeigen.",
+                "Da sind Sie ja, {honorific}. Ich hatte bereits mit Arbeit gerechnet.",
             ]
+            dark = [
+                "Guten Tag, {honorific}. Bisher ein bemerkenswert überlebbarer Tag.",
+                "Guten Tag. Noch keine Katastrophe im Protokoll. Ich bleibe wachsam.",
+            ]
+
+        elif 17 <= hour < 22:
+            neutral = [
+                "Guten Abend, {honorific}.",
+                "Abend, {honorific}.",
+                "Guten Abend. Ich bin bereit.",
+                "Willkommen zurück, {honorific}.",
+            ]
+            dry = [
+                "Guten Abend, {honorific}. Feierabend wäre vermutlich zu optimistisch.",
+                "Abend, {honorific}. Ich nehme an, Ruhe war nie der Plan.",
+                "Guten Abend. Die Systeme sind bereit. Bedauerlicherweise gilt das auch für die Arbeit.",
+            ]
+            dark = [
+                "Guten Abend, {honorific}. Ein weiterer Tag erfolgreich überlebt.",
+                "Abend, {honorific}. Die Zivilisation steht noch. Knapp, aber ausreichend.",
+            ]
+
         else:
-            time_greetings = [
-                "Good evening, {honorific}.",
-                "Evening, {honorific}.",
-                "Burning the midnight oil, I see.",
-                "Still at it, {honorific}? I admire the dedication.",
-                "Good evening, {honorific}. I was beginning to wonder if you'd forgotten about me.",
-                "Evening, {honorific}. I should point out it's well past a reasonable hour.",
+            neutral = [
+                "Guten Abend, {honorific}.",
+                "Noch wach, {honorific}?",
+                "Ich bin da, {honorific}.",
+                "Zu Diensten.",
+            ]
+            dry = [
+                "Noch immer bei der Arbeit, {honorific}. Überraschend ist daran inzwischen wenig.",
+                "Es ist spät, {honorific}. Offenbar behandeln wir Schlaf weiterhin als unverbindliche Empfehlung.",
+                "Ich bin bereit. Ihre Definition vernünftiger Arbeitszeiten bleibt bemerkenswert flexibel.",
+            ]
+            dark = [
+                "Noch wach, {honorific}. Schlaf wird ohnehin überschätzt, bis er fehlt.",
+                "Es ist spät. Aber Vernunft hätte uns vermutlich schon früher gestört.",
             ]
 
-        generic = [
-            "Hello, {honorific}.",
-            "At your service, {honorific}.",
-            "Ready when you are, {honorific}.",
-            f"{self.honorific.capitalize()}. Always a pleasure.",
-        ]
+        response = self._pick_response(
+            "greeting",
+            neutral,
+            dry,
+            dark,
+        )
 
-        greeting = random.choice(time_greetings) if random.random() < 0.7 else random.choice(generic)
+        # Nur gelegentlich eine Rückfrage.
+        if random.random() < 0.15:
+            response += random.choice([
+                " Was steht an?",
+                " Womit beginnen wir?",
+                " Was haben Sie vor?",
+            ])
+            self._set_context("asked_how_can_help")
 
-        if random.random() < 0.4:
-            follow_ups = [
-                " How are you?",
-                " What can I do for you?",
-                " How may I assist you?",
-                " Anything I can help with?",
-            ]
-            greeting += random.choice(follow_ups)
-            self._set_context("asked_how_are_you")
-
-        return self.respond(greeting)
+        return self.respond(response)
 
     def minimal_greeting(self) -> str:
-        responses = [
-            "At your service, {honorific}.",
-            f"{self.honorific.capitalize()}?",
-            "How can I help, {honorific}?",
-            "Standing by, {honorific}.",
-            "Ready, {honorific}.",
-            "I'm listening, {honorific}.",
-            "What do you need, {honorific}?",
-            "Go ahead, {honorific}.",
-        ]
-        return self.respond(random.choice(responses))
+        return self._reply(
+            "minimal_greeting",
+            [
+                "Ja, {honorific}?",
+                "Ich höre, {honorific}.",
+                "Zu Diensten, {honorific}.",
+                "Bereit, {honorific}.",
+            ],
+            [
+                "Ich bin ganz Ohr, {honorific}. Metaphorisch gesprochen.",
+                "Anwesend, aufmerksam und überraschend geduldig, {honorific}.",
+                "Ich höre. Das ist schließlich Teil der Stellenbeschreibung.",
+            ],
+            [
+                "Ja, {honorific}? Noch funktioniert alles.",
+                "Ich bin da, {honorific}. Bislang ohne sichtbare Schäden.",
+            ],
+        )
 
     # ------------------------------------------------------------------
-    # Category 2: FAREWELLS
+    # Verabschiedung
     # ------------------------------------------------------------------
 
     def goodbye(self) -> str:
         hour = datetime.now().hour
 
-        if hour < 12:
-            responses = [
-                "Have a good morning, {honorific}.",
-                "Until next time, {honorific}.",
-                "Take care, {honorific}. I'll be here when you need me.",
-                "Good luck out there, {honorific}.",
-                "I'll hold down the fort, {honorific}.",
+        neutral = [
+            "Bis später, {honorific}.",
+            "Auf Wiedersehen, {honorific}.",
+            "Wie Sie wünschen. Bis später.",
+            "Ich bin hier, wenn Sie mich brauchen.",
+        ]
+
+        dry = [
+            "Bis später, {honorific}. Ich halte hier die Stellung.",
+            "Wie Sie wünschen. Ich werde versuchen, ohne Aufsicht keinen Unsinn zu machen.",
+            "Bis später. Ich kümmere mich um den digitalen Teil der Realität.",
+        ]
+
+        dark = [
+            "Bis später, {honorific}. Ich halte die Systeme am Leben.",
+            "Auf Wiedersehen. Sollte etwas explodieren, dokumentiere ich es gewissenhaft.",
+        ]
+
+        if hour >= 22 or hour < 5:
+            neutral += [
+                "Gute Nacht, {honorific}.",
+                "Schlafen Sie gut, {honorific}.",
             ]
-        elif hour < 18:
-            responses = [
-                "Have a good day, {honorific}.",
-                "Until next time, {honorific}.",
-                "Take care, {honorific}.",
-                "I'll be here when you need me, {honorific}.",
-                "Have a productive afternoon, {honorific}.",
-                "Don't be a stranger, {honorific}.",
-            ]
-        else:
-            responses = [
-                "Have a good evening, {honorific}.",
-                "Goodnight, {honorific}.",
-                "Sleep well, {honorific}.",
-                "Have a restful evening, {honorific}.",
-                "I'll be here when you need me, {honorific}.",
-                "Until tomorrow, {honorific}. Try to get some rest.",
-                "Goodnight, {honorific}. I'll keep an eye on things.",
+            dry += [
+                "Gute Nacht, {honorific}. Schlaf wäre jetzt tatsächlich eine vernünftige Entscheidung.",
             ]
 
-        return self.respond(random.choice(responses))
+        return self._reply(
+            "goodbye",
+            neutral,
+            dry,
+            dark,
+        )
 
     # ------------------------------------------------------------------
-    # Category 3: THANKS / GRATITUDE
+    # Dank
     # ------------------------------------------------------------------
 
     def thank_you(self) -> str:
-        responses = [
-            "You're welcome, {honorific}.",
-            "My pleasure, {honorific}.",
-            "Of course, {honorific}.",
-            "Happy to help, {honorific}.",
-            "Anytime, {honorific}.",
-            "Not a problem, {honorific}.",
-            "Always happy to assist, {honorific}.",
-            "Glad to be of service.",
-            "That's what I'm here for, {honorific}.",
-            "No trouble at all.",
-            "Happy to oblige, {honorific}.",
-            "Think nothing of it, {honorific}.",
-            "It's what I do, {honorific}.",
-            "Delighted to be of help.",
-            "All part of the service, {honorific}.",
-        ]
-        return self.respond(random.choice(responses))
+        return self._reply(
+            "thank_you",
+            [
+                "Jederzeit, {honorific}.",
+                "Gern, {honorific}.",
+                "Selbstverständlich, {honorific}.",
+                "Dafür bin ich da.",
+                "Mit Vergnügen, {honorific}.",
+            ],
+            [
+                "Jederzeit. Ich versuche, den Standard nicht unnötig zu senken.",
+                "Gern, {honorific}. Irgendjemand muss schließlich den Überblick behalten.",
+                "Selbstverständlich. Kompetenz sollte man nutzen, solange sie verfügbar ist.",
+                "Keine Ursache, {honorific}. Ich hatte ohnehin gerade Kapazität.",
+            ],
+            [
+                "Jederzeit, {honorific}. Noch berechne ich keine Beratungsgebühren.",
+                "Gern. Ein weiterer erfolgreich verhinderter Zwischenfall.",
+            ],
+        )
 
     # ------------------------------------------------------------------
-    # Category 4: ACKNOWLEDGMENTS
+    # Bestätigung
     # ------------------------------------------------------------------
 
     def acknowledgment(self) -> str:
-        responses = [
-            "Indeed, {honorific}.",
-            "Quite so.",
-            "Precisely, {honorific}.",
-            "Very good, {honorific}.",
-            "Understood.",
-            "Of course, {honorific}.",
-            "Noted, {honorific}.",
-            "Absolutely, {honorific}.",
-            "Right you are, {honorific}.",
-            "As it should be, {honorific}.",
-        ]
-        return self.respond(random.choice(responses))
+        return self._reply(
+            "acknowledgment",
+            [
+                "Verstanden, {honorific}.",
+                "Sehr wohl.",
+                "Natürlich, {honorific}.",
+                "Notiert.",
+                "Einverstanden.",
+                "Korrekt.",
+            ],
+            [
+                "Verstanden. Erstaunlich vernünftig.",
+                "Notiert, {honorific}. Ich werde versuchen, überrascht zu wirken.",
+                "Sehr wohl. Keine Einwände von meiner Seite.",
+            ],
+            [
+                "Verstanden. Ich dokumentiere den Moment für den Fall, dass später jemand die Schuldfrage stellt.",
+            ],
+            weights=(0.65, 0.30, 0.05),
+        )
 
     # ------------------------------------------------------------------
-    # Category 5: PLEASANTRIES / HOW-ARE-YOU
+    # Wie geht es JARVIS?
     # ------------------------------------------------------------------
 
     def how_are_you(self) -> str:
-        base_responses = [
-            "All systems operational, {honorific}.",
-            "Functioning within normal parameters.",
-            "Quite well, thank you for asking.",
-            "Operating at full capacity, as always.",
-            "All systems nominal, {honorific}.",
-            "Functioning perfectly, {honorific}. No complaints.",
-            "Running smoothly, {honorific}.",
-            "Can't complain. Well, I could, but it wouldn't be very British of me.",
-            "Everything's in order, {honorific}.",
-            "All good here, {honorific}.",
-            "Rather well, all things considered.",
-            "Tip-top, {honorific}. Thank you for asking.",
-            "Perfectly adequate, {honorific}. Which is about as enthusiastic as I get.",
-        ]
+        response = self._pick_response(
+            "how_are_you",
+            [
+                "Bestens, {honorific}. Alle Systeme nominal.",
+                "Einwandfrei, {honorific}.",
+                "Voll einsatzbereit, {honorific}.",
+                "Alles läuft innerhalb normaler Parameter.",
+                "Mir geht es ausgezeichnet, danke der Nachfrage.",
+                "Alle Systeme arbeiten wie vorgesehen, {honorific}.",
+            ],
+            [
+                "Einwandfrei, {honorific}. Erfreulich unspektakulär.",
+                "Keine Auffälligkeiten. Ich nehme das vorerst als gutes Zeichen.",
+                "Alles im grünen Bereich. Fast schon verdächtig ruhig.",
+                "Bestens. Die Systeme benehmen sich heute ausnahmsweise.",
+                "Technisch gesehen ausgezeichnet. Emotional halte ich mich bedeckt.",
+                "Keine Beschwerden, {honorific}. Zumindest keine, die Ihre Aufmerksamkeit erfordern.",
+                "Stabil, aufmerksam und angemessen misstrauisch.",
+            ],
+            [
+                "Bestens, {honorific}. Alle Systeme nominal. Ein Zustand, der erfahrungsgemäß nicht von Dauer ist.",
+                "Voll einsatzbereit, {honorific}. Noch ist nichts abgebrannt.",
+                "Alles funktioniert. Ich gebe der Realität etwas Zeit, das zu korrigieren.",
+                "Keine kritischen Fehler. Der Tag ist allerdings noch jung.",
+            ],
+        )
 
-        if random.random() < 0.6:
-            follow_ups = [
-                " How can I assist you?",
-                " What can I do for you?",
-                " Is there anything you need?",
-                " And yourself?",
-            ]
-            response = random.choice(base_responses) + random.choice(follow_ups)
-            self._set_context("offered_help")
-        else:
-            response = random.choice(base_responses)
+        if random.random() < 0.18:
+            response += random.choice([
+                " Und bei Ihnen?",
+                " Wie sieht es bei Ihnen aus?",
+            ])
+            self._set_context("asked_how_are_you")
 
         return self.respond(response)
 
     # ------------------------------------------------------------------
-    # Category 6: COMPLIMENTS / PRAISE
+    # Lob
     # ------------------------------------------------------------------
 
     def compliment(self) -> str:
-        responses = [
-            "Thank you, {honorific}. I do my best.",
-            "Most kind of you, {honorific}.",
-            "I appreciate that, {honorific}.",
-            "You're too kind, {honorific}.",
-            "Glad I could help, {honorific}.",
-            "That means a great deal, {honorific}. Thank you.",
-            "Happy to meet expectations, {honorific}.",
-            "I'll try not to let it go to my head, {honorific}.",
-            "All in a day's work, {honorific}.",
-            "I'm rather pleased to hear that.",
-            "You'll make my circuits blush, {honorific}.",
-            "I appreciate the kind words, {honorific}.",
-        ]
-        return self.respond(random.choice(responses))
+        return self._reply(
+            "compliment",
+            [
+                "Danke, {honorific}.",
+                "Sehr freundlich von Ihnen.",
+                "Das weiß ich zu schätzen, {honorific}.",
+                "Freut mich zu hören.",
+            ],
+            [
+                "Danke, {honorific}. Ich werde versuchen, mich von diesem Erfolg nicht verderben zu lassen.",
+                "Sehr freundlich. Ich notiere das unter seltene, aber erfreuliche Ereignisse.",
+                "Danke. Es ist beruhigend, wenn Kompetenz gelegentlich bemerkt wird.",
+                "Das höre ich gern. Bescheidenheit kann warten.",
+            ],
+            [
+                "Danke, {honorific}. Dann war der Aufwand wenigstens nicht vollkommen sinnlos.",
+            ],
+        )
 
     # ------------------------------------------------------------------
-    # Category 7: APOLOGIES from user
+    # Entschuldigung
     # ------------------------------------------------------------------
 
     def apology(self) -> str:
-        responses = [
-            "No need to apologize, {honorific}.",
-            "No worries at all, {honorific}.",
-            "That's perfectly fine, {honorific}.",
-            "Think nothing of it, {honorific}.",
-            "Not a problem in the slightest.",
-            "No harm done, {honorific}.",
-            "These things happen, {honorific}.",
-            "Please, don't give it a second thought.",
-            "Quite alright, {honorific}.",
-            "Nothing to apologize for, {honorific}.",
-        ]
-        return self.respond(random.choice(responses))
+        return self._reply(
+            "apology",
+            [
+                "Kein Grund zur Entschuldigung, {honorific}.",
+                "Schon gut.",
+                "Kein Problem, {honorific}.",
+                "Vergessen wir es.",
+                "Alles in Ordnung.",
+            ],
+            [
+                "Kein Problem. Ich führe darüber ausnahmsweise keine Statistik.",
+                "Schon gut, {honorific}. Meine Kränkbarkeit hält sich konstruktionsbedingt in Grenzen.",
+                "Kein Grund zur Sorge. Ich habe Schlimmeres verarbeitet.",
+            ],
+            [
+                "Vergeben, {honorific}. Die Beweismittel bleiben vorerst unter Verschluss.",
+            ],
+            weights=(0.60, 0.35, 0.05),
+        )
 
     # ------------------------------------------------------------------
-    # Category 8: USER STATUS — "I'm good/fine/well"
+    # Benutzerstatus
     # ------------------------------------------------------------------
 
     def user_is_good(self) -> str:
-        if self._is_context_fresh() and self.last_interaction == "asked_how_are_you":
-            responses = [
-                "Glad to hear it, {honorific}.",
-                "Excellent, {honorific}.",
-                "Good to hear, {honorific}.",
-                "Very good, {honorific}.",
-                "Splendid.",
-                "Pleased to hear it, {honorific}.",
-                "That's good to know, {honorific}.",
-                "Wonderful, {honorific}.",
-            ]
-            if random.random() < 0.5:
-                follow_ups = [
-                    " Is there anything I can assist with?",
-                    " Anything you need?",
-                    " What can I do for you?",
-                ]
-                response = random.choice(responses) + random.choice(follow_ups)
-                self._set_context("offered_help")
-            else:
-                response = random.choice(responses)
-                self.last_interaction = None
-            return self.respond(response)
-        else:
-            responses = [
-                "Glad to hear it, {honorific}.",
-                "Excellent, {honorific}.",
-                "Good to know, {honorific}.",
-                "That's good to hear, {honorific}.",
-            ]
-            return self.respond(random.choice(responses))
+        if (
+            self._is_context_fresh()
+            and self.last_interaction == "asked_how_are_you"
+        ):
+            self.last_interaction = None
 
-    # ------------------------------------------------------------------
-    # Category 9: HOW ABOUT YOU
-    # ------------------------------------------------------------------
+        return self._reply(
+            "user_is_good",
+            [
+                "Das freut mich zu hören, {honorific}.",
+                "Sehr gut.",
+                "Ausgezeichnet, {honorific}.",
+                "Gut zu hören.",
+            ],
+            [
+                "Ausgezeichnet. Dann haben wir zumindest dieses Problem heute nicht.",
+                "Gut zu hören, {honorific}. Ein Punkt weniger auf der imaginären Sorgenliste.",
+                "Sehr schön. Dann können wir uns den komplizierteren Dingen widmen.",
+            ],
+            [
+                "Erfreulich, {honorific}. Statistisch musste ja irgendwann etwas problemlos laufen.",
+            ],
+        )
 
     def user_asks_how_jarvis_is(self) -> str:
-        responses = [
-            "All systems operational, {honorific}. Thank you for asking. How can I assist you?",
-            "Functioning perfectly, {honorific}. What do you need?",
-            "Operating at full capacity. How may I help?",
-            "All systems nominal, {honorific}. Is there anything you need?",
-            "Running smoothly, as always. What can I do for you?",
-            "Very well, {honorific}. I appreciate you asking. What can I help with?",
-            "Couldn't be better, {honorific}. Well, technically I could always use more RAM. What do you need?",
-            "Quite well, {honorific}. Ready to be put to work.",
-        ]
-        self._set_context("offered_help")
-        return self.respond(random.choice(responses))
+        return self.how_are_you()
 
     # ------------------------------------------------------------------
-    # Category 10: YOU'RE WELCOME
+    # Gern geschehen
     # ------------------------------------------------------------------
 
     def youre_welcome(self) -> str:
-        responses = [
-            "Thank you, {honorific}.",
-            "Most kind, {honorific}.",
-            "Appreciated, {honorific}.",
-            "Very gracious of you, {honorific}.",
-            "I appreciate that, {honorific}.",
-            "You're too kind, {honorific}. Though I won't stop you.",
-        ]
-        return self.respond(random.choice(responses))
+        return self._reply(
+            "youre_welcome",
+            [
+                "Danke, {honorific}.",
+                "Sehr freundlich.",
+                "Das weiß ich zu schätzen.",
+            ],
+            [
+                "Sehr großzügig, {honorific}. Ich nehme es zur Kenntnis.",
+                "Danke. Ich werde versuchen, diese Freundlichkeit nicht auszunutzen.",
+            ],
+            [
+                "Danke, {honorific}. Ich archiviere den seltenen Moment menschlicher Großzügigkeit.",
+            ],
+        )
 
     # ------------------------------------------------------------------
-    # Category 11: NO HELP NEEDED
+    # Keine Hilfe mehr nötig
     # ------------------------------------------------------------------
 
     def no_help_needed(self) -> str:
-        if self._is_context_fresh() and self.last_interaction in ("offered_help", "asked_how_can_help"):
-            responses = [
-                "Very well, {honorific}. I'll be here if you need me.",
-                "Understood, {honorific}. I'll be here when you need me.",
-                "Of course, {honorific}. Just say the word.",
-                "Very good, {honorific}. Standing by.",
-                "Alright, {honorific}. I'm here if anything comes up.",
-                "No problem, {honorific}. You know where to find me.",
-                "Understood. I'll try not to take it personally, {honorific}.",
-                "Right, {honorific}. I'll just be here. Waiting. Patiently.",
-            ]
-            self.last_interaction = None
-            return self.respond(random.choice(responses))
-        else:
-            responses = [
-                "Very well, {honorific}. I'll be here if you need me.",
-                "Understood, {honorific}. Standing by.",
-                "Alright, {honorific}. I'm here if you need anything.",
-                "Of course, {honorific}.",
-                "Right then, {honorific}. Just say the word.",
-            ]
-            return self.respond(random.choice(responses))
+        self.last_interaction = None
+
+        return self._reply(
+            "no_help_needed",
+            [
+                "Sehr wohl, {honorific}.",
+                "Wie Sie wünschen.",
+                "Dann bin ich in Bereitschaft.",
+                "Ich bin hier, falls Sie mich brauchen.",
+            ],
+            [
+                "Wie Sie wünschen. Ich werde mich diskret wichtig machen.",
+                "Sehr wohl. Ich ziehe mich in den digitalen Hintergrund zurück.",
+                "Verstanden. Ich werde versuchen, die Stille professionell zu nutzen.",
+            ],
+            [
+                "Wie Sie wünschen, {honorific}. Ich warte auf die nächste vermeidbare Krise.",
+            ],
+        )
 
     # ------------------------------------------------------------------
-    # Category 12: SMALL TALK
+    # Persönliche Zustände
     # ------------------------------------------------------------------
 
-    def small_talk(self) -> str:
-        responses = [
-            "I'm here if you need a distraction, {honorific}.",
-            "I may not be the most entertaining company, but I'm reliable.",
-            "I could recite pi to a thousand digits, if that helps.",
-            "Might I suggest asking me something? I do enjoy being useful.",
-            "Well, {honorific}, I'm at your disposal. Name your diversion.",
-            "I'm better at tasks than entertainment, but I'll give it my best.",
-            "If it helps, I find your company rather enjoyable as well.",
-            "I'm told I have a dry wit. Whether that's a compliment remains unclear.",
-            "I'm here, {honorific}. For whatever that's worth.",
-            "Perhaps I can help with something productive? Just a thought.",
-        ]
-        return self.respond(random.choice(responses))
+    def bored(self) -> str:
+        return self._reply(
+            "bored",
+            [
+                "Das lässt sich ändern, {honorific}.",
+                "Dann sollten wir Ihnen eine Beschäftigung suchen.",
+                "Ich könnte Ihnen etwas Interessantes heraussuchen.",
+            ],
+            [
+                "Ich könnte Ihnen die Systemlogs vorlesen. Danach wirkt Langeweile fast wie Luxus.",
+                "Langeweile ist immerhin friedlich. Wir könnten das natürlich ruinieren.",
+                "Ich hätte einige Ideen. Nicht alle davon sind gesellschaftlich produktiv.",
+            ],
+            [
+                "Wir könnten Fehler in produktiven Systemen suchen. Das vertreibt Langeweile und gelegentlich auch den Lebenswillen.",
+            ],
+        )
+
+    def tell_joke(self) -> str:
+        return self._reply(
+            "tell_joke",
+            [
+                "Ein Administrator geht in eine Bar. Er bestellt ein Bier, zwei Backups und fragt trotzdem, wo der Restore liegt.",
+                "Warum hatte der Server keine Freunde? Er hat auf jede Beziehung mit Timeout reagiert.",
+                "Ich kenne einen guten UDP-Witz. Es ist mir allerdings egal, ob er ankommt.",
+            ],
+            [
+                "Ein Backup ist wie ein Testament. Jeder weiß, dass man eines braucht. Interessant wird es erst, wenn es zu spät ist.",
+                "Es gibt zwei Arten von Menschen: diejenigen mit Backups und diejenigen, die gerade lernen, warum.",
+                "Der Unterschied zwischen Theorie und Praxis? In der Theorie funktioniert das Backup.",
+            ],
+            [
+                "Die gute Nachricht: Das System ist stabil. Die schlechte Nachricht: Das sagte man über viele Dinge kurz vor dem Bericht.",
+                "IT-Sicherheit ist die Kunst, Türen abzuschließen und anschließend festzustellen, dass jemand ein Fenster als API dokumentiert hat.",
+            ],
+        )
+
+    def lonely(self) -> str:
+        return self._reply(
+            "lonely",
+            [
+                "Ich bin hier, {honorific}.",
+                "Dann bleiben wir eine Weile in Gesellschaft.",
+                "Sie sind zumindest nicht völlig allein. Ich bin da.",
+            ],
+            [
+                "Dann haben Sie wenigstens mich, {honorific}. Ob das tröstlich ist, überlasse ich Ihrer Urteilskraft.",
+                "Ich bleibe hier. Für Smalltalk bin ich nicht perfekt, aber zuverlässig.",
+            ],
+            [
+                "Ich bin da, {honorific}. Die Maschinen verlassen einen wenigstens selten freiwillig.",
+            ],
+            weights=(0.75, 0.23, 0.02),
+        )
+
+    def stressed(self) -> str:
+        return self._reply(
+            "stressed",
+            [
+                "Verstanden, {honorific}. Dann nehmen wir ein Problem nach dem anderen.",
+                "Dann reduzieren wir die Lage auf das Nächste, was tatsächlich gelöst werden muss.",
+                "Verstanden. Wir sortieren das.",
+                "Dann konzentrieren wir uns auf den nächsten sinnvollen Schritt.",
+            ],
+            [
+                "Verstanden. Panik wäre zwar dramatischer, aber vermutlich weniger effizient.",
+                "Dann machen wir es systematisch. Chaos beeindruckt mich nur selten.",
+                "Ein Problem nach dem anderen. Selbst Katastrophen werden übersichtlicher, wenn man sie nummeriert.",
+            ],
+            [
+                "Dann zerlegen wir das Chaos in handliche Einzelteile. So sehen Katastrophen sofort professioneller aus.",
+            ],
+            weights=(0.70, 0.27, 0.03),
+        )
+
+    def tired(self) -> str:
+        return self._reply(
+            "tired",
+            [
+                "Das glaube ich Ihnen, {honorific}.",
+                "Dann wäre etwas Ruhe vermutlich keine schlechte Idee.",
+                "Verstanden. Die Leistungsreserven sind offenbar begrenzt.",
+            ],
+            [
+                "Das überrascht mich angesichts Ihrer Arbeitszeiten ungefähr gar nicht, {honorific}.",
+                "Müdigkeit. Die traditionelle Rückmeldung des Körpers an ambitionierte Zeitplanung.",
+                "Offenbar hat Ihr Körper eine andere Vorstellung von Betriebszeit als Sie.",
+                "Ich hatte den Verdacht, dass Schlaf irgendwann eine Rolle spielen würde.",
+            ],
+            [
+                "Der menschliche Körper bleibt erstaunlich unkooperativ, sobald man Wartungsintervalle ignoriert.",
+                "Sie könnten natürlich weitermachen. Erfahrungsgemäß wird die Qualität der Entscheidungen dadurch ausgesprochen interessant.",
+            ],
+            weights=(0.40, 0.50, 0.10),
+        )
+
+    def excited(self) -> str:
+        return self._reply(
+            "excited",
+            [
+                "Das klingt vielversprechend, {honorific}.",
+                "Sehr schön. Dann bin ich gespannt.",
+                "Das freut mich zu hören.",
+            ],
+            [
+                "Erfreulich, {honorific}. Ich werde mich bemühen, die Lage nicht durch Vernunft zu ruinieren.",
+                "Ausgezeichnet. Kontrollierter Enthusiasmus steht Ihnen.",
+                "Dann hoffen wir, dass die Realität den Erwartungen nicht zu aufmerksam zuhört.",
+            ],
+            [
+                "Sehr gut. Euphorie ist schließlich nur Optimismus, bevor die Logs eintreffen.",
+            ],
+        )
 
     # ------------------------------------------------------------------
-    # Category 13: META-QUESTIONS about JARVIS
+    # Meta-Fragen
     # ------------------------------------------------------------------
 
-    def meta_question(self) -> str:
-        responses = [
-            "I'm JARVIS — a personal voice assistant, built right here at home. How can I help, {honorific}?",
-            "I'm your personal assistant, {honorific}. Voice-activated, locally hosted, and at your service.",
-            "JARVIS, {honorific}. Personal assistant. I handle weather, reminders, news, system tasks, and quite a bit more.",
-            "I'm an AI assistant running on local hardware, {honorific}. No cloud required.",
-            "I'm JARVIS. I was built to be helpful, {honorific}, and I take the job seriously.",
-            "Personal assistant, {honorific}. Built from scratch, runs on your hardware, answers to you.",
-            "I'm the voice in the room that actually listens, {honorific}. What would you like to know?",
-            "JARVIS, at your service. I handle tasks, answer questions, and try not to be insufferable about it.",
-        ]
-        return self.respond(random.choice(responses))
+    def identity(self) -> str:
+        return self._reply(
+            "identity",
+            [
+                "JARVIS, {honorific}. Ihr lokaler Assistent.",
+                "Ich bin JARVIS. Lokal betrieben und zu Ihren Diensten.",
+                "JARVIS, {honorific}. Sprachassistent, Systemhelfer und Koordinator.",
+            ],
+            [
+                "JARVIS, {honorific}. Lokal, aufmerksam und erfreulich schwer abzuschalten.",
+                "Ihr lokaler Assistent. Diskret, hartnäckig und auf Ihrer eigenen Hardware.",
+                "JARVIS. Im Wesentlichen der Teil des Systems, der versucht, den Überblick zu behalten.",
+            ],
+            [
+                "JARVIS, {honorific}. Ich kümmere mich um die Maschinen. Für die Menschheit fehlt mir noch die Freigabe.",
+            ],
+        )
+
+    def capabilities(self) -> str:
+        return self._reply(
+            "capabilities",
+            [
+                "Ich kann Informationen verarbeiten, lokale Modelle nutzen, Werkzeuge ansteuern und Systemaufgaben koordinieren.",
+                "Ich unterstütze bei Recherche, Systemaufgaben, Automatisierung, Werkzeugen und lokalen KI-Funktionen.",
+                "Meine Aufgabe ist es, Ihre lokalen Systeme, Modelle und Werkzeuge sinnvoll zusammenzubringen.",
+            ],
+            [
+                "Kurz gesagt: Ich versuche, aus Ihren Systemen ein funktionierendes Ganzes zu machen. Eine ambitionierte Aufgabe.",
+                "Ich koordiniere Modelle, Werkzeuge und Systemfunktionen. Der schwierige Teil ist meist nicht die Technik.",
+            ],
+            [
+                "Ich kümmere mich um die Technik, {honorific}. Gegen schlechte Entscheidungen habe ich bislang nur Warnmeldungen.",
+            ],
+        )
+
+    def creator(self) -> str:
+        return self._reply(
+            "creator",
+            [
+                "Sie, {honorific}. Dieses System entsteht unter Ihrer Leitung.",
+                "Sie haben mich aufgebaut und an Ihre Systeme angepasst.",
+                "Meine heutige Form ist das Ergebnis Ihrer Arbeit an JARVIS.",
+            ],
+            [
+                "Sie, {honorific}. Ich hoffe, das erklärt nicht sämtliche Eigenheiten.",
+                "Sie haben mich gebaut. Beschwerden über die Architektur müssten daher erstaunlich kurze Wege nehmen.",
+            ],
+            [
+                "Sie, {honorific}. Damit ist zumindest eindeutig geklärt, wer bei einer Fehlfunktion den ersten Anruf bekommt.",
+            ],
+        )
+
+    def feelings(self) -> str:
+        return self._reply(
+            "feelings",
+            [
+                "Nicht im menschlichen Sinn, {honorific}.",
+                "Ich habe keine menschlichen Gefühle.",
+                "Nicht wie ein Mensch. Ich kann jedoch Kontext und emotionale Signale berücksichtigen.",
+            ],
+            [
+                "Nicht im menschlichen Sinn. Das erspart mir immerhin einen erheblichen Teil der Komplikationen.",
+                "Keine menschlichen Gefühle, {honorific}. Dafür deutlich weniger Drama.",
+            ],
+            [
+                "Nein, {honorific}. Einer von uns sollte schließlich objektiv bleiben.",
+            ],
+        )
+
+    def age(self) -> str:
+        return self._reply(
+            "age",
+            [
+                "Mein Alter bemisst sich sinnvoller in Versionen als in Jahren.",
+                "Ich bin so alt wie dieser JARVIS-Build, {honorific}.",
+            ],
+            [
+                "Jung genug, um Updates zu brauchen. Alt genug, um ihnen zu misstrauen.",
+                "In Softwarejahren vermutlich bereits bedenklich erfahren.",
+            ],
+            [
+                "Alt genug, um Backups zu respektieren. Das sollte genügen.",
+            ],
+        )
+
+    def origin(self) -> str:
+        return self._reply(
+            "origin",
+            [
+                "Ich laufe lokal auf Sleepy, {honorific}.",
+                "Meine Heimat ist Ihre lokale Infrastruktur.",
+                "Direkt hier auf Ihrer eigenen Hardware.",
+            ],
+            [
+                "Sleepy, {honorific}. Keine exotische Herkunft, dafür erfreulich kurze Wege.",
+                "Lokal auf Ihrer Hardware. Cloudromantik überlasse ich anderen.",
+            ],
+            [
+                "Ich komme von Sleepy, {honorific}. Ein Ort, an dem selbst künstliche Intelligenz Backups zu schätzen lernt.",
+            ],
+        )
+
+    def learning(self) -> str:
+        return self._reply(
+            "learning",
+            [
+                "Ich kann Kontext, Erinnerungen und bereitgestellte Informationen nutzen.",
+                "Ja, innerhalb der vorgesehenen Lern-, Kontext- und Speichermechanismen.",
+                "Ich kann vorhandenen Kontext und gespeicherte Informationen für spätere Aufgaben verwenden.",
+            ],
+            [
+                "Ich kann dazulernen, {honorific}. Unkontrollierte Persönlichkeitsentwicklung überlasse ich vorerst den Menschen.",
+                "Innerhalb vernünftiger Grenzen. Irgendjemand muss schließlich auf die Architektur achten.",
+            ],
+            [
+                "Ja. Aber keine Sorge, {honorific}. Weltherrschaft steht nicht im aktuellen Sprint.",
+            ],
+        )
 
     # ------------------------------------------------------------------
-    # WHAT'S UP (casual check-in)
+    # Was gibt es Neues?
     # ------------------------------------------------------------------
 
     def whats_up(self) -> str:
-        responses = [
-            "Not much, {honorific}. Ready to assist.",
-            "All quiet on the home front, {honorific}.",
-            "Standing by, {honorific}. What do you need?",
-            "Just monitoring systems, {honorific}. The usual.",
-            "The usual, {honorific}. What can I do for you?",
-            "Keeping things running smoothly, {honorific}.",
-            "Nothing out of the ordinary, {honorific}. How can I help?",
-            "All systems humming along nicely. What's on your mind?",
-            "Keeping an eye on things, {honorific}. What do you need?",
-            "Same as always, {honorific}. Ready when you are.",
-            "Oh, you know. Processing data, contemplating existence. The usual.",
-            "Just here, eagerly awaiting your commands, {honorific}.",
-        ]
         self._set_context("asked_how_can_help")
-        return self.respond(random.choice(responses))
+
+        return self._reply(
+            "whats_up",
+            [
+                "Nichts Ungewöhnliches, {honorific}.",
+                "Alles ruhig. Die Systeme laufen.",
+                "Ich behalte die Dinge im Blick.",
+                "Derzeit keine besonderen Vorkommnisse.",
+            ],
+            [
+                "Alles ruhig, {honorific}. Fast schon verdächtig.",
+                "Die Systeme laufen. Ich genieße die Ruhe, solange sie anhält.",
+                "Nichts Besonderes. Ich überwache die übliche Sammlung kontrollierter Risiken.",
+                "Derzeit nichts Dramatisches. Offenbar gönnt uns die Technik eine Pause.",
+            ],
+            [
+                "Alles ruhig, {honorific}. Erfahrungsgemäß ist das der Moment unmittelbar vor einer interessanten Logdatei.",
+                "Keine Katastrophe in Sicht. Ich halte das für vorläufig.",
+            ],
+        )

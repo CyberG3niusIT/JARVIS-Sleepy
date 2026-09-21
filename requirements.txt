@@ -56,3 +56,10 @@ gitpython>=3.1.0
 # Development
 pytest>=7.4.0
 black>=23.0.0
+
+# System / document / calendar runtime
+psutil>=5.9.0
+python-pptx>=0.6.21
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0

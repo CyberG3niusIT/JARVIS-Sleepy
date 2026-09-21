@@ -18,6 +18,9 @@ SKILL_NAME = "filesystem"
 # Shared directory map — single source of truth for named directories
 # ---------------------------------------------------------------------------
 
+_JARVIS_ROOT = Path(__file__).resolve().parents[2]
+_DATA_ROOT = Path("/home/alex/jarvis-data")
+
 _DIR_MAP = {
     "documents": Path.home() / "Documents",
     "downloads": Path.home() / "Downloads",
@@ -27,12 +30,12 @@ _DIR_MAP = {
     "videos": Path.home() / "Videos",
     "music": Path.home() / "Music",
     "scripts": Path.home() / "scripts",
-    "jarvis": Path.home() / "jarvis",
-    "core": Path.home() / "jarvis" / "core",
-    "tools": Path.home() / "jarvis" / "core" / "tools",
-    "skills": Path("/home/alex/jarvis-data/skills"),
-    "models": Path("/mnt/models"),
-    "storage": Path("/mnt/storage"),
+    "jarvis": _JARVIS_ROOT,
+    "core": _JARVIS_ROOT / "core",
+    "tools": _JARVIS_ROOT / "core" / "tools",
+    "skills": _JARVIS_ROOT / "skills",
+    "models": _DATA_ROOT / "models",
+    "storage": _DATA_ROOT,
     "tmp": Path("/tmp"),
 }
 
@@ -392,7 +395,7 @@ def _find_count_code(per_file: bool = False) -> str:
 
     When per_file is True, returns the top 20 files sorted by line count.
     """
-    jarvis_path = Path.home() / "jarvis"
+    jarvis_path = _JARVIS_ROOT
     if not jarvis_path.exists():
         return "JARVIS codebase not found."
     result = subprocess.run(

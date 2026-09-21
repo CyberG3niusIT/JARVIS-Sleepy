@@ -26,6 +26,14 @@ class Config:
         env_path = Path(__file__).parent.parent / ".env"
         if env_path.exists():
             load_dotenv(env_path, override=True)
+
+        # Authoritative project root.
+        # Follows the actual checkout location instead of assuming
+        # a fixed source directory.
+        os.environ.setdefault(
+            "JARVIS_ROOT",
+            str(Path(__file__).resolve().parent.parent),
+        )
         
         # Determine config path
         if config_path is None:

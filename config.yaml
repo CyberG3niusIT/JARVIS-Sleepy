@@ -12,6 +12,8 @@ audio:
   mic_device: pulse
   sample_rate: 16000
   channels: 1
+  output_backend: windows
+  windows_temp_dir: /mnt/c/Users/Alex/AppData/Local/Temp/JARVIS
   output_device: pulse              # WSLg PulseAudio
   use_rnnoise: false
   device_monitor_interval: 5.0      # Seconds between hot-plug checks
@@ -65,7 +67,8 @@ tts:
   engine: chatterbox                # active engine — see docs/ARCHITECTURE.md
   chatterbox_endpoint: http://127.0.0.1:8765/tts
   chatterbox_timeout: 60         # generation (read) timeout — GPU work can legitimately take a while
-  chatterbox_connect_timeout: 2  # separate, short — TCP connect on localhost/LAN shouldn't ever need long
+  chatterbox_connect_timeout: 2
+  chatterbox_warmup_enabled: false  # Disable cache generation during startup — TCP connect on localhost/LAN shouldn't ever need long
   # tools/chatterbox_server.py is a separate GPU process and does NOT read
   # this file — its generation params (exaggeration, cfg_weight,
   # temperature, repetition_penalty, min_p, top_p, tempo) are tuned via
@@ -100,9 +103,9 @@ conversation:
     enabled: true
     default_duration: 8.0
     extended_duration: 12.0
-    play_tone: true
-    tone_path: ~/jarvis/assets/conv_open.wav
-    close_tone_path: ~/jarvis/assets/conv_close.wav
+    play_tone: false
+    tone_path: "${JARVIS_ROOT}/assets/conv_open.wav"
+    close_tone_path: "${JARVIS_ROOT}/assets/conv_close.wav"
   max_history_turns: 30
   max_context_chars: 12000
 user_profiles:
@@ -119,7 +122,7 @@ embeddings:
 skills:
   auto_discover: true
   safe_mode: false
-  skills_path: skills
+  skills_path: "${JARVIS_ROOT}/skills"
 logging:
   level: INFO
   file: /home/alex/jarvis-data/data/logs/jarvis.log

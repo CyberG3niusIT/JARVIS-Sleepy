@@ -1,10 +1,10 @@
 """Tool definition: developer_tools — git, codebase search, system admin."""
 
 import logging
-import os
 import shlex
 import subprocess
 import time as _time
+from pathlib import Path
 
 TOOL_NAME = "developer_tools"
 SKILL_NAME = "developer_tools"
@@ -123,6 +123,10 @@ SYSTEM_PROMPT_RULE = (
 from core.logger import get_logger
 logger = get_logger("jarvis.tools.developer_tools")
 
+_JARVIS_ROOT = str(Path(__file__).resolve().parents[2])
+_DEVTOOLS_SKILL_DIR = Path(_JARVIS_ROOT) / "skills" / "system" / "developer_tools"
+_MODELS_ROOT = Path("/home/alex/jarvis-data/models")
+
 
 # ---------------------------------------------------------------------------
 # Runtime dependency — injected via tool_registry.inject_dependencies()
@@ -131,22 +135,6 @@ logger = get_logger("jarvis.tools.developer_tools")
 _config = None
 
 
-# ---------------------------------------------------------------------------
-# Real working directory for run_command/confirm_pending
-# ---------------------------------------------------------------------------
-#
-# Session #8 fix (agentic-audit finding #2): run_command/confirm_pending
-# used to cwd into a hardcoded '/home/user/jarvis' — stale and wrong on
-# the real Sleepy deployment, where config.yaml's own paths (e.g.
-# skill_manager.skills_path='/home/alex/jarvis/skills') show the actual
-# install root is elsewhere. There is no single "jarvis home" key in
-# config.yaml to read this from, so rather than hardcode a second guess,
-# this derives the real root from where this module itself is actually
-# running from: core/tools/developer_tools.py's own location, two
-# directories up, is always the checkout/install root the code is
-# executing from — correct in this sandbox AND on real hardware, with
-# nothing to keep in sync by hand.
-_JARVIS_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +151,7 @@ def _get_safety():
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             '_safety',
-            '/home/alex/jarvis-data/skills/system/developer_tools/_safety.py',
+            _DEVTOOLS_SKILL_DIR / '_safety.py',
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -176,9 +164,9 @@ def _get_safety():
 # ---------------------------------------------------------------------------
 
 _GIT_REPOS = {
-    'main': '/home/user/jarvis',
-    'skills': '/home/alex/jarvis-data/skills',
-    'models': '/mnt/models',
+    'main': _JARVIS_ROOT,
+    'skills': str(Path(_JARVIS_ROOT) / 'skills'),
+    'models': str(_MODELS_ROOT),
 }
 
 
@@ -297,8 +285,8 @@ def _devtools_codebase_search(args: dict) -> str:
     if not pattern:
         return "Error: 'pattern' is required for codebase search."
     search_dirs = [
-        '/home/user/jarvis/core',
-        '/home/alex/jarvis-data/skills',
+        str(Path(_JARVIS_ROOT) / 'core'),
+        str(Path(_JARVIS_ROOT) / 'skills'),
     ]
     all_matches = []
     for d in search_dirs:
@@ -412,7 +400,7 @@ def _devtools_system_health(args: dict) -> str:
             import importlib.util
             _spec = importlib.util.spec_from_file_location(
                 '_display',
-                '/home/alex/jarvis-data/skills/system/developer_tools/_display.py',
+                _DEVTOOLS_SKILL_DIR / '_display.py',
             )
             _disp_mod = importlib.util.module_from_spec(_spec)
             _spec.loader.exec_module(_disp_mod)
