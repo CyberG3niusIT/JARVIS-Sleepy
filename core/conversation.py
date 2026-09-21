@@ -257,7 +257,7 @@ class ConversationManager:
             profile = self._profile_manager.get_profile(user_id)
             if profile and profile.get("name"):
                 return profile["name"]
-        return user_id.capitalize()
+        return user_id.replace("_", " ").title()
 
     def get_recent_history(self, max_turns: Optional[int] = None, target_history: Optional[list] = None) -> List[Dict]:
         """

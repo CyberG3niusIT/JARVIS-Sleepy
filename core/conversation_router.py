@@ -776,9 +776,9 @@ class ConversationRouter:
             open_window=60.0 if not is_complete else None,
         )
 
-    # Self-identification patterns — "my name is X", "I'm X", "call me X"
+    # Only explicit naming phrases are treated as identity.
     _SELF_ID_RE = re.compile(
-        r"^(?:my name is|i'm|i am|call me|they call me|you can call me)\s+(\w+)",
+        r"^(?:my name is|call me|they call me|you can call me)\s+(\w+)",
         re.IGNORECASE,
     )
 
@@ -2958,7 +2958,14 @@ class ConversationRouter:
             logger.debug(f"P4-LLM: no tools selected for: {command[:80]}")
             return None
 
-        # Guest mode: restrict to weather + web_search, strip personal tools
+        # Capability gates run after all tool injection.
+        from core.tool_registry import ALWAYS_INCLUDED_TOOLS
+        tool_names_set = {t["function"]["name"] for t in tools}
+        for name, schema in ALWAYS_INCLUDED_TOOLS.items():
+            if name not in tool_names_set:
+                tools.append(schema)
+
+        # Guest allowlist
         if self._is_guest:
             tools = [t for t in tools
                      if t["function"]["name"] in self._GUEST_ALLOWED_TOOLS]
@@ -2966,18 +2973,10 @@ class ConversationRouter:
                 logger.debug("P4-LLM: guest — no allowed tools for command")
                 return None
 
-        # Mobile mode: strip desktop-only tools (browser, app launcher, etc.)
+        # Mobile exclusions
         if self._is_mobile:
             tools = [t for t in tools
                      if t["function"]["name"] not in self._MOBILE_EXCLUDED_TOOLS]
-
-        # Merge always-included tools (web_search, recall_memory, enroll_face, etc.)
-        # so they're available even when domain pruning selected other tools.
-        from core.tool_registry import ALWAYS_INCLUDED_TOOLS
-        tool_names_set = {t["function"]["name"] for t in tools}
-        for name, schema in ALWAYS_INCLUDED_TOOLS.items():
-            if name not in tool_names_set:
-                tools.append(schema)
 
         logger.debug(f"P4-LLM: selected {len(tools)} tools, routing to LLM")
 

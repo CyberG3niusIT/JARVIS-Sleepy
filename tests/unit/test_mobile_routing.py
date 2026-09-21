@@ -9,8 +9,11 @@ Covers Fixes A, B, C from session 163 handoff:
   C: Mobile session detection & filtering
 
 Usage:
-    python3 scripts/test_mobile_routing.py --verbose > /tmp/test_output.txt 2>&1
+    python3 tests/unit/test_mobile_routing.py --verbose > /tmp/test_output.txt 2>&1
 """
+
+# Standalone regression harness, not a pytest fixture-based module.
+__test__ = False
 
 import os
 os.environ['HSA_OVERRIDE_GFX_VERSION'] = '11.0.0'
@@ -414,13 +417,15 @@ def test_mobile_tool_exclusion(router):
               "developer_tools" not in mobile_tools,
               f"tools={mobile_tools}")
 
-        # Verify allowed tools still present on mobile
-        # (weather query to ensure get_weather passes through)
+        # Native weather path
         r = router.route("what's the weather in Gardendale")
+        check("mobile: local weather routes through native weather skill",
+              r.handled and r.source == "skill" and r.intent == "skill:weather",
+              f"handled={r.handled}, source={r.source}, intent={r.intent}")
+
+        # Web fallback remains available.
+        r = router.route("latest local news")
         tools = _tool_names(r)
-        check("mobile: get_weather still available",
-              "get_weather" in tools,
-              f"tools={tools}")
         check("mobile: web_search still available",
               "web_search" in tools,
               f"tools={tools}")
@@ -653,12 +658,11 @@ def test_desktop_unaffected(router, skill_manager):
               r.handled and r.intent == "greeting",
               f"intent={r.intent}")
 
-        # Weather tool-calling still works
+        # Native weather path
         r = router.route("what's the weather")
-        tools = _tool_names(r)
-        check("desktop: weather routes to tool_calling",
-              "get_weather" in tools,
-              f"tools={tools}")
+        check("desktop: weather routes through native weather skill",
+              r.handled and r.source == "skill" and r.intent == "skill:weather",
+              f"handled={r.handled}, source={r.source}, intent={r.intent}")
 
         # developer_tools present on desktop
         r = router.route("check system health")
@@ -759,9 +763,11 @@ def test_e2e_mobile_experience(router):
     conversation.client_type = "mobile"
 
     # (query, label, expected_tool)
-    # expected_tool = None means LLM should answer from knowledge (no tool call)
+    # "native:weather" means the request is expected to be fully handled
+    # by the native weather skill rather than LLM tool-calling.
+    # None means LLM should answer from knowledge (no tool call).
     mobile_queries = [
-        ("what's the weather tomorrow", "weather forecast", "get_weather"),
+        ("what's the weather tomorrow", "weather forecast", "native:weather"),
         ("set a reminder for 5pm to pick up groceries", "set reminder", "manage_reminders"),
         ("search for pizza places near me", "local search", "web_search"),
         ("latest Alabama football score", "live sports", "web_search"),
@@ -775,7 +781,15 @@ def test_e2e_mobile_experience(router):
             r = router.route(query)
             tools = _tool_names(r)
 
-            if expected_tool is None:
+            if expected_tool == "native:weather":
+                check(f"mobile e2e: '{label}' → native weather skill",
+                      r.handled and r.source == "skill" and r.intent == "skill:weather",
+                      f"handled={r.handled}, source={r.source}, intent={r.intent}")
+                check(f"mobile e2e: '{label}' → no LLM tool call",
+                      not r.use_tools,
+                      f"tools={_tool_names(r)}")
+
+            elif expected_tool is None:
                 # General knowledge: LLM should answer directly, NOT call web_search
                 if r.use_tools:
                     called_tool = None
@@ -823,10 +837,11 @@ def test_e2e_mobile_experience(router):
                     check(f"mobile e2e: '{label}' → LLM calls {expected_tool}",
                           False, "no tools available!")
 
-        # Verify mobile context is always present for tool-calling queries
-        r = router.route("what's the weather")
+        # Mobile context on an actual tool call.
+        r = router.route("set a reminder for 5pm")
         check("mobile e2e: tool-calling response has MOBILE SESSION context",
-              r.memory_context and "MOBILE SESSION" in r.memory_context)
+              r.memory_context and "MOBILE SESSION" in r.memory_context,
+              f"intent={r.intent}, context={r.memory_context[:120] if r.memory_context else None!r}")
 
     finally:
         conversation.client_type = saved

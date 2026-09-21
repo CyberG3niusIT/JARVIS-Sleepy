@@ -190,19 +190,13 @@ class MCPBridge:
                 # core/privacy_gate.py's capability matrix).
                 return "Das ist während der Privatsphäre-Einstellung nicht verfügbar."
             tool_call_timeout = self._timeouts.get("tool_call", 30)
-            # Session #7 fix (agentic-system audit finding #4): wrap the
-            # coroutine itself in asyncio.wait_for() so a timeout is
-            # enforced ON THE EVENT LOOP, guaranteeing _call_tool()
-            # (and any _reconnect_server() backoff it triggers — up to
-            # 5 attempts with exponential backoff, which alone can
-            # exceed 60s) actually stops running. The previous version
-            # only put a timeout on the outer future.result(), which
-            # does NOT cancel the underlying coroutine on a plain
-            # concurrent.futures.TimeoutError — it kept running on the
-            # shared mcp-bridge event-loop thread in the background,
-            # able to race the *next* tool call over self._sessions
-            # (mutated with no lock) after this call had already
-            # "returned" an error to its caller.
+
+            # Validate the loop before creating the coroutine.
+            loop = self._loop
+            if loop is None or loop.is_closed() or not loop.is_running():
+                raise RuntimeError("MCP bridge event loop is not running")
+
+            # Keep timeout and cancellation on the event loop.
             future = asyncio.run_coroutine_threadsafe(
                 asyncio.wait_for(
                     self._call_tool(server_name, tool_name, args),
@@ -211,10 +205,7 @@ class MCPBridge:
                 self._loop,
             )
             try:
-                # A few seconds of slack over the asyncio-side timeout,
-                # so the coroutine's own wait_for() is what actually
-                # fires and cancels it (deterministic), rather than
-                # racing this outer timeout against it.
+                # Small outer slack lets wait_for() own cancellation.
                 return future.result(timeout=tool_call_timeout + 5)
             except TimeoutError:
                 # Both asyncio.TimeoutError and concurrent.futures.TimeoutError

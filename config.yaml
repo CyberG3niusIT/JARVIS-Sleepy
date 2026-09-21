@@ -119,7 +119,7 @@ embeddings:
 skills:
   auto_discover: true
   safe_mode: false
-  skills_path: /home/alex/jarvis/skills
+  skills_path: skills
 logging:
   level: INFO
   file: /home/alex/jarvis-data/data/logs/jarvis.log

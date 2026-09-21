@@ -7,8 +7,11 @@ asserting on RouteResult fields. Tests priority chain ordering,
 skill routing, dismissals, bare ack filtering, memory ops, and LLM fallback.
 
 Usage:
-    python3 scripts/test_router.py
+    python3 tests/unit/test_router.py
 """
+
+# Standalone regression harness, not a pytest fixture-based module.
+__test__ = False
 
 import os
 os.environ['HSA_OVERRIDE_GFX_VERSION'] = '11.0.0'
@@ -207,6 +210,12 @@ def test_dismissals(router):
           r.intent != "dismissal",
           f"intent={r.intent}")
 
+    # Self-identification regression
+    check("'i'm tired' → NOT self-identification",
+          not router._SELF_ID_RE.match("i'm tired"))
+    check("'my name is Alex' → explicit self-identification pattern",
+          bool(router._SELF_ID_RE.match("my name is Alex")))
+
 
 def test_bare_ack_filter(router, conv_state):
     section("Bare Ack Filter (in_conversation=True)")
@@ -251,12 +260,16 @@ def test_skill_routing(router):
               r.handled and r.source == "skill" and expected_skill in skill_name.lower(),
               f"handled={r.handled}, source={r.source}, skill={skill_name}")
 
-    section("Skill Routing — P4-LLM tool-calling (migrated skills)")
+    section("Skill Routing — native-preferred + P4-LLM tools")
 
-    # Migrated skills go through LLM tool-calling: handled=False, intent=tool_calling,
-    # use_tools contains the expected tool schema.
+    # Native weather path
+    r = router.route("what's the weather")
+    check("'what's the weather' → native weather skill",
+          r.handled and r.source == "skill" and r.intent == "skill:weather",
+          f"handled={r.handled}, source={r.source}, intent={r.intent}")
+
+    # Other migrated skills go through LLM tool-calling.
     tool_tests = [
-        ("what's the weather", "get_weather"),
         ("show me the git log", "developer_tools"),
         ("how many files in my documents folder", "find_files"),
     ]
@@ -267,18 +280,16 @@ def test_skill_routing(router):
               r.intent == "tool_calling" and expected_tool in tool_names,
               f"intent={r.intent}, tools={tool_names}")
 
-    section("Skill Routing — LLM-native (no skill/tool needed)")
+    section("Skill Routing — CAL-L0 conversational fast-path")
 
-    # Conversation skill is disabled — LLM handles greetings, thanks, farewells
-    # natively. These should fall through to LLM fallback (handled=False, llm_command set).
-    native_llm = ["how are you", "thank you", "goodbye"]
-    for cmd in native_llm:
+    # CAL-L0 fast path
+    cal_l0_queries = ["how are you", "thank you", "goodbye"]
+    for cmd in cal_l0_queries:
         r = router.route(cmd)
-        # Either LLM fallback or tool_calling is acceptable — both mean the LLM handles it
-        fell_through = (not r.handled and r.llm_command) or r.intent == "tool_calling"
-        check(f"'{cmd}' → LLM (no skill)",
-              fell_through,
-              f"handled={r.handled}, intent={r.intent}")
+        check(f"'{cmd}' → CAL-L0",
+              r.handled and r.source == "cal_l0"
+              and r.intent.startswith("cal_l0:"),
+              f"handled={r.handled}, source={r.source}, intent={r.intent}")
 
 
 def test_memory_ops(router, memory_manager):
@@ -496,8 +507,8 @@ def test_rundown_immune_to_guest_mode(router, reminder_manager):
         check("guest + rundown mention: wake word → greeting with rundown mention",
               r.handled and r.intent == "greeting",
               f"intent={r.intent}")
-        check("  mentions 'rundown'",
-              "rundown" in r.text.lower(),
+        check("  mentions Tagesübersicht",
+              "tagesübersicht" in r.text.lower(),
               f"text={r.text!r}")
         check("  uses 'sir' not 'friend'",
               "sir" in r.text.lower() and "friend" not in r.text.lower(),
@@ -609,8 +620,12 @@ def test_multi_speaker(router):
     saved_user = conversation.current_user
     saved_participants = conversation.session_participants.copy()
     saved_history = conversation.session_history[:]
+    saved_profile_manager = conversation._profile_manager
     conversation.session_participants.clear()
     conversation.session_history.clear()
+
+    # Use deterministic fallback labels.
+    conversation._profile_manager = None
 
     try:
         # 1. Single speaker — no multi-speaker labeling
@@ -633,7 +648,8 @@ def test_multi_speaker(router):
         check("second speaker → is_multi_speaker=True",
               conversation.is_multi_speaker)
         check("session_participants has both",
-              conversation.session_participants == {"primary_user", "secondary_user"})
+              conversation.session_participants == {"user", "secondary_user"},
+              f"participants={conversation.session_participants}")
 
         # 3. History formatting includes speaker names
         conversation.add_message("assistant", "Reminder set for 5pm")
@@ -648,8 +664,8 @@ def test_multi_speaker(router):
               "USER: [User]" in history or "USER: [Secondary User]" in history,
               f"history={history[:250]}")
 
-        # 4. Router injects multi-speaker context (use LLM-fallback query)
-        r = router.route("tell me a joke")
+        # Multi-speaker context on an actual LLM fallback.
+        r = router.route("explain quantum entanglement in simple terms")
         check("multi-speaker → MULTI-SPEAKER SESSION in context",
               r.memory_context and "MULTI-SPEAKER" in r.memory_context,
               f"context={r.memory_context[:200] if r.memory_context else None!r}")
@@ -683,6 +699,7 @@ def test_multi_speaker(router):
         conversation.current_user = saved_user
         conversation.session_participants = saved_participants
         conversation.session_history = saved_history
+        conversation._profile_manager = saved_profile_manager
 
 
 def main():

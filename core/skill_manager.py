@@ -110,8 +110,13 @@ class SkillManager:
         self.logger = get_logger(__name__, config)
         self._privacy_gate = get_privacy_gate(config)
         
-        # Get skills path from config
-        self.skills_path = Path(config.get("skills.skills_path"))
+         skills_path = Path(config.get("skills.skills_path"))
+
+        if not skills_path.is_absolute():
+            repo_root = Path(__file__).resolve().parent.parent
+            skills_path = repo_root / skills_path
+
+        self.skills_path = skills_path.resolve()
         
         # Loaded skills
         self.skills: Dict[str, BaseSkill] = {}
@@ -732,6 +737,17 @@ class SkillManager:
                     _best_sim, _best_pair = _sim, (_sid, _sdata)
         if _best_pair:
             intent_id, intent_data = _best_pair
+            intent_threshold = intent_data.get("threshold", 0.55)
+
+            # Below threshold, let the semantic fallback decide.
+            if _best_sim < intent_threshold:
+                self.logger.info(
+                    "Keyword->intent disambiguation below threshold: "
+                    "%s (keyword=%s, score=%.2f < threshold=%.2f)",
+                    intent_id, kw_lower, _best_sim, intent_threshold,
+                )
+                return None
+
             self.logger.info(
                 "Keyword->intent disambiguated: %s (keyword=%s, score=%.2f)",
                 intent_id, kw_lower, _best_sim,
