@@ -7,12 +7,110 @@ way, and what's known to be broken or half-done*. Keep it current: when you
 make an architectural decision or find a real bug, write it here, not just
 in a commit message.
 
-Last major update: 2026-09-21 (Claude session #7, same branch
-`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `ddb49c9` —
-verified via `git fetch --all --prune` + `git log` + diff against
-`origin/main` before any change; working tree was clean). Ran with **no
-shell access to the real Sleepy machine**, same as sessions #5/#6 —
-every "NEEDS HW VERIFY" tag still means exactly that.
+Last major update: 2026-09-21 (Claude session #8, same branch
+`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `6ef9e4a` —
+verified via `git status`/`git log`/`git diff` against `origin/main`
+before any change; working tree was clean, 23 commits ahead of
+`origin/main`, 0 behind). Ran with **no shell access to the real
+Sleepy machine**, same as sessions #5-#7 — every "NEEDS HW VERIFY" tag
+still means exactly that.
+
+**Session #8 — security/agentic-runtime/proactive-core pass.** Opened
+with four required findings, all reproduced with real exploit strings
+or a standalone repro before any fix, all fixed and covered by new
+regression tests:
+
+1. **CRITICAL — developer_tools' command safety classifier
+   (`skills/system/developer_tools/_safety.py`) was still exploitable
+   after session #7's chain-operator fix.** Reproduced 12 bypasses:
+   `find -delete`/`-exec`, `git branch -D`, `git remote add`/`set-url`,
+   `git tag -d`, `curl -T`/`-o` to arbitrary paths, `wget --post-file`,
+   and three `xargs`-piped-destructive-command cases (`ps aux | xargs
+   kill -9`, `ls | xargs rm`, `find . | xargs rm -f`) — all classified
+   `'allowed'` because the classifier only ever inspected the first
+   one or two words of a command and never split on `|` at all.
+   Redesigned rather than patched further: chain-split (unchanged
+   policy from #7) → pipe-split every chain segment via shlex
+   tokenization (quote-aware) → argument-sensitive validators
+   dispatched by command name (find, git subcommands, curl/wget
+   including `--flag=value` attached forms, xargs — recursively
+   classifies its target command, systemctl, pip/apt/dpkg/docker) →
+   tier-set fallback for everything else → default-deny
+   ('confirmation') for anything unclassifiable. 44 tests (24 new).
+   `_run_cmd()` still uses `shell=True` — required for the pipe/
+   redirect semantics the classifier now actually validates
+   segment-by-segment; a full subprocess-pipeline executor to drop
+   `shell=True` entirely was out of scope.
+2. `core/tools/developer_tools.py`'s `run_command`/`confirm_pending`
+   used a hardcoded, stale `cwd='/home/user/jarvis'`. No single
+   "jarvis home" config key exists to read this from, so the fix
+   derives it from the module's own file location instead
+   (`_JARVIS_ROOT`, two directories up from `core/tools/
+   developer_tools.py`) — correct in this sandbox and on real
+   hardware, nothing to keep in sync by hand, no new hardcode.
+3. **Privacy logging audit.** `tool_registry.execute_tool()`'s own
+   `logger.debug()` logged full tool arguments *before* the
+   `CONTENT_LOGGING` gate that session #7 only applied to its
+   `event_logger.emit()` call further down — the exact bug named in
+   the task. Fixed, plus three more content-bearing, ungated sites
+   found in the same audit pass: `core/llm_router.py`'s
+   `stream_with_tools()` (LLM tool-call arguments, both call sites —
+   extracted into a shared `_log_tool_call()` helper for direct
+   testability), `core/tool_gate.py`'s classifier-skip log (up to 80
+   chars of raw query), `core/tools/generate_image.py`'s
+   image-generation prompt. A broader follow-up audit (background
+   subagent) found a much larger separate content-logging surface —
+   see §14 item 13 — deliberately NOT touched here (out of this
+   finding's tool/skill-log scope, and two of the biggest offenders,
+   `core/continuous_listener.py`/`core/pipeline.py`, import
+   `sounddevice` and cannot be imported or exercised at all in this
+   sandbox).
+4. **`PrivacyControlWatcher`'s sentinel files lived directly under
+   `/tmp`** (world-writable — any local user on the host, not just the
+   one running jarvis, could create a same-named file and flip this
+   process's privacy mode). Now resolves a user-private runtime
+   directory (`$XDG_RUNTIME_DIR/jarvis` / `/run/user/$UID/jarvis` when
+   available, else a self-created, ownership-and-symlink-validated
+   `/tmp/jarvis-$UID` fallback) — same sentinel-file mechanism, no new
+   IPC layer, just a directory only this user can write to.
+
+After the four required findings, continued into the still-open
+agentic-runtime items from session #7's audit (§14 item 13) with two
+concrete, bounded, tested pieces — **not** the full unified
+Skill/Tool/MCP capability-permission model (see §14 item 13a for why
+that was deliberately not attempted this session):
+- **TaskPlanner cooperative mid-step cancellation.** Previously
+  `cancel()` only took effect *between* plan steps; a step already in
+  flight (e.g. a multi-page web-research fetch) always ran to
+  completion. Added a thread-local cancellation token
+  (`current_cancel_event()`) published for the duration of
+  `execute_plan()`, which a genuinely interruptible tool may poll
+  between its own internal sub-steps — cooperative, not a thread kill.
+  `core/web_research.py`'s `fetch_pages_parallel()` is the first real
+  consumer: it now stops collecting further pages once cancelled,
+  returning whatever was already fetched.
+- **Watchdog background-worker visibility.** Previously zero
+  visibility outside the voice pipeline — a crashed reminder/weather/
+  news poll thread or a stuck TaskPlanner step went unnoticed by
+  anything. `Watchdog` now optionally takes `task_planner`/
+  `reminder_manager`/`weather_poller`/`news_manager` references and
+  detects dead threads, stale (stuck) poll loops, and plan steps stuck
+  past `command_hung_threshold` — detection + structured-event logging
+  only, deliberately no auto-restart (a blind restart could have side
+  effects, e.g. re-firing a reminder, this watchdog can't reason about
+  safely).
+
+Not attempted this session (see §14 for the honest reasoning on each):
+the full Skill/Tool/MCP capability-permission model, the generic
+proactive/event-notification layer, XTTSv2-Streaming-ONNX/Windows
+Audio (still no Windows/model access), the German-first backlog, and
+the broader content-logging surface the follow-up audit found outside
+tool/skill logs.
+
+---
+
+Previous major update: 2026-09-21 (Claude session #7, same branch
+`claude/jarvis-sleepy-backend-rc-nhtfgm`, starting from `ddb49c9`).
 
 Session #7 opened with five findings from an external review of session
 #6's own work — all real, all fixed:
@@ -1559,7 +1657,15 @@ chaining bypass in developer_tools' safety classifier (CRITICAL) ·
 MCP tool-call timeout not cancelling its coroutine · skill_manager
 audit-logging gap + PrivacyGate awareness for it and the pre-existing
 tool_registry audit log · developer_tools confirmation-slot race ·
-confirmed-dead prototype skill deleted.
+confirmed-dead prototype skill deleted. · **session #8 additions**:
+argument/pipe bypass in developer_tools' safety classifier (CRITICAL,
+session #7's chain-operator fix alone wasn't enough) · developer_tools
+`run_command`/`confirm_pending` hardcoded stale `cwd` · four ungated
+content-bearing tool/skill logs (`tool_registry.execute_tool`,
+`llm_router.stream_with_tools` ×2, `tool_gate.should_include_tools`,
+`generate_image.handler`) · `PrivacyControlWatcher` sentinels moved off
+world-writable `/tmp` · TaskPlanner cooperative mid-step cancellation ·
+Watchdog background-worker visibility.
 
 1. **German-first backlog — ~330-340 strings across ~12 files, see the
    table in §5a.** The single largest remaining piece of work. Still not
@@ -1631,9 +1737,9 @@ confirmed-dead prototype skill deleted.
     Genuinely needs a session with access to that Windows machine (or
     at minimum the ONNX model files and a way to exercise ONNX Runtime)
     to do responsibly.
-13. **Agentic system audit — done in session #7, ~10 findings, the
-    highest-priority ones acted on (see the session #7 summary at the
-    top of this doc and the "resolved" line above); ~6 remain open:**
+13. **Agentic system audit — done in session #7, ~10 findings; session
+    #8 closed two more (TaskPlanner cancellation, Watchdog visibility —
+    see the session #8 summary at the top of this doc), 3 remain open:**
     - `core/tool_gate.py` is not actually a permission/security gate
       despite its name — it only decides whether tool *schemas* are
       included in the LLM prompt (token-saving), with no authorization/
@@ -1647,31 +1753,85 @@ confirmed-dead prototype skill deleted.
       freely `import subprocess`/`os`. Any dropped-in skill directory
       with a valid manifest loads at the same trust level as core
       skills. Architectural root cause underlying the chaining bypass
-      fixed this session — that fix closes the one exploitable path
-      found, not the underlying lack of containment.
+      fixed in sessions #7/#8 — those fixes close the exploitable paths
+      found so far, not the underlying lack of containment.
     - MCP server config (`config.yaml`'s `mcp_servers` section) is
       fully trusted — subprocess command/args taken verbatim, full
       `os.environ` inherited before per-server overrides. Fine for a
       config file only the local admin edits; no guard if `config.yaml`
       were ever machine-written by a future self-modification feature.
-    - `TaskPlanner.execute_plan()` can only cancel *between* steps, not
-      a step already mid-execution (e.g. a long web-research fetch) —
-      `cancel()` sets a flag checked at the next loop iteration only.
-    - `Watchdog._run_checks()` has no visibility into `TaskPlanner`'s
-      active plan, or whether `reminder_manager`/`weather_poller`/
-      `news_manager`'s poll threads are still alive — a silently-dead
-      background thread (unhandled exception outside its own try/except)
-      has nothing that detects or restarts it.
+    - ~~`TaskPlanner.execute_plan()` can only cancel *between* steps~~
+      **— session #8: added a cooperative mid-step cancellation token
+      (`current_cancel_event()`), consumed by `web_research.py`'s
+      parallel page fetch. Only one real consumer wired up so far —
+      `core/tools/developer_tools.py`'s `run_command()` subprocess has
+      no cancellation seam at all (blocking `subprocess.run()`); would
+      need a Popen+poll rewrite, left open.**
+    - ~~`Watchdog._run_checks()` has no visibility into `TaskPlanner`'s
+      active plan or the poll-thread managers~~ **— session #8: added
+      `task_planner`/`reminder_manager`/`weather_poller`/`news_manager`
+      as optional Watchdog inputs; detects dead/stuck poll threads and
+      plan steps stuck past `command_hung_threshold`. Detection +
+      structured-event logging only — no auto-restart, since a blind
+      restart could have side effects (e.g. re-firing a reminder) the
+      watchdog can't reason about safely. `get_background_health()`
+      gives a metadata-only snapshot for a future `system_health`
+      integration.**
     `skills/system/_in_development/web_navigation/` (confirmed dead by
-    directory-depth, a stale v1.0.0 fork) was deleted this session.
+    directory-depth, a stale v1.0.0 fork) was deleted in session #7.
+13a. **Unified Skill/Tool/MCP capability-permission model — named as the
+    session #8 goal for the three findings above, deliberately NOT
+    attempted.** This is a real architectural undertaking (declared
+    capabilities per skill/tool/MCP server, central enforcement points,
+    local/remote distinction, PrivacyGate integration, destructive-
+    action confirmation, auditable decisions, default-deny) that
+    touches `core/base_skill.py`, `core/skill_manager.py`,
+    `core/tool_gate.py`/`core/tool_registry.py`, and `core/mcp_client.py`
+    simultaneously, and the task's own instructions are explicit that
+    it must not blindly break any of the ~15+ existing skills — that
+    needs a real migration plan and a full regression pass most of
+    which is untestable without a live pipeline run on real hardware
+    for the voice-driven skills. Rushing a partial version in the time
+    remaining this session would risk exactly that breakage. Left as a
+    dedicated next-sprint item with its own design pass, not bundled
+    into the smaller, independently-testable pieces (TaskPlanner
+    cancellation, Watchdog visibility) session #8 did complete.
+13b. **Broader content-logging audit (session #8 follow-up, background
+    subagent, NOT fixed — see §14's session #8 summary for the 4 sites
+    that WERE fixed).** Found a much larger separate content-logging
+    surface, ranked most-sensitive first: raw voice transcription/
+    command text logged unconditionally at 15+ call sites across
+    `core/continuous_listener.py` (`_transcribe_and_check`) and
+    `core/pipeline.py` (looks like a duplicate/refactored copy of the
+    same flow) — both import `sounddevice` and cannot be imported or
+    exercised at all in this sandbox, so any fix here is currently
+    unverifiable without real hardware; extracted-fact text and
+    proactive-surfacing phrases in `core/memory_manager.py`; spoken
+    response text in `core/tts.py`; raw search queries in
+    `core/web_research.py`; command/interrupt text in
+    `core/task_planner.py`; routing-decision command/query text in
+    `core/conversation_router.py`; personal-fact content in
+    `core/people_manager.py`; full announcement text in
+    `core/watchdog.py`. Each of these is real and should eventually be
+    gated the same way the session #7/#8 fixes were, but mass-editing
+    ~15 sites across several large, partly-untestable files without
+    being able to run and verify each one contradicts this project's
+    own "never fabricate test results" discipline — a dedicated
+    follow-up session should work through this list file by file with
+    real tests for each, same as sessions #7/#8 did for the smaller set.
 14. **Generic proactive/event-notification layer** (service/hardware/
     security events, reminders, background-task results, scheduled
     tasks, with policy/severity/destination/channel-adapter concepts,
-    WhatsApp/phone as later adapters) — named this session as "if
-    passend," not attempted. Building a new cross-cutting subsystem
-    without first confirming none of the existing pieces
+    WhatsApp/phone as later adapters) — named again this session ("if
+    passend"), still not attempted. Building a new cross-cutting
+    subsystem without first confirming none of the existing pieces
     (`reminder_manager.py`, `news_manager.py`, `weather_poller.py`,
-    `event_logger.py`, `watchdog.py`'s recovery actions) already cover
-    enough of this need would risk exactly the "zweite konkurrierende
-    Engine" earlier sessions were told to avoid — needs the audit in
-    item 13 first, not built in parallel with it.
+    `event_logger.py`, `watchdog.py`'s recovery actions — session #8's
+    Watchdog visibility work (item 13 above) touched several of these
+    but only added read-only observation, not an event/policy/channel
+    layer) already cover enough of this need would risk exactly the
+    "zweite konkurrierende Engine" earlier sessions were told to avoid.
+    A real audit of what `reminder_manager`/`news_manager`/
+    `event_logger` already do vs. what a unified Event → Policy →
+    Severity/Urgency → Channel path would add is still the prerequisite
+    step, not built in parallel with it.
