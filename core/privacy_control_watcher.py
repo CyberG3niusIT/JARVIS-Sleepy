@@ -28,19 +28,37 @@ This watcher is the "kleinste sichere CLI" fallback the task explicitly
 allows for exactly that case: a background thread polls three sentinel
 files (existence-only, no content parsed — nothing to inject), and calls
 the corresponding PrivacyGate method on the *same process's* singleton
-when one appears, then deletes it. Trust model matches the existing
-core/debug_logger.py sentinel-file convention (`/tmp/.jarvis_debug_active`)
-already in this codebase — local filesystem access is the trust
-boundary, not a new one introduced here.
+when one appears, then deletes it.
+
+Session #8 trust-boundary fix (agentic-audit finding #4): the sentinels
+used to live directly under `/tmp` (matching core/debug_logger.py's own
+`/tmp/.jarvis_debug_active` convention). `/tmp` is world-writable — any
+local user on the same host, not just the one running jarvis, can
+create a same-named file there. For debug_logger.py that only toggles a
+diagnostic JSONL dump on, which is a much smaller blast radius than
+privacy control: a same-named `/tmp/.jarvis_privacy_exit` created by
+another local user, or planted in advance before jarvis starts, would
+flip this process's actual privacy mode. On a genuinely single-user
+device this is a theoretical concern, but the sentinel path costs
+nothing to hold to a stricter standard, so it now resolves to a
+user-private runtime directory instead (see `_default_runtime_dir()`):
+$XDG_RUNTIME_DIR/jarvis or /run/user/$UID/jarvis (systemd-managed,
+mode 0700, per-user — not shared with other users of the host) when
+available, falling back to a dedicated /tmp/jarvis-$UID directory
+(created here with mode 0700, ownership verified, symlinks refused)
+only if neither exists. This is still a local-filesystem-access trust
+boundary, not a new IPC layer — same polling mechanism, same three
+sentinel files, just a directory only this user can write to.
 
 Usage (from a shell on the same host running jarvis_continuous.py):
-    touch /tmp/.jarvis_privacy_enter    # -> PrivacyMode.PRIVACY
-    touch /tmp/.jarvis_privacy_lock     # -> PrivacyMode.PRIVACY_LOCK
-    touch /tmp/.jarvis_privacy_exit     # -> PrivacyMode.NORMAL
-    cat /tmp/.jarvis_privacy_status     # last known mode + timestamp
+    touch "$XDG_RUNTIME_DIR/jarvis/.jarvis_privacy_enter"   # -> PrivacyMode.PRIVACY
+    touch "$XDG_RUNTIME_DIR/jarvis/.jarvis_privacy_lock"    # -> PrivacyMode.PRIVACY_LOCK
+    touch "$XDG_RUNTIME_DIR/jarvis/.jarvis_privacy_exit"    # -> PrivacyMode.NORMAL
+    cat "$XDG_RUNTIME_DIR/jarvis/.jarvis_privacy_status"    # last known mode + timestamp
 """
 
 import os
+import stat
 import threading
 import time
 from typing import Optional
@@ -51,13 +69,57 @@ from core.privacy_gate import get_privacy_gate, PrivacyMode
 logger = get_logger(__name__)
 
 
+def _default_runtime_dir() -> str:
+    """Resolve the user-private directory the privacy sentinel files
+    live under. Prefers $XDG_RUNTIME_DIR/jarvis or /run/user/$UID/jarvis
+    (systemd-managed, mode 0700, per-user tmpfs) over a self-created
+    /tmp/jarvis-$UID fallback — the fallback is still validated
+    (created 0700, ownership checked, symlinks refused) so a directory
+    pre-planted by another local user is never trusted. Never raises:
+    a broken/hostile environment degrades to plain /tmp (this module's
+    previous behavior) with a loud warning, rather than crashing the
+    watcher or blocking startup."""
+    candidates = []
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg:
+        candidates.append(os.path.join(xdg, "jarvis"))
+    run_user = f"/run/user/{os.getuid()}"
+    if os.path.isdir(run_user):
+        candidates.append(os.path.join(run_user, "jarvis"))
+    candidates.append(f"/tmp/jarvis-{os.getuid()}")
+
+    for path in candidates:
+        try:
+            os.makedirs(path, mode=0o700, exist_ok=True)
+            os.chmod(path, 0o700)
+            st = os.lstat(path)
+            if stat.S_ISLNK(st.st_mode):
+                continue  # refuse a symlinked directory
+            if st.st_uid != os.getuid():
+                continue  # pre-created by someone else — don't trust it
+            return path
+        except OSError:
+            continue
+
+    logger.warning(
+        "PrivacyControlWatcher: no user-private runtime dir available "
+        "(tried XDG_RUNTIME_DIR/jarvis, /run/user/%s/jarvis, "
+        "/tmp/jarvis-%s) — falling back to plain /tmp",
+        os.getuid(), os.getuid(),
+    )
+    return "/tmp"
+
+
+_RUNTIME_DIR = _default_runtime_dir()
+
+
 class PrivacyControlWatcher(threading.Thread):
     """Polls for privacy control sentinel files. See module docstring."""
 
-    ENTER_SENTINEL = "/tmp/.jarvis_privacy_enter"
-    LOCK_SENTINEL = "/tmp/.jarvis_privacy_lock"
-    EXIT_SENTINEL = "/tmp/.jarvis_privacy_exit"
-    STATUS_FILE = "/tmp/.jarvis_privacy_status"
+    ENTER_SENTINEL = os.path.join(_RUNTIME_DIR, ".jarvis_privacy_enter")
+    LOCK_SENTINEL = os.path.join(_RUNTIME_DIR, ".jarvis_privacy_lock")
+    EXIT_SENTINEL = os.path.join(_RUNTIME_DIR, ".jarvis_privacy_exit")
+    STATUS_FILE = os.path.join(_RUNTIME_DIR, ".jarvis_privacy_status")
 
     DEFAULT_POLL_INTERVAL = 0.5  # seconds
 
