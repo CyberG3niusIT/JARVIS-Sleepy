@@ -56,6 +56,79 @@ class TestBasicMarking:
         assert t.turn_id == "abc123"
 
 
+class TestBackfillWithExplicitTimestamp:
+    """Session #7: mark(stage, at=...) lets a caller backfill a stage
+    that happened on a different thread before this tracker even
+    existed (e.g. speech_end on continuous_listener.py's callback
+    thread, captured before _handle_command() creates the tracker) —
+    see the _STAGE_ORDER comment in core/latency_tracker.py for the
+    full reasoning and current wiring status."""
+
+    def test_mark_with_at_uses_explicit_timestamp(self):
+        t = LatencyTracker()
+        past = time.monotonic() - 0.5  # 500ms "in the past"
+        t.mark("speech_end", at=past)
+        assert t._marks["speech_end"] == past
+
+    def test_backfilled_stage_produces_correct_span(self):
+        past = time.monotonic() - 0.2  # speech ended 200ms before the tracker existed
+        t = LatencyTracker()
+        t.mark("speech_end", at=past)
+        ms = t._span_ms("speech_end", "command_received")
+        assert ms is not None
+        assert 150 <= ms <= 400  # allow scheduling jitter around the 200ms target
+
+    def test_backfilled_stage_appears_in_summary_line(self):
+        past = time.monotonic() - 0.05
+        t = LatencyTracker()
+        t.mark("speech_end", at=past)
+        line = t.summary_line()
+        assert "Speech-End -> Command" in line
+
+    def test_no_backfill_leaves_existing_behavior_unchanged(self):
+        """A tracker that never receives speech_end/stt_start/stt_end
+        must behave exactly as before this change — those spans simply
+        don't appear, nothing errors."""
+        t = LatencyTracker()
+        t.mark("router_done")
+        line = t.summary_line()
+        assert "Speech-End -> Command" not in line
+        assert "STT" not in line  # "STT" span label, not incidental substring match elsewhere
+        assert "Routing+Memory" in line
+
+    def test_mark_without_at_still_uses_now(self):
+        """Default behavior (no `at`) is unaffected by the new parameter."""
+        t = LatencyTracker()
+        before = time.monotonic()
+        t.mark("router_done")
+        after = time.monotonic()
+        assert before <= t._marks["router_done"] <= after
+
+    def test_backfill_is_idempotent_too(self):
+        t = LatencyTracker()
+        first_past = time.monotonic() - 1.0
+        second_past = time.monotonic() - 0.1
+        t.mark("speech_end", at=first_past)
+        t.mark("speech_end", at=second_past)  # must not overwrite
+        assert t._marks["speech_end"] == first_past
+
+    def test_full_chain_including_new_stages(self):
+        speech_end = time.monotonic() - 0.3
+        stt_start = speech_end + 0.01
+        stt_end = stt_start + 0.15
+        t = LatencyTracker()
+        t.mark("speech_end", at=speech_end)
+        t.mark("stt_start", at=stt_start)
+        t.mark("stt_end", at=stt_end)
+        for stage in ["router_done", "llm_start", "llm_first_token",
+                      "first_speakable_chunk", "tts_first_pcm", "response_done"]:
+            t.mark(stage)
+        line = t.summary_line()
+        for label in ["STT", "Speech-End -> Command", "Routing+Memory",
+                      "LLM TTFT", "Gesamt (ab Speech-End)"]:
+            assert label in line, f"missing '{label}' in: {line}"
+
+
 class TestSummaryLine:
     def test_summary_includes_reached_spans_only(self):
         t = LatencyTracker()

@@ -22,6 +22,9 @@ from typing import Optional
 # Ordered so the summary line and the "vorher/stage" delta both read
 # naturally top to bottom, matching the flow of a turn.
 _STAGE_ORDER = [
+    "speech_end",
+    "stt_start",
+    "stt_end",
     "command_received",
     "router_done",
     "llm_start",
@@ -36,12 +39,25 @@ _STAGE_ORDER = [
 # does both synchronously and isn't separately instrumented yet (would
 # need a checkpoint inside conversation_router.py itself; not done this
 # session — see docs/ARCHITECTURE.md).
+#
+# speech_end/stt_start/stt_end are OPTIONAL stages (session #7): they
+# only appear if the caller backfills them via mark(stage, at=...) with
+# a timestamp captured earlier on continuous_listener.py's/STTWorker's
+# own threads — command_received still marks "now" as before when no
+# backfill happened, so existing callers (and existing tests) are
+# unaffected. See docs/ARCHITECTURE.md for why the actual wiring
+# (passing those timestamps through the audio_queue/TRANSCRIPTION_READY
+# payload) was researched but not implemented this session — this class
+# is ready for it, the pipeline-side plumbing is not done yet.
 _SUMMARY_SPANS = [
+    ("STT", "stt_start", "stt_end"),
+    ("Speech-End -> Command", "speech_end", "command_received"),
     ("Routing+Memory", "command_received", "router_done"),
     ("LLM TTFT", "llm_start", "llm_first_token"),
     ("Erster sprechbarer Chunk", "llm_start", "first_speakable_chunk"),
     ("TTS erstes PCM", "first_speakable_chunk", "tts_first_pcm"),
     ("Gesamt", "command_received", "response_done"),
+    ("Gesamt (ab Speech-End)", "speech_end", "response_done"),
 ]
 
 
@@ -64,14 +80,24 @@ class LatencyTracker:
         self._lock = threading.Lock()
         self.mark("command_received")
 
-    def mark(self, stage: str) -> float:
+    def mark(self, stage: str, at: Optional[float] = None) -> float:
         """Record a monotonic timestamp for `stage`, if not already set.
         Returns the timestamp. Idempotent — a stage already marked keeps
         its first timestamp (e.g. multiple chunks each try to mark
-        "first_speakable_chunk"; only the first sticks)."""
+        "first_speakable_chunk"; only the first sticks).
+
+        `at`: an explicit `time.monotonic()` value captured earlier,
+        for backfilling a stage that happened before this tracker
+        existed (e.g. speech_end/stt_start/stt_end, captured on
+        continuous_listener.py's/STTWorker's own thread, before
+        _handle_command() creates the tracker — see the _STAGE_ORDER
+        comment above). Must be a `time.monotonic()` value, not
+        `time.time()` — mixing clocks would produce meaningless deltas
+        against the other marks, which all use `time.monotonic()`.
+        Defaults to "now" (existing behavior, unaffected)."""
         with self._lock:
             if stage not in self._marks:
-                self._marks[stage] = time.monotonic()
+                self._marks[stage] = at if at is not None else time.monotonic()
             return self._marks[stage]
 
     def has(self, stage: str) -> bool:
