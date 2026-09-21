@@ -12,6 +12,7 @@ import requests
 from core.gpu_swap import get_gpu_swap_manager
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 logger = get_logger("jarvis.tools.generate_image")
 
 TOOL_NAME = "generate_image"
@@ -97,7 +98,13 @@ def handler(args: dict) -> str:
 
     try:
         # 2. Generate image
-        logger.info("Sending generation request: %.80s...", prompt)
+        # Session #8 fix (agentic-audit finding #3): `prompt` is raw user
+        # content (what the user asked to generate) — the request itself
+        # (not just its length) used to be logged unconditionally.
+        if get_privacy_gate().allow(Capability.CONTENT_LOGGING):
+            logger.info("Sending generation request: %.80s...", prompt)
+        else:
+            logger.info("Sending generation request (%d chars)", len(prompt))
         response = requests.post(
             f"{FLUX_SERVER_URL}/generate",
             json={"prompt": prompt, "width": width, "height": height},

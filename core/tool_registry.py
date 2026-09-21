@@ -273,7 +273,20 @@ def execute_tool(tool_name: str, arguments: dict) -> str | dict:
         logger.warning(f"Unknown tool: {tool_name}")
         return f"Error: unknown tool '{tool_name}'"
     _trunc_args = {k: (str(v)[:80] + "..." if len(str(v)) > 80 else v) for k, v in arguments.items()}
-    logger.debug("execute_tool: %s(%s)", tool_name, _trunc_args)
+    # Session #8 fix (agentic-audit finding #3): this line logged
+    # truncated tool ARGUMENTS via plain logger.debug — content-bearing
+    # (file paths, search patterns, user text, shell commands...) — to
+    # the file log completely outside the CONTENT_LOGGING gate that
+    # session #7 only applied to the event_logger.emit() calls further
+    # below. During PRIVACY/PRIVACY_LOCK this leaked argument content
+    # regardless of privacy mode. Metadata-only (tool name, arg count)
+    # is always safe to log; the argument values themselves now require
+    # CONTENT_LOGGING, matching every other content-logging call site.
+    if get_privacy_gate().allow(Capability.CONTENT_LOGGING):
+        logger.debug("execute_tool: %s(%s)", tool_name, _trunc_args)
+    else:
+        logger.debug("execute_tool: %s(%d args) [content logging suppressed]",
+                      tool_name, len(arguments))
     try:
         _t0 = time.time()
         result = handler(arguments)

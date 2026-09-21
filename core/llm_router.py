@@ -49,6 +49,20 @@ from core.tool_registry import (  # noqa: E402
 )
 
 
+def _log_tool_call(logger_, privacy_gate, label: str, tool_call_name: str, args: dict) -> None:
+    """Log a detected tool call, gated on CONTENT_LOGGING for the
+    arguments (user-request-derived content). The tool name alone is
+    metadata and always logged. Session #8 fix (agentic-audit finding
+    #3): both call sites in stream_with_tools() used to log `args`
+    unconditionally, regardless of privacy mode. Extracted into its own
+    function so the gating logic itself is directly unit-testable
+    without driving the whole SSE-streaming generator."""
+    if privacy_gate.allow(Capability.CONTENT_LOGGING):
+        logger_.info(f"{label}: {tool_call_name}({args})")
+    else:
+        logger_.info(f"{label}: {tool_call_name}(...)")
+
+
 class LLMRouter:
     """Routes LLM requests to local or API models with smart fallback"""
 
@@ -1358,9 +1372,8 @@ class LLMRouter:
                             args = json.loads(tool_call_args) if tool_call_args else {}
                         except json.JSONDecodeError:
                             args = {"query": tool_call_args}
-                        self.logger.info(
-                            f"Tool call: {tool_call_name}({args})"
-                        )
+                        _log_tool_call(self.logger, self._privacy_gate,
+                                       "Tool call", tool_call_name, args)
                         yield ToolCallRequest(
                             name=tool_call_name,
                             arguments=args,
@@ -1378,7 +1391,8 @@ class LLMRouter:
                     args = json.loads(tool_call_args) if tool_call_args else {}
                 except json.JSONDecodeError:
                     args = {"query": tool_call_args}
-                self.logger.info(f"Tool call (no finish_reason): {tool_call_name}({args})")
+                _log_tool_call(self.logger, self._privacy_gate,
+                               "Tool call (no finish_reason)", tool_call_name, args)
                 yield ToolCallRequest(
                     name=tool_call_name,
                     arguments=args,

@@ -83,3 +83,37 @@ class TestExecuteToolAuditGatedByPrivacy:
 
         assert "Error executing broken_tool" in result
         assert fake_el.calls == []
+
+
+class TestExecuteToolDebugLogGatedByPrivacy:
+    """Session #8 agentic-audit finding #3: execute_tool()'s own
+    logger.debug() call — separate from the event_logger.emit() audit
+    trail above — logged truncated tool ARGUMENTS unconditionally via
+    the plain file logger, completely outside the CONTENT_LOGGING gate
+    that session #7 only applied to the event_logger emission. During
+    PRIVACY/PRIVACY_LOCK this leaked argument content (e.g. raw user
+    text passed as a tool argument) to the log file regardless of
+    privacy mode."""
+
+    def test_argument_content_absent_from_debug_log_during_privacy(
+        self, registry_ready, monkeypatch, caplog
+    ):
+        monkeypatch.setattr("core.event_logger.get_event_logger", lambda *a, **k: None)
+        get_privacy_gate().enter(PrivacyMode.PRIVACY, actor="test")
+
+        with caplog.at_level("DEBUG", logger="jarvis.tool_registry"):
+            tool_registry.execute_tool("echo_tool", {"text": "super-geheimes-passwort"})
+
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "super-geheimes-passwort" not in joined
+
+    def test_argument_content_present_in_debug_log_outside_privacy(
+        self, registry_ready, monkeypatch, caplog
+    ):
+        monkeypatch.setattr("core.event_logger.get_event_logger", lambda *a, **k: None)
+
+        with caplog.at_level("DEBUG", logger="jarvis.tool_registry"):
+            tool_registry.execute_tool("echo_tool", {"text": "normal-content"})
+
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "normal-content" in joined

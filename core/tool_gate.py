@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
 
 logger = get_logger("jarvis.tool_gate")
 
@@ -168,10 +169,21 @@ def should_include_tools(query: str, embedding=None) -> bool:
                 prob_tool = clf.predict_proba(emb)[0][1]
 
                 if prob_tool < _CONFIDENCE_THRESHOLD:
-                    logger.info(
-                        "Tool gate: classifier P(tool)=%.3f < %.2f — tools SKIPPED for: %.80s",
-                        prob_tool, _CONFIDENCE_THRESHOLD, query,
-                    )
+                    # Session #8 fix (agentic-audit finding #3): `query`
+                    # is up to 80 chars of raw user text and used to be
+                    # logged unconditionally. Metadata (the probability)
+                    # is always safe; the query text itself requires
+                    # CONTENT_LOGGING.
+                    if get_privacy_gate().allow(Capability.CONTENT_LOGGING):
+                        logger.info(
+                            "Tool gate: classifier P(tool)=%.3f < %.2f — tools SKIPPED for: %.80s",
+                            prob_tool, _CONFIDENCE_THRESHOLD, query,
+                        )
+                    else:
+                        logger.info(
+                            "Tool gate: classifier P(tool)=%.3f < %.2f — tools SKIPPED",
+                            prob_tool, _CONFIDENCE_THRESHOLD,
+                        )
                     return False
                 else:
                     logger.debug(
