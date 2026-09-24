@@ -1,0 +1,56 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "jarvis-ui-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5180",
+        "--strictPort"
+      ],
+      "port": 5180
+    },
+    {
+      "name": "jarvis-ui-mock",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5181",
+        "--strictPort"
+      ],
+      "port": 5181,
+      "env": {
+        "JARVIS_WEB_URL": "http://127.0.0.1:5190",
+        "JARVIS_LLM_MAIN_URL": "http://127.0.0.1:5190",
+        "JARVIS_LLM_SMALL_URL": "http://127.0.0.1:5190",
+        "JARVIS_TTS_URL": "http://127.0.0.1:5190",
+        "JARVIS_FLUX_URL": "http://127.0.0.1:5190",
+        "JARVIS_VVS_URL": "http://127.0.0.1:5190",
+        "VITE_JARVIS_ADAPTER": "production"
+      }
+    },
+    {
+      "name": "jarvis-ui-live",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5182",
+        "--strictPort"
+      ],
+      "port": 5182,
+      "env": {
+        "VITE_JARVIS_ADAPTER": "production"
+      }
+    }
+  ]
+}

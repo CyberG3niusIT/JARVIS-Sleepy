@@ -1,107 +1,32 @@
-# TLS certs
-.certs/
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-
 # Logs
+logs
 *.log
-logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Virtual environments
-venv/
-.venv/
-venv-tts/
-env/
-ENV/
+node_modules
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack/**
+.nitro
+*.local
 
-# IDE / tools
-.vscode/
-.idea/
-.claude/plans/
-.claude/PLANS/
-*.swp
-*.swo
-*~
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
 
-# Backup files
-*.backup
-*.backup_*
-config.yaml.backup*
-config.yaml.bak
-*.bak
-
-# OS
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
-
-# Don't commit models (too large)
-*.gguf
-*.bin
-*.onnx
-
-# Generated images (Flux output)
-generated_images/
-
-# Audio files (generated/test artifacts)
-*.wav
-*.mp3
-wav_files/
-
-# Don't commit user data
-/mnt/storage/jarvis/chat_history/
-*.db
-
-# Runtime artifacts
-reports/
-
-# Google Calendar OAuth (NEVER commit)
-credentials.json
-token.json
-google_token.json
-google_sync_token.json
-
-# Experiments / scratch
-experiments/
-
-# Research artifacts (session research, not code)
-research/
-
-# Test results (local run artifacts)
-tests/iterative_results/
-tests/v3_results/
-
-# Code review artifacts
-reviews/
-
-# Local backups & archives
-.backup/
-.archive/
-share/
-
-# Console history
-.console_history
-
-# PID files
-*.pid
-
-# Memory / handoff notes (personal, never publish)
-memory/
-
-# Environment
-.env
-governance/.governance_pw
-
-# Sleepy/JARVIS local migration backups
-backups/
-*.bak-*
-*.bak-*/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

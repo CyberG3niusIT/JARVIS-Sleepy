@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "jarvis": {
-      "command": "python3",
-      "args": ["/home/user/jarvis/mcp_server.py"]
-    }
-  }
-}

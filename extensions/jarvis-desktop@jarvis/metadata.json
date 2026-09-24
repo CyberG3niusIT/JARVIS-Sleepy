@@ -1,7 +1,0 @@
-{
-  "name": "JARVIS Desktop Bridge",
-  "description": "D-Bus bridge for JARVIS voice assistant — exposes window management, workspace control, and system operations on Wayland.",
-  "uuid": "jarvis-desktop@jarvis",
-  "shell-version": ["46"],
-  "version": 1
-}
