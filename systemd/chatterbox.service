@@ -1,17 +1,10 @@
-# NEEDS HW VERIFY — see systemd/README.md before installing.
-# This unit did not exist in the repo before this pass (grep confirmed
-# no chatterbox.service anywhere). Piper remains the real fallback per
-# config.yaml (tts.engine: chatterbox, with Piper configured and used
-# whenever the Chatterbox HTTP call fails — core/tts.py's
-# _fallback_to_piper) — this unit intentionally has no hard dependency
-# that would block jarvis.service from starting without it.
+# Sleepy production unit for the local Chatterbox Multilingual V3 server.
+# Hardware/runtime contract:
+#   /home/alex/chatterbox-venv/bin/python3
+#   /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main
+#   /home/alex/jarvis-data/voices/chatterbox/jarvis-reference.wav
 #
-# NEEDS HW VERIFY: confirm whether Chatterbox actually runs from the
-# same /home/alex/jarvis-venv as the rest of JARVIS, or needs its own
-# separate venv (its GPU/torch/chatterbox-tts dependency set may not be
-# compatible with the main venv's pinned versions — this could not be
-# checked without running on Sleepy itself). If it needs its own venv,
-# change ExecStart's interpreter path accordingly.
+# start_chatterbox.sh verifies the canonical voice SHA before model load.
 
 [Unit]
 Description=Chatterbox Multilingual V3 TTS server for JARVIS
@@ -20,26 +13,19 @@ After=network.target
 [Service]
 Type=simple
 User=alex
-EnvironmentFile=-/home/alex/jarvis/.env
-Environment=HSA_OVERRIDE_GFX_VERSION=11.0.0
-Environment=CHATTERBOX_PORT=8765
-Environment=CHATTERBOX_LANGUAGE=de
-WorkingDirectory=/home/alex/jarvis
+WorkingDirectory=/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main
 
-# NEEDS HW VERIFY: python interpreter — see docstring above re: separate venv.
-ExecStart=/home/alex/jarvis-venv/bin/python3 /home/alex/jarvis/tools/chatterbox_server.py
+ExecStartPre=/usr/bin/test -x /home/alex/chatterbox-venv/bin/python3
+ExecStartPre=/usr/bin/test -f /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/start_chatterbox.sh
+ExecStart=/bin/bash /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/start_chatterbox.sh
 
 Restart=on-failure
 RestartSec=10
-# Model load onto GPU can legitimately take a while before the process
-# is ready to serve — don't let systemd consider a slow-starting model
-# load a failure.
-TimeoutStartSec=120
-TimeoutStopSec=15
+TimeoutStopSec=20
 
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=chatterbox
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

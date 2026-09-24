@@ -1,0 +1,26 @@
+name: school
+version: 1.0.0
+description: Deterministic school-day state — schedule, pickup requirement, and day-specific overrides for each child
+category: personal
+author: Jarvis Team
+enabled: true
+priority: 7
+
+dependencies: []
+
+intents:
+  - "wann hat {person} heute aus"
+  - "muss ich {person} heute abholen"
+  - "wann muss ich los um {person} abzuholen"
+
+keywords:
+  - school
+  - pickup
+  - pick up
+  - dropoff
+  - drop off
+  - schule
+  - abholen
+  - abholung
+  - unterricht
+  - stundenplan

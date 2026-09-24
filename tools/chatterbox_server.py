@@ -11,11 +11,11 @@ Generation parameters (verified signature):
              min_p=0.05, top_p=1.0)
 
 Defaults come from CHATTERBOX_* env vars so they can be tuned without
-touching this file, and can be overridden per-request via the JSON body
-(e.g. {"text": "...", "exaggeration": 0.7}) — the hook a future "vocal
-behavior" layer (dynamic emotion/emphasis per utterance) would use.
+touching this file, and can be overridden per-request via the JSON body.
+The production values live in systemd/chatterbox.env.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -24,7 +24,6 @@ import wave
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import numpy as np
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("CHATTERBOX_PORT", "8765"))
@@ -34,7 +33,6 @@ PORT = int(os.environ.get("CHATTERBOX_PORT", "8765"))
 TEMPO = float(os.environ.get("CHATTERBOX_TEMPO", "0.89"))
 LANGUAGE_ID = os.environ.get("CHATTERBOX_LANGUAGE", "de")
 
-# Chatterbox generate() defaults — see module docstring for the signature.
 DEFAULT_GEN_PARAMS = {
     "exaggeration": float(os.environ.get("CHATTERBOX_EXAGGERATION", "0.5")),
     "cfg_weight": float(os.environ.get("CHATTERBOX_CFG_WEIGHT", "0.5")),
@@ -45,29 +43,29 @@ DEFAULT_GEN_PARAMS = {
 }
 AUDIO_PROMPT_PATH = os.environ.get("CHATTERBOX_AUDIO_PROMPT_PATH") or None
 
-print("Lade Chatterbox V3...", flush=True)
+# Set in main() after the HTTP socket has been bound successfully.
+model = None
 
-model = ChatterboxMultilingualTTS.from_pretrained(
-    device="cuda",
-    t3_model="v3",
-)
 
-print(f"READY http://{HOST}:{PORT} (tempo={TEMPO}, lang={LANGUAGE_ID})", flush=True)
+def _file_sha256(path: str | None) -> str | None:
+    """Return a file SHA256 without loading the whole reference WAV into RAM."""
+    if not path:
+        return None
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+AUDIO_PROMPT_SHA256 = _file_sha256(AUDIO_PROMPT_PATH)
 
 
 def _apply_tempo(pcm_bytes: bytes, tempo: float, sample_rate: int) -> bytes:
-    """Resample playback speed via ffmpeg, piping raw PCM through stdin/stdout.
-
-    No temp files: avoids disk round-trips per request (this runs on every
-    single utterance, so the I/O adds up under normal conversation load).
-
-    Deliberately in/out as raw s16le, not WAV: ffmpeg can't seek back to
-    patch the RIFF data-chunk size on a non-seekable pipe, so a WAV muxed
-    straight to pipe:1 ships a bogus (~4GB) declared size. Most readers
-    tolerate that by reading until EOF, but it's not worth trusting for
-    audio played straight into aplay — building the WAV header ourselves
-    in make_wav() guarantees a correct one.
-    """
+    """Resample playback speed via ffmpeg, piping raw PCM through stdin/stdout."""
     if tempo == 1.0:
         return pcm_bytes
 
@@ -92,6 +90,9 @@ def _apply_tempo(pcm_bytes: bytes, tempo: float, sample_rate: int) -> bytes:
 
 
 def make_wav(text: str, gen_params: dict) -> bytes:
+    if model is None:
+        raise RuntimeError("Chatterbox model is not initialized")
+
     wav = model.generate(
         text,
         language_id=LANGUAGE_ID,
@@ -131,14 +132,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/config":
-            # Lets the client (core/tts.py) fingerprint the exact voice
-            # config this server is running, without either side assuming
-            # anything about the other's environment variables. See
-            # TextToSpeech._chatterbox_voice_fingerprint().
             body = json.dumps({
                 "language": LANGUAGE_ID,
                 "tempo": TEMPO,
                 "audio_prompt_path": AUDIO_PROMPT_PATH,
+                "audio_prompt_sha256": AUDIO_PROMPT_SHA256,
                 **DEFAULT_GEN_PARAMS,
             }).encode()
 
@@ -164,8 +162,6 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 raise ValueError("Text ist leer")
 
-            # Per-request overrides of the default generation params —
-            # the hook for a future dynamic vocal-behavior layer.
             gen_params = dict(DEFAULT_GEN_PARAMS)
             for key in gen_params:
                 if key in data:
@@ -180,9 +176,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(wav)
 
         except Exception as e:
-            body = json.dumps(
-                {"error": str(e)}
-            ).encode()
+            body = json.dumps({"error": str(e)}).encode()
 
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
@@ -191,4 +185,37 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
 
-HTTPServer((HOST, PORT), Handler).serve_forever()
+def main() -> None:
+    """Bind first, load the GPU model second, announce READY last.
+
+    Binding before model load prevents a second Chatterbox process from spending
+    GPU time loading the model only to discover that port 8765 is already used.
+    READY is emitted only after both the socket bind and model initialization
+    have succeeded.
+    """
+    global model
+
+    # HTTPServer binds/activates the socket in its constructor but does not
+    # accept requests until serve_forever() is entered below.
+    server = HTTPServer((HOST, PORT), Handler)
+
+    try:
+        print("Lade Chatterbox V3...", flush=True)
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+
+        model = ChatterboxMultilingualTTS.from_pretrained(
+            device="cuda",
+            t3_model="v3",
+        )
+
+        print(
+            f"READY http://{HOST}:{PORT} (tempo={TEMPO}, lang={LANGUAGE_ID})",
+            flush=True,
+        )
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

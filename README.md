@@ -1,5 +1,7 @@
 # JARVIS Sleepy
 
+> Zentrale technische Dokumentation: [JARVIS Sleepy Dokumentation](../Dokumentation/README.md). Die folgenden Hardware-, Modell- und Runtime-Angaben stammen aus einem früheren Snapshot; aktuellen Entwicklungsstand bitte gegen Code, Konfiguration und [Git-Status](../Dokumentation/00_PROJECT_STATUS.md) prüfen.
+
 Lokaler Sprachassistent für Windows 11 mit Ubuntu 24.04 unter WSL2, AMD ROCm, lokalem LLM, deutscher Spracherkennung und Windows-Steuerung.
 
 Dieses Repository enthält den aktuellen Sleepy-Stand meiner JARVIS-Anpassung. Die Basis stammt aus `InterGenJLU/jarvis`, wurde aber für meinen Windows- und WSL2-Stack deutlich umgebaut.

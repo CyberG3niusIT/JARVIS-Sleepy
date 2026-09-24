@@ -202,6 +202,23 @@ class ProfileManager:
     # Convenience
     # ------------------------------------------------------------------
 
+    def ensure_primary_profile(self) -> Dict[str, Any]:
+        """Ensure the configured primary identity exists without enrolling a voice."""
+        user_id = self.config.get("user_profiles.primary_user_id", "primary_user")
+        name = self.config.get("user_profiles.primary_user_name", "Alex")
+        honorific = self.config.get("user_profiles.primary_honorific", "sir")
+        profile = self.get_profile(user_id)
+        if profile is None:
+            return self.create_profile(user_id, name, honorific, role="admin")
+        updates = {}
+        if profile["name"] != name:
+            updates["name"] = name
+        if profile["honorific"] != honorific:
+            updates["honorific"] = honorific
+        if updates:
+            return self.update_profile(user_id, **updates)
+        return profile
+
     def get_honorific_for(self, user_id: str) -> str:
         """Get the honorific for a user, defaulting to 'sir'."""
         profile = self.get_profile(user_id)

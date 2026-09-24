@@ -1,18 +1,32 @@
-#!/bin/bash
-#
-# Stop Jarvis Service (graceful)
-#
-# Only stops jarvis.service (user unit) — deliberately leaves
-# llama-server.service/chatterbox.service (system units) running, since
-# a graceful "pause JARVIS" shouldn't tear down GPU-loaded models that
-# are slow to reload. Use killswitch.sh for a full stop of everything.
-#
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-echo "🟡 Stopping Jarvis..."
-systemctl --user stop jarvis.service
+JARVIS_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/jarvis-runtime"
+mkdir -p "$STATE_DIR"
+exec 9>"$STATE_DIR/control.lock"
+flock 9
 
-echo "✅ Jarvis stopped"
-echo ""
-echo "Service is still enabled and will restart on boot."
-echo "To disable: systemctl --user disable jarvis.service"
-echo "llama-server/chatterbox were left running — use killswitch.sh to stop everything."
+state="$(systemctl --user show jarvis.service --property=LoadState --value 2>/dev/null || true)"
+if [[ "$state" == not-found || -z "$state" ]]; then
+    echo "STOPPED: jarvis.service ist nicht installiert."
+    exit 0
+fi
+[[ "$state" == loaded ]] || { echo "ERROR: jarvis.service ist nicht korrekt geladen."; exit 1; }
+fragment="$(systemctl --user show jarvis.service --property=FragmentPath --value 2>/dev/null || true)"
+fragment_real="$(readlink -f "$fragment" 2>/dev/null || true)"
+unit_real="$(readlink -f "$JARVIS_ROOT/systemd/jarvis.service" 2>/dev/null || true)"
+execstart="$(systemctl --user show jarvis.service --property=ExecStart --value 2>/dev/null || true)"
+[[ -n "$unit_real" && "$fragment_real" == "$unit_real" && "$execstart" == *"/home/alex/jarvis-venv/bin/python3"* && "$execstart" == *"$JARVIS_ROOT/jarvis_continuous.py"* ]] || {
+    echo "ERROR: jarvis.service gehört nicht zur geprüften JARVIS-Unit; es wurde nichts gestoppt."
+    exit 1
+}
+
+if systemctl --user is-active --quiet jarvis.service; then
+    systemctl --user stop jarvis.service
+fi
+if systemctl --user is-active --quiet jarvis.service; then
+    echo "ERROR: jarvis.service ist nach Stop weiterhin aktiv."
+    exit 1
+fi
+echo "STOPPED: JARVIS-Backend beendet; LLM, Chatterbox und VVS bleiben unverändert."

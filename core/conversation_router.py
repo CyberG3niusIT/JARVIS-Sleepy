@@ -275,7 +275,7 @@ class ConversationRouter:
                     _obs_id = el.emit(
                         category="decision",
                         event="route_completed",
-                        message=f"{result.intent or 'llm_fallback'}: {command[:80]}",
+                        message=f"{result.intent or 'llm_fallback'}",
                         severity="info",
                         source="conversation_router",
                         stage="routing",
@@ -285,7 +285,7 @@ class ConversationRouter:
                         trace_id=_tc.trace_id,
                         session_id=_tc.session_id,
                         metadata={
-                            "command": command[:200],
+                            "command_length": len(command),
                             "intent": result.intent or ("llm_fallback" if not result.handled else "handled"),
                             "source": result.source,
                             "handled": result.handled,
@@ -316,18 +316,14 @@ class ConversationRouter:
                      image_data: str = None) -> RouteResult:
         """Internal routing logic — called from route() with thread-local ctx set."""
         guest = self._is_guest
-        logger.debug("route: command=%.80s user=%s guest=%s in_conv=%s",
-                      command, self._user_id, guest, in_conversation)
+        logger.debug("route: command_length=%d user=%s guest=%s in_conv=%s",
+                      len(command), self._user_id, guest, in_conversation)
 
-        # --- Priority 1: Rundown acceptance (outside guest guard) ---
-        # Rundown is JARVIS-initiated for the owner.  If a rundown is
-        # pending the response must go through the rundown handler even
-        # when speaker-ID has (incorrectly) activated guest mode.
-        # Checked BEFORE guest greeting so short responses like "no" (2 chars)
-        # are not swallowed by the guest greeting guard.
-        result = self._handle_rundown(command)
-        if result:
-            return result
+        # A pending owner rundown must never be delivered to an unknown voice.
+        if not guest:
+            result = self._handle_rundown(command)
+            if result:
+                return result
 
         # --- Guest greeting (before pending-state priorities) ---
         if guest and (command.strip() == "jarvis_only" or len(command.strip()) <= 2):
@@ -529,6 +525,9 @@ class ConversationRouter:
                     always_on = [t for t in always_on
                                  if t["function"]["name"] not in self._MOBILE_EXCLUDED_TOOLS]
                 always_on = self._apply_anaphoric_carryover(always_on)
+                if self._is_guest:
+                    always_on = [tool for tool in always_on
+                                 if tool["function"]["name"] in self._GUEST_ALLOWED_TOOLS]
                 if always_on:
                     result.use_tools = always_on
                     result.tool_temperature = 0.0
@@ -542,7 +541,7 @@ class ConversationRouter:
                     # Emit domain classification debug event
                     from core.debug_logger import get_debug_logger as _get_dbg
                     _get_dbg()._write("domain_classification", {
-                        "command": command[:200],
+                        "command_length": len(command),
                         "category": category,
                         "temperature": result.synthesis_temperature,
                     })
@@ -574,10 +573,11 @@ class ConversationRouter:
 
     def _route_greeting(self) -> RouteResult:
         """Handle wake-word-only or empty commands."""
-        # Rundown mention is owner-directed — check before guest guard
-        if self.reminder_manager and self.reminder_manager.has_rundown_mention():
+        # Rundown mention is owner-directed.
+        if (not self._is_guest and self.reminder_manager
+                and self.reminder_manager.has_rundown_mention()):
             self.reminder_manager.clear_rundown_mention()
-            set_honorific("sir")
+            set_honorific(self.config.get("user_profiles.primary_honorific", "sir"))
             text = persona.rundown_mention()
             return RouteResult(
                 text=text, intent="greeting", source="canned",
@@ -598,16 +598,16 @@ class ConversationRouter:
     def _handle_rundown(self, command: str) -> RouteResult | None:
         """P1: Rundown acceptance or deferral.
 
-        Runs OUTSIDE the guest guard because the rundown is JARVIS-initiated
-        for the owner.  Restores the owner honorific so the response uses
-        "sir" instead of "friend" when guest mode was spuriously active.
+        Only the identified primary user can receive this owner-directed content.
         """
+        if self._is_guest:
+            return None
         rm = self.reminder_manager
         if not rm or not rm.is_rundown_pending():
             return None
 
         # Rundown is owner-directed — ensure correct honorific
-        set_honorific("sir")
+        set_honorific(self.config.get("user_profiles.primary_honorific", "sir"))
 
         text_lower = command.strip().lower()
         words = set(re.findall(r'\b\w+\b', text_lower))
@@ -1933,9 +1933,14 @@ class ConversationRouter:
                 handled=True, open_window=EXTENDED_WINDOW,
             )
 
+        history_source = self._target_history
+        if guest:
+            history_source = [message for message in (
+                history_source if history_source is not None else self.conversation.session_history
+            ) if message.get("user_id") == "__guest__"]
         history = self.conversation.format_history_for_llm(
             include_system_prompt=False,
-            target_history=self._target_history,
+            target_history=history_source,
         )
         response = self.llm.chat(
             user_message=(
@@ -2359,7 +2364,7 @@ class ConversationRouter:
         if not signal:
             return None
 
-        logger.info(f"Compound request detected — generating plan for: {command[:80]}")
+        logger.info("Compound request detected — generating plan (command length=%d)", len(command))
         plan = tp.generate_plan(command, signal=signal)
         if not plan:
             logger.info("Planner returned no plan — falling through to single-skill routing")
@@ -2514,7 +2519,7 @@ class ConversationRouter:
             # Unrecognized hardware aspect — let LLM handle it
             return None
 
-        logger.info(f"Hardware self-query answered directly: {text[:60]}...")
+        logger.info("Hardware self-query answered directly (response length=%d)", len(text))
         return RouteResult(
             text=text, intent="hw_self_query", source="self_awareness",
             handled=True, open_window=DEFAULT_WINDOW,
@@ -2943,8 +2948,8 @@ class ConversationRouter:
         Returns None if no tool-enabled skills are relevant (falls through
         to P4 legacy skill routing).
         """
-        logger.debug("_handle_tool_calling: command=%.80s guest=%s mobile=%s",
-                     command, self._is_guest, self._is_mobile)
+        logger.debug("_handle_tool_calling: command_length=%d guest=%s mobile=%s",
+                     len(command), self._is_guest, self._is_mobile)
         tools = self._select_tools_for_command(command) or []
 
         # Inject prior-turn tool families for anaphoric follow-ups.
@@ -2955,7 +2960,7 @@ class ConversationRouter:
         tools = self._apply_anaphoric_carryover(tools)
 
         if not tools:
-            logger.debug(f"P4-LLM: no tools selected for: {command[:80]}")
+            logger.debug("P4-LLM: no tools selected (command length=%d)", len(command))
             return None
 
         # Capability gates run after all tool injection.
@@ -2983,7 +2988,7 @@ class ConversationRouter:
         from core.debug_logger import get_debug_logger
         _dbg = get_debug_logger()
         _dbg._write("tool_selection", {
-            "command": command[:200],
+            "command_length": len(command),
             "tool_count": len(tools),
             "tool_names": [t["function"]["name"] for t in tools],
             "guest": self._is_guest,
@@ -3012,7 +3017,7 @@ class ConversationRouter:
                          category, result.synthesis_temperature)
         # Emit domain classification debug event
         _dbg._write("domain_classification", {
-            "command": command[:200],
+            "command_length": len(command),
             "category": category,
             "temperature": result.synthesis_temperature,
         })
@@ -3527,9 +3532,14 @@ class ConversationRouter:
         """Prepare context for LLM fallback (streaming done by frontend)."""
         guest = self._is_guest
 
+        history_source = self._target_history
+        if guest:
+            history_source = [message for message in (
+                history_source if history_source is not None else self.conversation.session_history
+            ) if message.get("user_id") == "__guest__"]
         history = self.conversation.format_history_for_llm(
             include_system_prompt=False,
-            target_history=self._target_history,
+            target_history=history_source,
         )
         logger.debug("_prepare_llm_context: history_len=%d", len(history) if history else 0)
 
@@ -3644,7 +3654,7 @@ class ConversationRouter:
         # Replaces fixed 3-exchange window with: topic anchor + compressed
         # older exchanges + last 2 exchanges in full.  Covers ~5 exchanges
         # at equal or lower token cost vs the old 3-exchange window.
-        if in_conversation:
+        if in_conversation and not guest:
             prior_lines = []
             multi_speaker = self.conversation.is_multi_speaker
 
@@ -3758,7 +3768,7 @@ class ConversationRouter:
         )
         _dbg.log_context_window(
             segments_count=len(context_messages) if context_messages else 0,
-            query=command[:200],
+            query_length=len(command),
         )
 
         return RouteResult(

@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Seed the JARVIS user profiles database.
+"""Seed the configured primary profile in JARVIS' private runtime database.
 
-Creates the two admin profiles (the primary and secondary users) with their
-preferred honorifics.  Safe to re-run — skips profiles that already exist.
+Safe to re-run; voice enrollment is a separate explicit step.
 
 Usage:
     python3 scripts/init_profiles.py          # Create default profiles
     python3 scripts/init_profiles.py --list    # List all profiles
-    python3 scripts/init_profiles.py --reset   # Delete and recreate
 """
 
 import sys
@@ -21,54 +19,12 @@ from core.config import Config
 from core.user_profile import get_profile_manager
 
 
-# Default profiles to seed
-DEFAULT_PROFILES = [
-    {
-        "user_id": "user",
-        "name": "User",
-        "honorific": "sir",
-        "role": "admin",
-    },
-    {
-        "user_id": "secondary_user",
-        "name": "Guest",
-        "honorific": "ma'am",
-        "role": "admin",
-    },
-]
-
-
-def seed_profiles(reset: bool = False):
-    """Create default profiles in the database."""
+def seed_profiles():
+    """Create only the configured primary profile, without voice data."""
     config = Config()
     pm = get_profile_manager(config)
-
-    if reset:
-        for p in DEFAULT_PROFILES:
-            existing = pm.get_profile(p["user_id"])
-            if existing:
-                pm.delete_profile(p["user_id"])
-                print(f"  Deleted existing profile: {p['user_id']}")
-
-    created = 0
-    skipped = 0
-    for p in DEFAULT_PROFILES:
-        existing = pm.get_profile(p["user_id"])
-        if existing:
-            print(f"  Skipped (already exists): {p['user_id']} "
-                  f"({existing['name']}, {existing['honorific']})")
-            skipped += 1
-        else:
-            pm.create_profile(
-                user_id=p["user_id"],
-                name=p["name"],
-                honorific=p["honorific"],
-                role=p["role"],
-            )
-            print(f"  Created: {p['user_id']} ({p['name']}, {p['honorific']})")
-            created += 1
-
-    print(f"\nDone — {created} created, {skipped} skipped.")
+    profile = pm.ensure_primary_profile()
+    print(f"  Primary profile ready: {profile['id']} ({profile['name']}, {profile['honorific']})")
 
 
 def list_profiles():
@@ -94,13 +50,8 @@ def main():
     if "--list" in sys.argv:
         print("\nAll profiles:")
         list_profiles()
-    elif "--reset" in sys.argv:
-        print("\nResetting profiles...")
-        seed_profiles(reset=True)
-        print("\nCurrent profiles:")
-        list_profiles()
     else:
-        print("\nSeeding profiles...")
+        print("\nSeeding primary profile...")
         seed_profiles()
         print("\nCurrent profiles:")
         list_profiles()

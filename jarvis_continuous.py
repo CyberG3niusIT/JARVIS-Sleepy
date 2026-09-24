@@ -152,6 +152,8 @@ class JarvisContinuous:
         self.speaker_id = None
         if config.get("user_profiles.enabled", False):
             self.profile_manager = get_profile_manager(config)
+            if self.profile_manager:
+                self.profile_manager.ensure_primary_profile()
             if self.profile_manager and config.get("user_profiles.voice_recognition", False):
                 self.speaker_id = SpeakerIdentifier(config, self.profile_manager)
                 self.speaker_id.load_embeddings()
@@ -420,7 +422,7 @@ class JarvisContinuous:
         if self.event_mode:
             self.stt_worker = STTWorker(
                 self.stt, self.event_queue, self.audio_queue,
-                config, speaker_id=self.speaker_id,
+                config, speaker_id=self.speaker_id, listener=self.listener,
             )
             self.coordinator = Coordinator(
                 config=config,
@@ -440,6 +442,7 @@ class JarvisContinuous:
                 desktop_manager=self.desktop_manager,
                 metrics=self.metrics,
             )
+            self.stt_worker.on_barge_in = self.coordinator.handle_barge_in
             # Wire presence detector to Coordinator's conv_state + accumulator + LLM (CAL integration)
             if hasattr(self, 'presence_detector') and self.presence_detector:
                 self.presence_detector.set_conv_state(self.coordinator.conv_state)
@@ -1010,7 +1013,10 @@ class JarvisContinuous:
         if self.event_mode:
             # Start pipeline workers
             self.stt_worker.start()
-            self.tts_worker = TTSWorker(self.tts, self.event_queue, self.tts_queue, self.config)
+            self.tts_worker = TTSWorker(
+                self.tts, self.event_queue, self.tts_queue, self.config,
+                listener=self.listener,
+            )
             self.tts_worker.start()
             self.logger.info("Pipeline workers started (STT + TTS)")
 

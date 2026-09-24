@@ -1,0 +1,23 @@
+name: mobility
+version: 1.0.0
+description: General-purpose journey planning against the local WIMAEDV VVS API — arrive-by/leave-at with honest realtime and error states
+category: system
+author: Jarvis Team
+enabled: true
+priority: 6
+
+dependencies:
+  - requests
+
+keywords:
+  - bus
+  - bahn
+  - vvs
+  - abfahrt
+  - ankunft
+  - verbindung
+  - stau
+  - verspätung
+  - los
+  - aufbrechen
+  - fahrplan

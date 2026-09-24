@@ -148,6 +148,9 @@ class SpeechToText:
     def _debug_save_audio(self, audio: np.ndarray, sr: int = 16000):
         """Save audio clip to /tmp for debugging (keeps last 5)."""
         try:
+            from core.privacy_gate import get_privacy_gate, Capability
+            if not get_privacy_gate(self.config).allow(Capability.CONTENT_LOGGING):
+                return
             import wave, glob, os, time
             debug_dir = "/tmp/jarvis_audio_debug"
             os.makedirs(debug_dir, exist_ok=True)
@@ -272,7 +275,7 @@ class SpeechToText:
                         latency_ms=round(_stt_elapsed, 1),
                         duration_ms=round(_stt_elapsed, 1),
                         metadata={
-                            "text": text.strip()[:200],
+                            "text_length": len(text.strip()),
                             "segments": len(seg_list),
                             "language_probability": round(info.language_probability, 3),
                             "audio_duration_s": round(_audio_dur, 2),
@@ -286,7 +289,8 @@ class SpeechToText:
             return text.strip()
 
         except Exception as e:
-            self.logger.error(f"Transcription failed: {e}")
+            error_type = type(e).__name__
+            self.logger.error("Transcription failed (%s)", error_type)
             # Structured event: STT failure
             try:
                 from core.event_logger import get_event_logger
@@ -295,12 +299,12 @@ class SpeechToText:
                     el.emit(
                         category="inference",
                         event="stt_transcription",
-                        message=f"STT FAILED: {e}",
+                        message=f"STT FAILED ({error_type})",
                         severity="error",
                         source="stt",
                         stage="stt",
                         status="error",
-                        metadata={"error": str(e)},
+                        metadata={"error_type": error_type},
                     )
             except Exception:
                 pass

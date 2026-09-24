@@ -14,7 +14,7 @@ import sqlite3
 import subprocess
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Callable
 
@@ -108,6 +108,7 @@ class ReminderManager:
         # for why — lets core/watchdog.py distinguish a hung poll loop
         # from a dead thread.
         self._last_poll_ts: float = 0.0
+        self._last_mobility_demand_sync: float = 0.0
 
         # Ack tracking
         self._last_announced_id = None
@@ -1784,13 +1785,49 @@ class ReminderManager:
         self._running = False
         if self._poll_thread:
             self._poll_thread.join(timeout=10)
+        try:
+            from core.mobility_planner import get_mobility_planner
+            planner = get_mobility_planner()
+            if planner is not None:
+                planner.release_demand()
+        except Exception as e:
+            self.logger.warning("Could not release local Mobility demand: %s", type(e).__name__)
         self.logger.info("Reminder system stopped")
+
+    def _sync_mobility_demand(self):
+        """Derive VVS polling windows from School events in this scheduler thread."""
+        if not self.config.get("school.enabled", False) or not self.config.get("mobility.enabled", False):
+            return
+        now = time.monotonic()
+        if now - self._last_mobility_demand_sync < 30:
+            return
+        self._last_mobility_demand_sync = now
+        try:
+            from core.school_db import get_school_db
+            from core.mobility_planner import get_mobility_planner
+
+            school = get_school_db(self.config)
+            planner = get_mobility_planner(self.config)
+            if school is None or planner is None:
+                return
+            today = date.today()
+            events = []
+            for day_offset in range(7):
+                events.extend(school.travel_events(today + timedelta(days=day_offset)))
+            result = planner.sync_demand(events)
+            self.logger.debug("School Mobility demand: %s (%s windows)",
+                              result.get("status", "unknown"), result.get("windows", 0))
+        except Exception as e:
+            self.logger.warning("School Mobility demand sync failed: %s", type(e).__name__)
 
     def _poll_loop(self):
         """Main polling loop: check for due reminders every poll_interval seconds."""
         while self._running:
             self._last_poll_ts = time.time()
             try:
+                # Use the existing reminder scheduler; do not start a second poller.
+                self._sync_mobility_demand()
+
                 # Skip if missed-reminder announcement is in progress
                 if self._announcing_missed:
                     self.logger.debug("Poll cycle: skipped (missed announcement in progress)")

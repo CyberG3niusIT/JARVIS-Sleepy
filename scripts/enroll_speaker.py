@@ -2,14 +2,14 @@
 """Enroll a speaker's voice for JARVIS speaker identification.
 
 Records short audio clips from the microphone, extracts ECAPA-TDNN embeddings
-via SpeechBrain, and saves the averaged embedding to the user's profile.
+via SpeechBrain, and saves separate references to the primary profile.
 
 Usage:
     python3 scripts/enroll_speaker.py                    # Interactive enrollment
-    python3 scripts/enroll_speaker.py --user your_username  # Enroll specific user
+    python3 scripts/enroll_speaker.py --user primary_user  # Explicit primary user
     python3 scripts/enroll_speaker.py --test              # Test identification
     python3 scripts/enroll_speaker.py --list              # List enrollment status
-    python3 scripts/enroll_speaker.py --clips 5           # Record 5 clips (default 3)
+    python3 scripts/enroll_speaker.py --clips 5           # Record 5 clips (default 5)
     python3 scripts/enroll_speaker.py --duration 4        # 4-second clips (default 3)
 """
 
@@ -106,9 +106,9 @@ def enroll_interactive(config, user_id: str, num_clips: int = 3,
                        clip_duration: float = 3.0):
     """Interactive enrollment flow: record clips, enroll, verify."""
     pm = get_profile_manager(config)
-    profile = pm.get_profile(user_id)
-    if not profile:
-        print(f"  Error: profile '{user_id}' not found. Run init_profiles.py first.")
+    profile = pm.ensure_primary_profile()
+    if user_id != profile["id"]:
+        print("  Error: only the configured primary user may be enrolled.")
         return False
 
     sid = SpeakerIdentifier(config, pm)
@@ -192,9 +192,7 @@ def _compute_all_scores(sid, audio, sample_rate):
     embedding = sid.extract_embedding(audio, sample_rate)
     scores = {}
     for user_id, (enrolled_emb, _hon) in sid._cache.items():
-        score = float(np.dot(embedding, enrolled_emb) / (
-            np.linalg.norm(embedding) * np.linalg.norm(enrolled_emb) + 1e-8
-        ))
+        score = sid._score_against_references(embedding, enrolled_emb)
         scores[user_id] = score
     return embedding, scores
 
@@ -383,7 +381,8 @@ def diagnose_speaker_id(config, clip_duration: float = 3.0, num_clips: int = 5):
 def list_enrollment(config):
     """Show enrollment status for all profiles."""
     pm = get_profile_manager(config)
-    profiles = pm.get_all()
+    profile = pm.get_profile(config.get("user_profiles.primary_user_id", "primary_user"))
+    profiles = [profile] if profile else []
 
     if not profiles:
         print("  (no profiles)")
@@ -393,7 +392,7 @@ def list_enrollment(config):
         emb_path = p.get("embedding_path")
         if emb_path and Path(emb_path).exists():
             emb = np.load(emb_path)
-            status = f"enrolled (dim={emb.shape[0]}, norm={np.linalg.norm(emb):.3f})"
+            status = f"enrolled ({emb.shape[0]} references)" if emb.ndim == 2 and emb.shape[0] >= 3 else "needs re-enrollment"
         elif emb_path:
             status = "ERROR: embedding file missing"
         else:
@@ -412,7 +411,7 @@ def main():
     parser.add_argument("--diagnose", action="store_true",
                         help="Comprehensive multi-clip diagnostic")
     parser.add_argument("--list", action="store_true", help="List enrollment status")
-    parser.add_argument("--clips", type=int, default=3, help="Number of clips (default: 3)")
+    parser.add_argument("--clips", type=int, default=5, help="Number of clips (default: 5)")
     parser.add_argument("--duration", type=float, default=3.0,
                         help="Clip duration in seconds (default: 3.0)")
     args = parser.parse_args()
@@ -422,6 +421,7 @@ def main():
 
     config = Config()
     pm = get_profile_manager(config)
+    primary_user_id = config.get("user_profiles.primary_user_id", "primary_user")
 
     if args.list:
         print("\nEnrollment status:")
@@ -436,30 +436,11 @@ def main():
         test_identification(config, args.duration)
         return
 
-    # Enrollment mode
-    if args.user:
-        user_id = args.user
-    else:
-        # Interactive: pick from available profiles
-        profiles = pm.get_all()
-        if not profiles:
-            print("  No profiles found. Run init_profiles.py first.")
-            return
-
-        print("\nAvailable profiles:")
-        for i, p in enumerate(profiles, 1):
-            emb = "enrolled" if p.get("embedding_path") else "not enrolled"
-            print(f"  {i}. {p['id']} ({p['name']}, {p['honorific']}) — {emb}")
-
-        choice = input("\nSelect profile number: ").strip()
-        try:
-            idx = int(choice) - 1
-            user_id = profiles[idx]["id"]
-        except (ValueError, IndexError):
-            print("  Invalid selection.")
-            return
-
-    enroll_interactive(config, user_id, args.clips, args.duration)
+    if args.user and args.user != primary_user_id:
+        parser.error("only the configured primary user may be enrolled")
+    if args.clips < 3 or args.duration < 3:
+        parser.error("enrollment requires at least three clips of three seconds")
+    enroll_interactive(config, primary_user_id, args.clips, args.duration)
 
 
 if __name__ == "__main__":

@@ -78,9 +78,9 @@ def _get_weather_api_key() -> str:
     """Lazy read — .env may not be loaded at import time."""
     return os.environ.get("OPENWEATHER_API_KEY", "")
 
-_DEFAULT_LAT = 33.6662
-_DEFAULT_LON = -86.8128
-_DEFAULT_CITY = "Gardendale"
+DEPENDENCIES = {"config": "_config", "current_user_fn": "_current_user_fn"}
+_config = None
+_current_user_fn = None
 
 
 def _resolve_location(location: str | None) -> tuple[float, float, str] | str:
@@ -90,7 +90,16 @@ def _resolve_location(location: str | None) -> tuple[float, float, str] | str:
     a named location fails (never silently falls back to home).
     """
     if not location:
-        return _DEFAULT_LAT, _DEFAULT_LON, _DEFAULT_CITY
+        if not _current_user_fn or _current_user_fn() in (None, "", "__guest__"):
+            return "Bitte nennen Sie einen Ort für die Wetterauskunft."
+        if _config is None:
+            return "Der Wetterort ist nicht konfiguriert."
+        lat = _config.get("location.home_lat")
+        lon = _config.get("location.home_lon")
+        city = _config.get("location.home_address")
+        if lat is None or lon is None or not city:
+            return "Der Wetterort ist nicht vollständig konfiguriert."
+        return float(lat), float(lon), str(city)
 
     import requests
     try:
@@ -133,22 +142,26 @@ def handler(args: dict) -> str:
     query_type = args.get("query_type", "current")
     location = args.get("location")
 
-    # Sunrise/sunset don't need location resolution
+    resolved = _resolve_location(location)
+    if isinstance(resolved, str):
+        return resolved
+    lat, lon, city = resolved
+    is_home = location is None
+
+    # Sunrise/sunset are stored only for the configured home location.
     if query_type == "sunrise":
+        if not is_home:
+            return "Sonnenzeiten für diesen Ort sind derzeit nicht verfügbar."
         return _weather_sun("sunrise")
     elif query_type == "sunset":
+        if not is_home:
+            return "Sonnenzeiten für diesen Ort sind derzeit nicht verfügbar."
         return _weather_sun("sunset")
 
     # Period queries use the temporal parser
     if query_type == "period":
         period_text = args.get("period", "")
-        return _weather_period(period_text)
-
-    resolved = _resolve_location(location)
-    if isinstance(resolved, str):
-        return resolved  # Geocoding error message
-    lat, lon, city = resolved
-    is_home = (location is None)
+        return _weather_period(period_text, lat, lon, city, is_home)
 
     if query_type == "forecast":
         return _weather_forecast(lat, lon, city, is_home)
@@ -412,14 +425,15 @@ def _weather_rain_check(lat: float, lon: float, city: str, is_home: bool) -> str
         return f"Error checking rain forecast for {city}: {e}"
 
 
-def _weather_period(period_text: str) -> str:
+def _weather_period(period_text: str, lat: float, lon: float,
+                    city: str, is_home: bool) -> str:
     """Weather for a date range parsed from a temporal phrase — raw data for LLM synthesis."""
     from core.weather_db import parse_temporal_phrase
 
     period = parse_temporal_phrase(period_text) if period_text else None
     if not period:
         # Can't parse — fall back to 3-day forecast
-        return _weather_forecast(_DEFAULT_LAT, _DEFAULT_LON, _DEFAULT_CITY, True)
+        return _weather_forecast(lat, lon, city, is_home)
 
     start_date, end_date = period
     today = date.today()
@@ -431,7 +445,7 @@ def _weather_period(period_text: str) -> str:
     if end_date > max_forecast:
         end_date = max_forecast
 
-    db = _get_db()
+    db = _get_db() if is_home else None
     if db:
         rows = db.get_forecast(days=16)
         filtered = [
@@ -457,7 +471,7 @@ def _weather_period(period_text: str) -> str:
             return "\n".join(lines)
 
     # Fallback to generic forecast
-    return _weather_forecast(_DEFAULT_LAT, _DEFAULT_LON, _DEFAULT_CITY, True)
+    return _weather_forecast(lat, lon, city, is_home)
 
 
 def _weather_sun(which: str) -> str:

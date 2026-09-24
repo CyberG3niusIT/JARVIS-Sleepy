@@ -23,6 +23,10 @@ from typing import Optional
 
 from core.events import Event, EventType, PipelineState
 from core.speech_chunker import SpeechChunker
+from core.vocal_directions import (
+    PcmChunk, VoiceTagBoundaryBuffer, compose_directed_pcm, has_directions,
+    log_diagnostics, parse_directions, resample_pcm_s16le,
+)
 from core.latency_tracker import LatencyTracker
 from core.continuous_listener import is_garbage_transcription
 from core.logger import get_logger
@@ -101,52 +105,74 @@ class STTWorker(threading.Thread):
     """
 
     def __init__(self, stt, event_queue: queue.Queue, audio_queue: queue.Queue,
-                 config=None, speaker_id=None):
+                 config=None, speaker_id=None, listener=None):
         super().__init__(daemon=True, name="stt-worker")
         self.stt = stt
         self.event_queue = event_queue
         self.audio_queue = audio_queue
         self.speaker_id = speaker_id
+        self.listener = listener
+        self.on_barge_in = None
         self.logger = get_logger("pipeline.stt", config)
+        self._cached_speaker_id = None
+        self._cached_speaker_confidence = 0.0
+        self._last_strong_match_time = 0.0
+        self._borderline_count = 0
+        self._identity_threshold = config.get("user_profiles.similarity_threshold", 0.30) if config else 0.30
 
-    # Sticky identity: once identified, hold for 60s of silence
-    _cached_speaker_id: str | None = None
-    _cached_speaker_confidence: float = 0.0
-    _last_utterance_time: float = 0.0
-    IDENTITY_TIMEOUT = 60.0  # seconds of silence before re-verifying
+    IDENTITY_TIMEOUT = 60.0
+    SESSION_MARGIN = 0.03
+    MAX_BORDERLINE = 2
 
     def run(self):
         self.logger.info("STT worker started")
         while True:
-            audio = self.audio_queue.get()
-            if audio is None:  # shutdown sentinel
+            item = self.audio_queue.get()
+            if item is None:  # shutdown sentinel
                 self.logger.info("STT worker shutting down")
                 break
             try:
+                if isinstance(item, dict) and "audio" in item:
+                    audio = item["audio"]
+                    generation = item.get("capture_generation")
+                    during_tts = bool(item.get("during_tts"))
+                else:
+                    audio, generation, during_tts = item, None, False
+
+                # Audio captured before the current speaking/listening
+                # generation must never be replayed after a long response.
+                if (generation is not None and self.listener is not None
+                        and generation != self.listener._capture_generation):
+                    continue
                 sample_rate = 16000  # audio is always resampled to 16 kHz
-                now = time.time()
+                now = time.monotonic()
 
-                if self.speaker_id is not None:
-                    # Sticky identity: reuse cached ID if within timeout
-                    if (self._cached_speaker_id
-                            and self._cached_speaker_id != "__guest__"
-                            and now - self._last_utterance_time < self.IDENTITY_TIMEOUT):
-                        speaker_user_id = self._cached_speaker_id
-                        speaker_confidence = self._cached_speaker_confidence
-                        self.logger.debug(
-                            f"Sticky speaker ID: {speaker_user_id} "
-                            f"(last utterance {now - self._last_utterance_time:.0f}s ago)"
-                        )
+                if during_tts:
+                    # Global stop must not wait for, or depend on, speaker ID.
+                    speaker_user_id, speaker_confidence = None, 0.0
+                    text = self.stt.transcribe(audio, sample_rate)
+                elif self.speaker_id is not None:
+                    identified, speaker_confidence = self.speaker_id.identify(audio, sample_rate)
+                    primary = getattr(self.speaker_id, "primary_user_id", "primary_user")
+                    strong_match = (identified == primary
+                                    and speaker_confidence >= self._identity_threshold)
+                    if strong_match:
+                        speaker_user_id = primary
+                        self._cached_speaker_id = primary
+                        self._cached_speaker_confidence = speaker_confidence
+                        self._last_strong_match_time = now
+                        self._borderline_count = 0
+                    elif (self._cached_speaker_id == primary
+                          and now - self._last_strong_match_time <= self.IDENTITY_TIMEOUT
+                          and self._borderline_count < self.MAX_BORDERLINE
+                          and speaker_confidence >= self._identity_threshold - self.SESSION_MARGIN):
+                        speaker_user_id = primary
+                        self._borderline_count += 1
                     else:
-                        # Re-verify: first utterance or >60s silence
-                        speaker_user_id, speaker_confidence = self.speaker_id.identify(
-                            audio, sample_rate
-                        )
-                        if speaker_user_id:
-                            self._cached_speaker_id = speaker_user_id
-                            self._cached_speaker_confidence = speaker_confidence
-
-                    self._last_utterance_time = now
+                        speaker_user_id = None
+                        self._cached_speaker_id = None
+                        self._cached_speaker_confidence = 0.0
+                        self._borderline_count = 0
                     text = self.stt.transcribe(
                         audio, sample_rate, speaker_user_id=speaker_user_id
                     )
@@ -154,13 +180,27 @@ class STTWorker(threading.Thread):
                     text = self.stt.transcribe(audio, sample_rate)
                     speaker_user_id, speaker_confidence = None, 0.0
 
+                if (generation is not None and self.listener is not None
+                        and generation != self.listener._capture_generation):
+                    continue
+
                 if text and text.strip():
+                    if during_tts:
+                        accepted = False
+                        if self.on_barge_in is not None:
+                            accepted = bool(self.on_barge_in(
+                                text.strip(), speaker_user_id, speaker_confidence,
+                            ))
+                        if not accepted:
+                            self.logger.info("Discarded speech during TTS (not a confirmed interrupt)")
+                        continue
                     # Enriched event data when speaker ID is available
-                    if self.speaker_id is not None:
+                    if self.speaker_id is not None or generation is not None:
                         data = {
                             "text": text.strip(),
                             "speaker_id": speaker_user_id,
                             "speaker_confidence": speaker_confidence,
+                            "capture_generation": generation,
                         }
                     else:
                         data = text.strip()
@@ -174,10 +214,11 @@ class STTWorker(threading.Thread):
                     self.logger.info("Blank transcription")
                     print("⚠️  (no speech detected)")
             except Exception as e:
-                self.logger.error(f"STT worker error: {e}", exc_info=True)
+                error_type = type(e).__name__
+                self.logger.error("STT worker failed (%s)", error_type)
                 self.event_queue.put(Event(
                     EventType.ERROR,
-                    data={"source": "stt", "error": str(e)},
+                    data={"source": "stt", "error_type": error_type},
                     source="stt_worker",
                 ))
 
@@ -191,11 +232,12 @@ class TTSWorker(threading.Thread):
     plays them sequentially, emitting lifecycle events."""
 
     def __init__(self, tts, event_queue: queue.Queue, tts_queue: queue.Queue,
-                 config=None):
+                 config=None, listener=None):
         super().__init__(daemon=True, name="tts-worker")
         self.tts = tts
         self.event_queue = event_queue
         self.tts_queue = tts_queue
+        self.listener = listener
         self.logger = get_logger("pipeline.tts", config)
 
     def run(self):
@@ -208,6 +250,7 @@ class TTSWorker(threading.Thread):
 
             event = item
             done_event = None  # threading.Event for synchronous callers
+            spoken_text = None
 
             # Emit pause + started
             self.event_queue.put(Event(EventType.PAUSE_LISTENING, source="tts_worker"))
@@ -224,12 +267,16 @@ class TTSWorker(threading.Thread):
                     else:
                         text = str(data)
                     if text:
+                        if self.listener is not None:
+                            self.listener.active_tts_text = text
+                            spoken_text = text
                         self.tts.speak(text)
             except Exception as e:
-                self.logger.error(f"TTS worker error: {e}", exc_info=True)
+                error_type = type(e).__name__
+                self.logger.error("TTS worker failed (%s)", error_type)
                 self.event_queue.put(Event(
                     EventType.ERROR,
-                    data={"source": "tts", "error": str(e)},
+                    data={"source": "tts", "error_type": error_type},
                     source="tts_worker",
                 ))
             finally:
@@ -237,6 +284,9 @@ class TTSWorker(threading.Thread):
                 # even on exception — prevents stuck speaking flags and
                 # EventTTSProxy.speak() hanging on done_event.wait().
                 self.event_queue.put(Event(EventType.SPEECH_FINISHED, source="tts_worker"))
+                if (self.listener is not None and spoken_text is not None
+                        and self.listener.active_tts_text == spoken_text):
+                    self.listener.active_tts_text = ""
                 if done_event is not None:
                     done_event.set()
 
@@ -483,6 +533,19 @@ class _ChatterboxAudioWriter:
 
         return True, self.total_samples, self.error
 
+    def cancel(self):
+        """Discard queued PCM and let the owning pipeline stop playback."""
+        self._stopped.set()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+
 
 class StreamingAudioPipeline:
     """Background audio pipeline for gapless multi-sentence TTS.
@@ -497,6 +560,7 @@ class StreamingAudioPipeline:
         self.logger = logger
         self._text_queue = queue.Queue()
         self._done = threading.Event()
+        self._cancelled = threading.Event()
         self._error = None
         self._total_chunks = 0
         self._thread = None
@@ -506,10 +570,15 @@ class StreamingAudioPipeline:
         # latency instrumentation (core/latency_tracker.py); must never
         # raise, so it's wrapped defensively at each call site.
         self._on_first_audio = on_first_audio
+        self._writer = None
 
     def start(self):
         """Start the background audio pipeline thread."""
+        interrupt_event = getattr(self.tts, "_interrupt_event", None)
+        if interrupt_event is not None:
+            interrupt_event.clear()
         self._done.clear()
+        self._cancelled.clear()
         self._error = None
         self._total_chunks = 0
         self._thread = threading.Thread(
@@ -519,8 +588,36 @@ class StreamingAudioPipeline:
 
     def put(self, text: str):
         """Submit a sentence for audio generation and playback."""
+        if self._cancelled.is_set():
+            return False
         self._text_queue.put(text)
         self._total_chunks += 1
+        return True
+
+    def cancel(self):
+        """Stop owned playback now and discard any not-yet-started chunks.
+
+        An in-flight Chatterbox HTTP synthesis call is synchronous and cannot
+        be stopped cooperatively by this client; its result is discarded as
+        soon as that request returns.
+        """
+        self._cancelled.set()
+        while True:
+            try:
+                self._text_queue.get_nowait()
+            except queue.Empty:
+                break
+        self._text_queue.put_nowait(None)
+        cancel_audio = getattr(self.tts, "interrupt_active", None)
+        if callable(cancel_audio):
+            cancel_audio()
+        else:
+            kill_audio = getattr(self.tts, "kill_active", None)
+            if callable(kill_audio):
+                kill_audio()
+        writer = self._writer
+        if writer is not None:
+            writer.cancel()
 
     def _fire_first_audio_callback(self):
         if self._on_first_audio is None:
@@ -532,8 +629,14 @@ class StreamingAudioPipeline:
 
     def finish(self):
         """Signal no more sentences. Blocks until all audio finishes."""
-        self._text_queue.put(None)  # sentinel
-        self._done.wait(timeout=120)
+        if not self._cancelled.is_set():
+            self._text_queue.put(None)  # sentinel
+        else:
+            return
+        deadline = time.monotonic() + 120
+        while not self._done.wait(timeout=0.1):
+            if self._cancelled.is_set() or time.monotonic() >= deadline:
+                break
         if self._error:
             self.logger.error(f"Streaming audio pipeline error: {self._error}")
 
@@ -553,9 +656,18 @@ class StreamingAudioPipeline:
             try:
                 with tts._tts_lock:
                     while True:
+                        if self._cancelled.is_set():
+                            break
                         text = self._text_queue.get()
                         if text is None:
                             break
+
+                        if has_directions(text):
+                            plan = parse_directions(text)
+                            log_diagnostics(self.logger, plan.diagnostics)
+                            if plan.has_pause:
+                                self.logger.warning("Voice pause direction requires Chatterbox")
+                            text = plan.plain_text
 
                         # Normalize
                         if tts.normalization_enabled and tts.normalizer:
@@ -569,6 +681,8 @@ class StreamingAudioPipeline:
                             text, voice=tts._kokoro_voice,
                             speed=tts._kokoro_speed
                         ):
+                            if self._cancelled.is_set():
+                                break
                             audio_np = np.asarray(audio)
                             pcm = (audio_np * 32767).astype(
                                 np.int16
@@ -599,7 +713,7 @@ class StreamingAudioPipeline:
                             break
 
                     # All sentences done — close aplay
-                    if aplay is not None:
+                    if aplay is not None and not self._cancelled.is_set():
                         aplay.stdin.close()
                         duration = total_samples / tts.sample_rate
                         gen_time = time.time() - t0
@@ -658,14 +772,61 @@ class StreamingAudioPipeline:
         # See _ChatterboxAudioWriter's docstring for why this is a
         # separate thread rather than direct writes like the Kokoro path.
         writer = _ChatterboxAudioWriter(tts, self.logger)
+        self._writer = writer
         writer.start()
 
         try:
             with tts._tts_lock:
                 while True:
+                    if self._cancelled.is_set():
+                        break
                     text = self._text_queue.get()
                     if text is None:
                         break
+
+                    if has_directions(text):
+                        plan = parse_directions(text)
+                        log_diagnostics(self.logger, plan.diagnostics)
+                        if plan.has_pause:
+                            def normalize_segment(segment):
+                                if tts.normalization_enabled and tts.normalizer:
+                                    return tts.normalizer.normalize(segment)
+                                return segment.strip()
+
+                            def synthesize_segment(segment):
+                                if self._cancelled.is_set():
+                                    return None
+                                pcm_part, rate_part = tts._chatterbox_generate_pcm(segment)
+                                if pcm_part is None and not self._cancelled.is_set():
+                                    pcm_part, rate_part = tts._piper_generate_pcm(segment)
+                                if pcm_part is None or rate_part is None:
+                                    return None
+                                return PcmChunk(pcm_part, rate_part)
+
+                            try:
+                                pcm, sr = compose_directed_pcm(
+                                    plan, synthesize_segment, normalize_segment,
+                                    default_rate=tts.sample_rate,
+                                    resample=resample_pcm_s16le,
+                                )
+                            except (ValueError, subprocess.SubprocessError) as exc:
+                                self._error = str(exc)
+                                continue
+                            if pcm is None:
+                                self._error = "Directed TTS synthesis failed"
+                                continue
+                            if self._cancelled.is_set():
+                                break
+                            if not first_chunk_logged:
+                                first_chunk_logged = True
+                                self.logger.info(
+                                    f"{tts.engine} first chunk in {time.time() - t0:.3f}s"
+                                )
+                                self._fire_first_audio_callback()
+                            if not writer.submit(pcm, sr) or writer.error:
+                                break
+                            continue
+                        text = plan.plain_text
 
                     if tts.normalization_enabled and tts.normalizer:
                         text = tts.normalizer.normalize(text)
@@ -674,6 +835,8 @@ class StreamingAudioPipeline:
                         continue
 
                     pcm, sr = tts._chatterbox_generate_pcm(text)
+                    if self._cancelled.is_set():
+                        break
                     if pcm is None:
                         # Never silently drop a sentence: fall back to
                         # Piper for just this chunk, then keep streaming —
@@ -681,14 +844,17 @@ class StreamingAudioPipeline:
                         # get a fresh shot (health-throttled, see
                         # TextToSpeech._chatterbox_available()).
                         self.logger.warning(
-                            "Chatterbox chunk failed, falling back to "
-                            "Piper for this sentence: %r", text[:60],
+                            "Chatterbox chunk failed; falling back to Piper (%d chars)",
+                            len(text),
                         )
+                        if self._cancelled.is_set():
+                            break
                         pcm, sr = tts._piper_generate_pcm(text)
+                        if self._cancelled.is_set():
+                            break
                         if pcm is None:
                             self.logger.error(
-                                "Piper fallback also failed — sentence "
-                                "lost: %r", text[:60],
+                                "Piper fallback also failed (chunk length=%d)", len(text)
                             )
                             continue
 
@@ -712,6 +878,10 @@ class StreamingAudioPipeline:
             # itself before its final aplay.wait). Use a generous fixed
             # ceiling — real playback finishes in realtime long before it;
             # this is only a safety net against a truly stuck aplay.
+            if self._cancelled.is_set():
+                writer.cancel()
+                writer._thread.join(timeout=5)
+                return
             ok, total_samples, werr = writer.finish_and_wait(timeout=90.0)
             if werr:
                 self._error = werr
@@ -776,12 +946,11 @@ class Coordinator:
         self.conversation = conversation
         self.reminder_manager = reminder_manager
         # Wire reminder manager and config for tool-calling dispatch
+        from core.tool_executor import set_current_user_fn
+        set_current_user_fn(lambda: getattr(self.conversation, 'current_user', None))
         if reminder_manager:
-            from core.tool_executor import set_reminder_manager, set_current_user_fn
+            from core.tool_executor import set_reminder_manager
             set_reminder_manager(reminder_manager)
-            set_current_user_fn(
-                lambda: getattr(self.conversation, 'current_user', None) or 'christopher'
-            )
         from core.tool_executor import set_config as set_tool_config, set_memory_manager, set_desktop_manager
         set_tool_config(config)
         if memory_manager:
@@ -853,6 +1022,12 @@ class Coordinator:
         # Streaming LLM state
         self._streaming_active = False
         self._llm_responded = False
+        self._turn_cancelled = threading.Event()
+        self._stop_only_interrupt = False
+        self._active_audio_pipeline = None
+        self._active_response_text = ""
+        self._barge_in_lock = threading.Lock()
+        self._retired_audio_pipelines = []
 
         # Per-turn latency instrumentation (core/latency_tracker.py) —
         # one active tracker at a time, matching the existing pattern of
@@ -932,6 +1107,10 @@ class Coordinator:
         """Block on the event queue, dispatching events until shutdown."""
         self.logger.info("Coordinator event loop started")
         while self.running:
+            self._retired_audio_pipelines = [
+                pipeline for pipeline in self._retired_audio_pipelines
+                if pipeline._thread is not None and pipeline._thread.is_alive()
+            ]
             try:
                 event = self.event_queue.get(timeout=0.5)
             except queue.Empty:
@@ -939,10 +1118,14 @@ class Coordinator:
             try:
                 self._dispatch(event)
             except Exception as e:
-                self.logger.error(f"Dispatch error for {event}: {e}", exc_info=True)
+                self.logger.error(
+                    "Dispatch error for event type %s (%s)",
+                    getattr(getattr(event, "type", None), "name", "unknown"),
+                    type(e).__name__,
+                )
                 self.stats['errors'] += 1
                 self.stats['last_error_time'] = time.time()
-                self.stats['last_error_msg'] = f"dispatch: {e}"
+                self.stats['last_error_msg'] = f"dispatch: {type(e).__name__}"
 
         self.logger.info("Coordinator event loop exited")
 
@@ -1035,6 +1218,11 @@ class Coordinator:
             raw_text = event.data["text"]
             speaker_id = event.data.get("speaker_id")
             speaker_confidence = event.data.get("speaker_confidence", 0.0)
+            generation = event.data.get("capture_generation")
+            if (generation is not None and not event.data.get("barge_in")
+                    and generation != getattr(self.listener, "_capture_generation", generation)):
+                self.logger.info("Discarded stale transcription from an earlier audio generation")
+                return
             self._apply_speaker_context(speaker_id, speaker_confidence)
         else:
             raw_text = event.data
@@ -1044,29 +1232,28 @@ class Coordinator:
         # Filter noise annotations
         if (text.startswith('(') and text.endswith(')')) or \
            (text.startswith('[') and text.endswith(']')):
-            self.logger.info(f"Ignoring noise annotation: {text}")
+            self.logger.info("Ignoring Whisper noise annotation (%d chars)", len(text))
             print("⚠️  Ignoring background noise")
             return
 
         # Filter garbage (repetitive chars from TTS bleed, etc.)
         if is_garbage_transcription(text):
-            self.logger.info(f"Ignoring garbage transcription: {text[:30]}...")
+            self.logger.info("Ignoring garbage transcription (%d chars)", len(text))
             return
 
         # Apply brand-name corrections (quinn→qwen, etc.) before any routing
         text = self._apply_transcription_corrections(text)
 
-        self.logger.info(f"Transcribed: {text}")
-        print(f"📝 Heard: \"{text}\"")
+        self.logger.info("Transcription received (%d chars)", len(text))
 
         # Conversation window — accept without wake word
         if self.listener.conversation_window_active:
             if self._is_conversation_noise(text):
-                self.logger.info(f"Filtered noise during conversation: '{text}'")
+                self.logger.info("Filtered speech during conversation (%d chars)", len(text))
                 return
             text = self._apply_command_corrections(text)
             self.listener._cancel_conversation_timer()
-            self.logger.info(f"Response during conversation window: {text}")
+            self.logger.info("Accepting conversation response (%d chars)", len(text))
             self.event_queue.put(Event(
                 EventType.COMMAND_DETECTED,
                 data=text,
@@ -1102,7 +1289,7 @@ class Coordinator:
                 for alias in wake_aliases
             )
             if similarity >= 0.80:
-                self.logger.info(f"Wake word detected (similarity: {similarity:.2f}): {word_clean} in {text}")
+                self.logger.info("Wake word detected (similarity: %.2f)", similarity)
                 wake_word_found = True
                 matched_word = word_clean
                 break
@@ -1133,14 +1320,14 @@ class Coordinator:
                 flags=re.IGNORECASE,
             )
 
-            self.logger.info(f"Corrected: '{text}' → '{corrected_text}'")
+            self.logger.info("Normalized wake-word transcript (%d chars)", len(text))
             self.event_queue.put(Event(
                 EventType.COMMAND_DETECTED,
                 data=corrected_text,
                 source="coordinator",
             ))
         else:
-            self.logger.info(f"No wake word in: {text}")
+            self.logger.info("No wake word detected (%d chars)", len(text))
             print("❌ No wake word (ignored)")
 
     # ----- command processing (extracted from on_command_detected) -----
@@ -1148,6 +1335,9 @@ class Coordinator:
     def _handle_command(self, event: Event):
         """Route a detected command through the priority chain."""
         self._last_command_start_ts = time.monotonic()
+        self._turn_cancelled.clear()
+        self._stop_only_interrupt = False
+        self._active_response_text = ""
         self._current_latency = LatencyTracker()
         full_text = event.data
         in_conversation = self.listener.conversation_window_active
@@ -1156,15 +1346,13 @@ class Coordinator:
 
         # Parse input
         if in_conversation:
-            self.logger.info(f"Conversation continues: {full_text}")
-            print(f"\n💬 You said: {full_text}")
+            self.logger.info("Conversation continues (%d chars)", len(full_text))
             if self.wake_word in full_text.lower():
                 command = self._extract_command(full_text)
             else:
                 command = full_text
         else:
-            self.logger.info(f"Command detected: {full_text}")
-            print(f"\n🟡 Command detected: {full_text}")
+            self.logger.info("Command detected (%d chars)", len(full_text))
             command = self._extract_command(full_text)
             # Fresh wake-word activation — reset memory surfacing window
             # (covers conversation timeout path where no explicit close event fires)
@@ -1187,7 +1375,7 @@ class Coordinator:
             self._last_command_end_ts = self._last_idle_ts = time.monotonic()
             return
 
-        self.logger.info(f"Command: {repr(command.strip())}")
+        self.logger.info("Processing command (%d chars)", len(command.strip()))
 
         # --- Minimal greeting (voice-specific: adds "jarvis" to history) ---
         if command.strip() == "jarvis_only" or len(command.strip()) <= 2:
@@ -1195,8 +1383,7 @@ class Coordinator:
             return
 
         # --- Process real command ---
-        print(f"📝 Processing: {command}")
-        self.logger.info(f"Processing command: {command}")
+        self.logger.debug("Passing command to router (%d chars)", len(command))
         self.conversation.add_message(
             "user", command,
             speaker_confidence=self._last_speaker_confidence,
@@ -1282,6 +1469,10 @@ class Coordinator:
                 # handling needed here.
                 self._speak_and_wait(response)
 
+            if self._turn_cancelled.is_set():
+                self._finish_cancelled_turn()
+                return
+
             # Conversation window side effects
             if result.close_window:
                 self._handle_close_conversation(None)
@@ -1303,6 +1494,9 @@ class Coordinator:
                 synthesis_category=result.synthesis_category,
                 force_web_search=result.force_web_search,
             )
+            if self._turn_cancelled.is_set():
+                self._finish_cancelled_turn()
+                return
             if not response:
                 response = "I'm sorry, I'm having trouble processing that right now."
 
@@ -1345,7 +1539,8 @@ class Coordinator:
         # substantive tasks (tool calls, LLM responses). Skip for quick
         # conversational exchanges (CAL-L0 greetings, bare acks).
         _is_substantive = used_llm or (result.handled and result.source not in ("cal_l0", "dismissal"))
-        if _is_substantive and self.accumulator:
+        if (_is_substantive and self.accumulator
+                and getattr(self.conversation, 'current_user', None) != '__guest__'):
             try:
                 _user_id = getattr(self.conversation, 'current_user', None) or 'christopher'
                 _nudge_items = self.accumulator.get_top(
@@ -1363,7 +1558,7 @@ class Coordinator:
                     )
                     if _nudge_text:
                         self.logger.info(
-                            "CAL nudge (task_end): '%s'", _nudge_text[:80],
+                            "CAL nudge prepared (%d chars)", len(_nudge_text),
                         )
                         self._speak_and_wait(_nudge_text)
                         self.accumulator.mark_surfaced(_nudge_items, _user_id)
@@ -1382,9 +1577,12 @@ class Coordinator:
 
     def _handle_minimal_greeting(self, command: str, in_conversation: bool):
         self.logger.info("Minimal greeting - just wake word")
-        if self.reminder_manager and self.reminder_manager.has_rundown_mention():
+        if (getattr(self.conversation, 'current_user', None) != "__guest__"
+                and self.reminder_manager and self.reminder_manager.has_rundown_mention()):
             self.reminder_manager.clear_rundown_mention()
             response = persona.rundown_mention()
+        elif getattr(self.conversation, 'current_user', None) == "__guest__":
+            response = persona.guest_greeting()
         else:
             response = persona.pick("greeting")
 
@@ -1393,6 +1591,9 @@ class Coordinator:
             self.conversation.add_message("assistant", response, client_id="voice")
             print(f"💬 Jarvis: {response}")
             self._speak_and_wait(response)
+            if self._turn_cancelled.is_set():
+                self._finish_cancelled_turn()
+                return
 
         self.listener.open_conversation_window(self.listener._extended_duration)
         self.listener.resume_listening()
@@ -1489,7 +1690,11 @@ class Coordinator:
         """
         if raw_command is None:
             raw_command = command
+        guest_mode = getattr(self.conversation, 'current_user', None) == '__guest__'
+        if guest_mode:
+            memory_context = None
         chunker = SpeechChunker()
+        voice_boundary = VoiceTagBoundaryBuffer()
         full_response = ""
         chunks_spoken = 0
         first_chunk_checked = False
@@ -1535,12 +1740,14 @@ class Coordinator:
                     tool_temperature=tool_temperature,
                     tool_presence_penalty=tool_presence_penalty,
                     force_web_search=force_web_search,
+                    guest_mode=guest_mode,
                 ) if _enable_tools else
                 self.llm.stream(
                     user_message=command,
                     conversation_history=history,
                     memory_context=memory_context,
                     conversation_messages=conversation_messages,
+                    guest_mode=guest_mode,
                 )
             )
 
@@ -1548,6 +1755,8 @@ class Coordinator:
                 self._current_latency.mark("llm_start")
 
             for item in token_source:
+                if self._turn_cancelled.is_set():
+                    break
                 if self._current_latency:
                     self._current_latency.mark("llm_first_token")
 
@@ -1568,7 +1777,12 @@ class Coordinator:
                         ack_timer.cancel()
 
                 full_response += token
-                chunk = chunker.feed(token)
+                self._active_response_text = full_response
+                self.listener.active_tts_text = full_response
+                safe_token = voice_boundary.feed(token)
+                log_diagnostics(self.logger, voice_boundary.diagnostics)
+                voice_boundary.diagnostics.clear()
+                chunk = chunker.feed(safe_token) if safe_token else None
 
                 if chunk:
                     if self._current_latency:
@@ -1580,10 +1794,13 @@ class Coordinator:
                             first_chunk_checked, pending_chunk,
                             audio_pipeline, use_pipeline,
                         )
+                    self._active_audio_pipeline = audio_pipeline
                     if chunks_spoken == -1:  # quality gate failed
                         return pending_chunk  # contains fallback response
 
             # --- Phase B: handle tool call if requested ---
+            if self._turn_cancelled.is_set():
+                return ""
             # Multi-tool loop: execute tool, synthesize, repeat if LLM
             # requests another tool (e.g. "time and weather" → get_time then get_weather).
             # Cap at 3 to prevent runaway loops.
@@ -1599,8 +1816,23 @@ class Coordinator:
             while tool_call_request and tool_chain_count < _MAX_TOOL_CHAIN:
                 tool_chain_count += 1
 
-                # Deduplication: skip if tool exceeds its per-turn limit
                 _tc_name = tool_call_request.name
+                advertised_tools = ({tool["function"]["name"] for tool in use_tools}
+                                    if use_tools is not None else {"web_search"})
+                if (_tc_name not in advertised_tools
+                        or (guest_mode and _tc_name not in {"get_weather", "web_search"})):
+                    self.logger.warning("Rejected unauthorized voice tool call: %s", _tc_name)
+                    if ack_timer:
+                        ack_timer.cancel()
+                    self._llm_responded = True
+                    if audio_pipeline:
+                        audio_pipeline.cancel()
+                    self._active_audio_pipeline = None
+                    self.tts._spoke = False
+                    return ("Für diese persönliche Aktion ist eine erkannte Stimme erforderlich."
+                            if guest_mode else "Dieses Werkzeug ist hier nicht verfügbar.")
+
+                # Deduplication: skip if tool exceeds its per-turn limit
                 _tool_call_counts[_tc_name] = _tool_call_counts.get(_tc_name, 0) + 1
                 _dedup_limit = _TOOL_DEDUP_LIMITS.get(_tc_name, 2)
                 if _tool_call_counts[_tc_name] > _dedup_limit:
@@ -1639,7 +1871,7 @@ class Coordinator:
                             "\n\n---\n\n".join(page_sections)
 
                     tool_result = format_search_results(results) + page_content
-                    self.logger.info(f"Web search ({_backend}): {len(results)} results for {query!r}")
+                    self.logger.info("Web search (%s): %d results", _backend, len(results))
                     print(f"📋 Found {len(results)} results ({_backend})")
 
                     # Emit tool_completed for voice pipeline web_search
@@ -1689,7 +1921,7 @@ class Coordinator:
                         tool_call_request.name, tool_call_request.arguments
                     )
                     tool_result, tool_image_data = parse_tool_result(raw_result)
-                    self.logger.info(f"Tool result: {tool_result[:100]}")
+                    self.logger.info("Tool completed (result length=%d)", len(tool_result or ""))
                     self.logger.debug("Tool result metrics: full_len=%d image=%s%s",
                                       len(tool_result) if tool_result else 0,
                                       "yes" if tool_image_data else "no",
@@ -1749,6 +1981,8 @@ class Coordinator:
                 self.conv_state.last_tool_result_text = (
                     f"[{tool_call_request.name}] {_tool_summary}"
                 )
+                if self._turn_cancelled.is_set():
+                    return ""
 
                 # Stream synthesis — may yield text tokens or another ToolCallRequest
                 _synth_img = tool_image_data if tool_call_request.name != "web_search" else None
@@ -1792,7 +2026,10 @@ class Coordinator:
                     image_data=_synth_img,
                     synthesis_temperature=synthesis_temperature,
                     synthesis_category=synthesis_category,
+                    guest_mode=guest_mode,
                 ):
+                    if self._turn_cancelled.is_set():
+                        break
                     if isinstance(item, ToolCallRequest):
                         self.logger.debug("Chained tool call from synthesis: %s "
                                           "(discarding %d chars intermediate text)",
@@ -1803,6 +2040,9 @@ class Coordinator:
                     _intermediate_buffer += item
                     _synth_token_count += 1
 
+                if self._turn_cancelled.is_set():
+                    return ""
+
                 if next_tool_call is None and _intermediate_buffer:
                     # Final synthesis — commit buffered text to response
                     if not self._llm_responded:
@@ -1810,7 +2050,10 @@ class Coordinator:
                     full_response += _intermediate_buffer
                     # Re-feed buffered text through chunker for TTS
                     for char in _intermediate_buffer:
-                        chunk = chunker.feed(char)
+                        safe_char = voice_boundary.feed(char)
+                        log_diagnostics(self.logger, voice_boundary.diagnostics)
+                        voice_boundary.diagnostics.clear()
+                        chunk = chunker.feed(safe_char) if safe_char else None
                         if chunk:
                             chunks_spoken, first_chunk_checked, pending_chunk, audio_pipeline = \
                                 self._process_speech_chunk(
@@ -1850,6 +2093,7 @@ class Coordinator:
                     try:
                         full_response = self.llm.chat(
                             _fallback_prompt, [], max_tokens=600,
+                            guest_mode=guest_mode,
                         ) or ""
                         if full_response.strip():
                             self.logger.info("Partial fallback succeeded: %d chars", len(full_response))
@@ -1857,16 +2101,21 @@ class Coordinator:
                         self.logger.error("Partial fallback also failed: %s", e)
 
             # Combine buffered last chunk + flush remnant, strip filler, then speak
+            safe_tail = voice_boundary.finish()
+            log_diagnostics(self.logger, voice_boundary.diagnostics)
+            last_chunk = chunker.feed(safe_tail) if safe_tail else None
             remaining = chunker.flush()
-            final_text = (pending_chunk or "") + (" " + remaining if remaining else "")
+            final_remainder = " ".join(part for part in (last_chunk, remaining) if part)
+            final_text = (pending_chunk or "") + (" " + final_remainder if final_remainder else "")
 
             if final_text.strip():
                 if not first_chunk_checked:
                     quality_issue = self.llm._check_response_quality(final_text, command)
                     if quality_issue:
                         self.logger.warning(
-                            f"Streaming quality gate failed ({quality_issue}): "
-                            f"'{final_text[:60]}' — falling back to sync chat()"
+                            "Streaming quality gate failed (%s, response length=%d); "
+                            "falling back to sync chat()",
+                            quality_issue, len(final_text),
                         )
                         if audio_pipeline:
                             audio_pipeline.finish()
@@ -1875,6 +2124,7 @@ class Coordinator:
                             conversation_history=history,
                             memory_context=memory_context,
                             conversation_messages=conversation_messages,
+                            guest_mode=guest_mode,
                         )
                 final_text = self.llm.strip_filler(self.llm.strip_metric(final_text, command))
                 if final_text.strip():
@@ -1902,6 +2152,12 @@ class Coordinator:
                 audio_pipeline.finish()
 
         except Exception as e:
+            if self._turn_cancelled.is_set():
+                if ack_timer:
+                    ack_timer.cancel()
+                if audio_pipeline:
+                    audio_pipeline.cancel()
+                return ""
             self.logger.error(f"Streaming LLM error: {e}")
             self._llm_responded = True
             if ack_timer:
@@ -1914,9 +2170,12 @@ class Coordinator:
                     conversation_history=history,
                     memory_context=memory_context,
                     conversation_messages=conversation_messages,
+                    guest_mode=guest_mode,
                 )
 
         # Cancel ack timer if stream was empty
+        if self._turn_cancelled.is_set():
+            return ""
         if not self._llm_responded:
             self._llm_responded = True
             if ack_timer:
@@ -1925,6 +2184,7 @@ class Coordinator:
         if chunks_spoken > 0:
             self.logger.info(f"Streamed LLM response in {chunks_spoken} chunks")
             self.tts._spoke = True
+        self._active_audio_pipeline = None
 
         # Extended conversation window after research answers
         if tool_call_request:
@@ -1993,6 +2253,7 @@ class Coordinator:
                     conversation_history=history,
                     memory_context=memory_context,
                     conversation_messages=conversation_messages,
+                    guest_mode=getattr(self.conversation, 'current_user', None) == '__guest__',
                 )
                 return -1, first_chunk_checked, fallback, audio_pipeline
 
@@ -2015,6 +2276,7 @@ class Coordinator:
                 )
                 audio_pipeline.start()
                 audio_pipeline.put(processed)
+                self._active_audio_pipeline = audio_pipeline
             else:
                 self._speak_and_wait(processed)
             chunks_spoken += 1
@@ -2040,7 +2302,93 @@ class Coordinator:
         other events while speaking a response to the current command.
         """
         self.listener.speaking = True
+        self.listener.active_tts_text = text
         self.tts.speak(text)
+
+    def handle_barge_in(self, text: str, speaker_id=None,
+                        speaker_confidence: float = 0.0) -> bool:
+        """Cancel an active response for a wake-word command or bare stop."""
+        if not (self.listener._speaking_event.is_set() and self._barge_in_lock.acquire(blocking=False)):
+            return False
+        try:
+            if self._turn_cancelled.is_set():
+                return False
+            words = re.findall(r"[\w']+", text.lower())
+            stop_only = len(words) == 1 and words[0] in {"stopp", "stop", "halt"}
+            aliases = {
+                "jarvis", "jarwis", "jarwiss", "charvis", "charwis",
+                "chauvis", "chauwis", "scharvis", "djarvis", "dscharvis",
+                "tscharvis", self.wake_word,
+            }
+            wake_index = next((i for i, word in enumerate(words)
+                               if max(SequenceMatcher(None, alias, word).ratio()
+                                      for alias in aliases) >= 0.80), None)
+            if not stop_only and (wake_index is None or wake_index == len(words) - 1):
+                return False
+
+            transcript = " ".join(words)
+            response_text = getattr(self.listener, "active_tts_text", "") or self._active_response_text
+            response_words = re.findall(r"[\w']+", response_text.lower())
+            if transcript:
+                lower_bound = max(1, len(words) - 1)
+                upper_bound = min(len(response_words), len(words) + 1)
+                for window_size in range(lower_bound, upper_bound + 1):
+                    for start in range(len(response_words) - window_size + 1):
+                        echoed_text = " ".join(response_words[start:start + window_size])
+                        if SequenceMatcher(None, transcript, echoed_text).ratio() >= 0.84:
+                            return False
+
+            self._turn_cancelled.set()
+            self._llm_responded = True
+            pipeline = self._active_audio_pipeline
+            if pipeline is not None:
+                pipeline.cancel()
+            if hasattr(self.tts, "interrupt_active"):
+                self.tts.interrupt_active()
+            else:
+                self.tts.kill_active()
+            cancel_stream = getattr(self.llm, "cancel_active_stream", None)
+            if callable(cancel_stream):
+                cancel_stream()
+            invalidate_audio = getattr(self.listener, "invalidate_pending_audio", None)
+            if callable(invalidate_audio):
+                invalidate_audio()
+            if stop_only:
+                self._stop_only_interrupt = True
+            else:
+                self.event_queue.put(Event(
+                    EventType.TRANSCRIPTION_READY,
+                    data={
+                        "text": text.strip(),
+                        "speaker_id": speaker_id,
+                        "speaker_confidence": speaker_confidence,
+                        "capture_generation": self.listener._capture_generation,
+                        "barge_in": True,
+                    },
+                    source="barge_in",
+                ))
+            self.logger.info("Accepted voice interrupt; stopped current response")
+            return True
+        finally:
+            self._barge_in_lock.release()
+
+    def _finish_cancelled_turn(self):
+        """Restore turn state after its queued barge-in transcript is safe."""
+        pipeline = self._active_audio_pipeline
+        if pipeline is not None:
+            pipeline.cancel()
+            if pipeline._thread is not None and pipeline._thread.is_alive():
+                self._retired_audio_pipelines.append(pipeline)
+        self._active_audio_pipeline = None
+        self._active_response_text = ""
+        self._streaming_active = False
+        self.listener.resume_listening()
+        if getattr(self, "_stop_only_interrupt", False):
+            self.listener.open_conversation_window(self.listener._extended_duration)
+            self._stop_only_interrupt = False
+        self.state = PipelineState.IDLE
+        self._last_command_end_ts = self._last_idle_ts = time.monotonic()
+        self._turn_cancelled.clear()
 
     # Regex to strip redundant LLM opening phrases when ack already played
     _ACK_OPENER_RE = re.compile(
@@ -2159,7 +2507,7 @@ class Coordinator:
             stripped = stripped.lstrip()
             if stripped:
                 stripped = stripped[0].upper() + stripped[1:]
-            self.logger.info(f"Stripped ack opener: '{text[:40]}' → '{stripped[:40]}'")
+            self.logger.info("Stripped acknowledgement opener (%d chars)", len(text))
         return stripped
 
     def _play_beep(self):
@@ -2341,7 +2689,7 @@ class Coordinator:
             if wrong in corrected:
                 corrected = corrected.replace(wrong, right)
         if corrected != text:
-            self.logger.info(f"Corrected: '{text}' → '{corrected}'")
+            self.logger.info("Applied transcription correction (%d chars)", len(text))
         return corrected
 
     def _apply_command_corrections(self, text: str) -> str:
@@ -2401,9 +2749,7 @@ class Coordinator:
         is_trailing = word_idx >= len(words) - 2  # last or second-to-last word
 
         if effective_pos >= 3 and not is_trailing:
-            self.logger.info(
-                f"🔇 Ambient rejected (position {word_idx}): {text[:80]}"
-            )
+            self.logger.info("Ambient speech rejected (wake word position=%d)", word_idx)
             return True
 
         # --- Signal 2: Post-wake-word copula/auxiliary ---
@@ -2414,19 +2760,14 @@ class Coordinator:
 
             # Possessive = always ambient ("jarvis's brain")
             if wake_token.endswith("'s") or wake_token.endswith("\u2019s"):
-                self.logger.info(
-                    f"🔇 Ambient rejected (possessive): {text[:80]}"
-                )
+                self.logger.info("Ambient speech rejected (possessive wake-word form)")
                 return True
 
             has_comma = wake_token.endswith(',')
             if not has_comma and word_idx + 1 < len(words):
                 next_word = words[word_idx + 1].strip('.,!?;:').lower()
                 if next_word in self._AMBIENT_FOLLOWERS:
-                    self.logger.info(
-                        f"🔇 Ambient rejected ('{matched_word} {next_word}' "
-                        f"without comma): {text[:80]}"
-                    )
+                    self.logger.info("Ambient speech rejected (wake word followed by ambient wording)")
                     return True
 
         # --- Signal 5: Length heuristic ---
@@ -2434,8 +2775,8 @@ class Coordinator:
         # almost certainly ambient conversation, not commands.
         if len(words) > 15 and word_idx > 0:
             self.logger.info(
-                f"🔇 Ambient rejected (long utterance {len(words)} words, "
-                f"wake word at position {word_idx}): {text[:80]}"
+                "Ambient speech rejected (word_count=%d wake_word_position=%d)",
+                len(words), word_idx,
             )
             return True
 
@@ -2464,7 +2805,8 @@ class Coordinator:
         self._last_switch_time = now
         self._last_speaker_id = speaker_id or self._last_speaker_id
 
-        if speaker_id and self.profile_manager:
+        primary_user_id = self.config.get("user_profiles.primary_user_id", "primary_user")
+        if speaker_id == primary_user_id and self.profile_manager:
             honorific = self.profile_manager.get_honorific_for(speaker_id)
             formal = self.profile_manager.get_formal_address_for(speaker_id)
             set_honorific(honorific, formal)
@@ -2475,19 +2817,12 @@ class Coordinator:
                 f"Speaker identified: {speaker_id} (confidence={confidence:.3f}, "
                 f"honorific={honorific}, formal={formal})"
             )
-        elif speaker_id is None and self.profile_manager:
-            # Unknown speaker — but don't override if face ID already identified them.
-            # Face recognition (99.83% LFW) is more authoritative than speaker ID.
-            current = getattr(self.conversation, 'current_user', None)
-            if current and current not in (None, "", "__guest__"):
-                self.logger.info(
-                    f"Speaker ID unknown (confidence={confidence:.3f}) but face ID "
-                    f"already set current_user={current} — keeping face ID"
-                )
-            else:
-                set_honorific("friend")
-                self.conversation.current_user = "__guest__"
-                self.logger.info(f"Guest mode activated (confidence={confidence:.3f})")
+        elif self.profile_manager:
+            set_honorific("Gast")
+            self.conversation.current_user = "__guest__"
+            if self.context_window:
+                self.context_window.set_user("__guest__")
+            self.logger.info("Unknown speaker; personal context disabled (confidence=%.3f)", confidence)
 
     # ----- resume handler -----
 

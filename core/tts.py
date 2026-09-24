@@ -19,6 +19,10 @@ from typing import Optional, Dict
 
 from core.logger import get_logger
 from core.tts_normalizer_de import get_normalizer
+from core.vocal_directions import (
+    PcmChunk, compose_directed_pcm, has_directions, log_diagnostics,
+    parse_directions, resample_pcm_s16le,
+)
 
 logger = get_logger(__name__)
 
@@ -92,6 +96,7 @@ class TextToSpeech:
         # Track active audio subprocesses for scoped interrupt/kill
         self._active_procs: list = []
         self._active_procs_lock = threading.Lock()
+        self._interrupt_event = threading.Event()
 
         # Track whether speak() was called (for caller detection)
         self._spoke = False
@@ -487,6 +492,8 @@ class TextToSpeech:
             )
             response.raise_for_status()
             wav_bytes = response.content
+            if self._interrupt_event.is_set():
+                return False
 
             if not wav_bytes.startswith(b"RIFF"):
                 self.logger.error("Chatterbox returned invalid WAV data")
@@ -551,7 +558,7 @@ class TextToSpeech:
             self._chatterbox_record_failure()
             return False
 
-    def _chatterbox_generate_pcm(self, text: str):
+    def _chatterbox_generate_pcm(self, text: str, timeout_override: float = None):
         """POST text to the Chatterbox server, return (pcm_bytes, sample_rate).
 
         Used by StreamingAudioPipeline for gapless multi-sentence playback —
@@ -568,7 +575,8 @@ class TextToSpeech:
             response = self._chatterbox_session.post(
                 self.chatterbox_endpoint,
                 json={"text": text},
-                timeout=(self.chatterbox_connect_timeout, self.chatterbox_timeout),
+                timeout=(self.chatterbox_connect_timeout,
+                         timeout_override if timeout_override is not None else self.chatterbox_timeout),
             )
             wav_bytes = response.content
 
@@ -579,6 +587,10 @@ class TextToSpeech:
 
             with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
                 sample_rate = wf.getframerate()
+                if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getcomptype() != "NONE":
+                    self.logger.error("Unsupported Chatterbox PCM format")
+                    self._chatterbox_record_failure()
+                    return None, None
                 pcm = wf.readframes(wf.getnframes())
             self._chatterbox_record_success()
             return pcm, sample_rate
@@ -715,6 +727,59 @@ class TextToSpeech:
 
     # ── Shared speak interface ─────────────────────────────────────────
 
+    def _speak_directed_chatterbox(self, plan, *, normalize: bool,
+                                   cancel_check=None, timeout_override=None) -> bool:
+        """Synthesize only explicit pause-separated segments, then play once."""
+        if self.engine != "chatterbox":
+            self.logger.warning("Voice pause direction requires Chatterbox")
+            return False
+
+        def normalize_segment(text):
+            if normalize and self.normalization_enabled and self.normalizer:
+                return self.normalizer.normalize(text)
+            return text.strip()
+
+        def synthesize_segment(text):
+            if self._interrupt_event.is_set() or (cancel_check and cancel_check()):
+                return None
+            if timeout_override is None:
+                pcm, rate = self._chatterbox_generate_pcm(text)
+            else:
+                pcm, rate = self._chatterbox_generate_pcm(text, timeout_override=timeout_override)
+            if (pcm is None and not self._interrupt_event.is_set()
+                    and not (cancel_check and cancel_check())):
+                pcm, rate = self._piper_generate_pcm(text)
+            return PcmChunk(pcm, rate) if pcm is not None and rate is not None else None
+
+        try:
+            pcm, rate = compose_directed_pcm(
+                plan, synthesize_segment, normalize_segment,
+                default_rate=self.sample_rate,
+                resample=resample_pcm_s16le,
+            )
+        except (ValueError, subprocess.SubprocessError) as exc:
+            self.logger.error("Directed TTS audio rejected: %s", exc)
+            return False
+        if pcm is None or self._interrupt_event.is_set() or (cancel_check and cancel_check()):
+            return False
+        if self.output_backend == "windows":
+            return self._play_pcm_windows(pcm, rate)
+        saved_rate = self.sample_rate
+        player = None
+        try:
+            self.sample_rate = rate
+            player = self._open_aplay()
+            if player is None:
+                return False
+            self._track_proc(player)
+            player.stdin.write(pcm)
+            player.stdin.close()
+            return player.wait(timeout=max(30, len(pcm) / (rate * 2) + 5)) == 0
+        finally:
+            self.sample_rate = saved_rate
+            if player is not None:
+                self._untrack_proc(player)
+
     def speak(self, text: str, normalize: bool = True, cancel_check=None,
               timeout_override: float = None) -> bool:
         """
@@ -746,16 +811,36 @@ class TextToSpeech:
                 self.logger.debug("speak() cancelled after lock acquisition")
                 return False
 
+            if not hasattr(self, "_interrupt_event"):
+                self._interrupt_event = threading.Event()
+            self._interrupt_event.clear()
+
             if not text or not text.strip():
                 self.logger.warning("Empty text provided to speak()")
                 return False
 
             self._spoke = True
-            self.logger.info(f"TTS speak() called with: '{text[:50]}...'")
+            directed = has_directions(text)
+            if directed:
+                plan = parse_directions(text)
+                log_diagnostics(self.logger, plan.diagnostics)
+                self.logger.info("TTS speak() called with voice directions")
+                if plan.has_pause:
+                    if self.engine == "chatterbox":
+                        return self._speak_directed_chatterbox(
+                            plan, normalize=normalize, cancel_check=cancel_check,
+                            timeout_override=timeout_override,
+                        )
+                    self.logger.warning("Voice pause direction requires Chatterbox")
+                text = plan.plain_text
+                if not text.strip():
+                    return False
+            else:
+                self.logger.info("TTS speak() called (%d chars)", len(text))
 
             # CAL-L0 cache: check for pre-generated audio before synthesizing.
             # Saves ~300ms per cached phrase. Cache key is the exact text.
-            cached_pcm = self._tts_cache.get(text) if hasattr(self, "_tts_cache") else None
+            cached_pcm = self._tts_cache.get(text) if not directed and hasattr(self, "_tts_cache") else None
             if cached_pcm is not None:
                 if getattr(self, "output_backend", "auto") == "windows":
                     ok = self._play_pcm_windows(
@@ -763,9 +848,7 @@ class TextToSpeech:
                         self.sample_rate,
                     )
                     if ok:
-                        self.logger.info(
-                            f"CAL-L0 cached Windows playback: '{text[:50]}'"
-                        )
+                        self.logger.info("CAL-L0 cached Windows playback (%d chars)", len(text))
                         return True
                 try:
                     aplay = self._open_aplay()
@@ -775,7 +858,7 @@ class TextToSpeech:
                         aplay.stdin.close()
                         aplay.wait(timeout=10)
                         self._untrack_proc(aplay)
-                        self.logger.info(f"CAL-L0 cached playback: '{text[:50]}'")
+                        self.logger.info("CAL-L0 cached playback (%d chars)", len(text))
                         # Structured event: TTS cache hit
                         try:
                             from core.event_logger import get_event_logger
@@ -784,7 +867,7 @@ class TextToSpeech:
                                 el.emit(
                                     category="performance",
                                     event="tts_cache_hit",
-                                    message=f"Cache hit: '{text[:50]}'",
+                                    message=f"Cache hit ({len(text)} chars)",
                                     severity="debug",
                                     source="tts",
                                     stage="tts",
@@ -808,11 +891,13 @@ class TextToSpeech:
                     original_text = text
                     text = self.normalizer.normalize(text)
                     if text != original_text:
-                        self.logger.debug(f"Normalized: '{original_text}' -> '{text}'")
+                        self.logger.debug("Normalized TTS text (%d chars)", len(text))
 
                 if self.engine == "kokoro":
                     result = self._speak_kokoro(text)
                     if not result:
+                        if self._interrupt_event.is_set():
+                            return False
                         return self._fallback_to_piper(text)
                     return result
                 elif self.engine == "chatterbox":
@@ -825,6 +910,8 @@ class TextToSpeech:
                             text, timeout_override=timeout_override
                         )
                     if not result:
+                        if self._interrupt_event.is_set():
+                            return False
                         if cancel_check is not None:
                             # Bounded/cancellable call (the contextual-ack
                             # path — see _play_ack_if_still_thinking in
@@ -849,6 +936,8 @@ class TextToSpeech:
                         return self._fallback_to_piper(text)
                     return result
                 else:
+                    if self._interrupt_event.is_set():
+                        return False
                     return self._speak_piper(text)
 
             except Exception as e:
@@ -1173,7 +1262,8 @@ class TextToSpeech:
                 full = self._apply_fade(full)
                 return (full * 32767).astype(self._np.int16).tobytes()
         except Exception as e:
-            self.logger.warning(f"CAL-L0 cache: failed to synthesize '{text[:50]}': {e}")
+            self.logger.warning("CAL-L0 cache synthesis failed (%d chars, %s)",
+                                len(text), type(e).__name__)
         return None
 
     def cache_cal_l0_phrase(self, text: str, pcm: bytes):
@@ -1197,7 +1287,7 @@ class TextToSpeech:
                 )
                 if ok:
                     self.logger.info(
-                        f"CAL-L0 cached Windows playback: '{text[:50]}'"
+                        "CAL-L0 cached Windows playback (%d chars)", len(text)
                     )
                 return ok
 
@@ -1211,7 +1301,7 @@ class TextToSpeech:
                 aplay.stdin.close()
                 aplay.wait(timeout=10)
                 self._untrack_proc(aplay)
-                self.logger.info(f"CAL-L0 cached playback: '{text[:50]}'")
+                self.logger.info("CAL-L0 cached playback (%d chars)", len(text))
                 return aplay.returncode == 0
             except Exception as e:
                 self.logger.error(f"speak_cached failed: {e}")
@@ -1476,6 +1566,8 @@ class TextToSpeech:
             )
             response.raise_for_status()
             wav_bytes = response.content
+            if self._interrupt_event.is_set():
+                return False
 
             if not wav_bytes.startswith(b"RIFF"):
                 self.logger.error("Chatterbox returned invalid WAV data")
@@ -1502,8 +1594,19 @@ class TextToSpeech:
 
     def _track_proc(self, proc):
         """Register an audio subprocess for scoped interrupt control."""
+        if not hasattr(self, "_interrupt_event"):
+            self._interrupt_event = threading.Event()
         with self._active_procs_lock:
             self._active_procs.append(proc)
+            interrupted = self._interrupt_event.is_set()
+        if interrupted:
+            try:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=2)
+            except Exception:
+                pass
+            self._untrack_proc(proc)
 
     def _untrack_proc(self, proc):
         """Unregister an audio subprocess after it finishes."""
@@ -1526,6 +1629,11 @@ class TextToSpeech:
                     self.logger.info(f"Killed audio subprocess pid={proc.pid}")
             except Exception as e:
                 self.logger.warning(f"Failed to kill audio subprocess: {e}")
+
+    def interrupt_active(self):
+        """Cancel the active speak operation and stop tracked playback."""
+        self._interrupt_event.set()
+        self.kill_active()
 
     # ── Kokoro speak ──────────────────────────────────────────────────
 

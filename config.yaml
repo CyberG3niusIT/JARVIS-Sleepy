@@ -3,9 +3,9 @@ system:
   language: de-DE
   storage_path: /home/alex/jarvis-data
 location:
-  home_address: "Esslingen am Neckar, Baden-Württemberg, Germany"
-  home_lat: 48.7396
-  home_lon: 9.3047
+  home_address: "${JARVIS_HOME_ADDRESS}"
+  home_lat: ${JARVIS_HOME_LAT}
+  home_lon: ${JARVIS_HOME_LON}
 weather:
   youtube_tv_channel_code: "V_Zzi6Sz3eI"  # WBRC Local News Station
 audio:
@@ -26,6 +26,7 @@ vad:
   buffer_duration: 1.0
 llm:
   local:
+    endpoint: "http://127.0.0.1:8080/v1/chat/completions"
     model_path: /home/alex/jarvis-data/models/llm/Qwen3.5-35B-A3B-abliterated-Q3_K_M.gguf
     context_size: 32768
     gpu_layers: 999
@@ -110,9 +111,12 @@ conversation:
   max_context_chars: 12000
 user_profiles:
   enabled: true
-  voice_recognition: false
+  primary_user_id: primary_user
+  primary_user_name: Alex
+  primary_honorific: sir
+  voice_recognition: true
   similarity_threshold: 0.30
-  auto_enroll: true
+  auto_enroll: false
   greet_by_name: true
 # Per-frontend embedding device (saves GPU VRAM when web service doesn't need GPU speed)
 embeddings:
@@ -216,6 +220,25 @@ awareness:
 people:
   enabled: true
   db_path: /home/alex/jarvis-data/data/people.db
+
+# School state stays in external SQLite storage. Destination identifiers are
+# an external JSON object keyed by existing PeopleManager person_id values.
+school:
+  enabled: true
+  db_path: /home/alex/jarvis-data/data/school.db
+  destinations: ${JARVIS_SCHOOL_DESTINATIONS}
+
+# Set the actual deployed VVS API URL externally. An unset environment
+# variable is treated as NOT_CONFIGURED; no host or port is assumed.
+mobility:
+  enabled: true
+  provider: wimaedv_vvs
+  base_url: ${WIMAEDV_VVS_BASE_URL}
+  api_key: ${WIMAEDV_VVS_API_KEY}
+  timeout_seconds: 10
+  default_arrival_buffer_minutes: 5
+  db_path: /home/alex/jarvis-data/data/mobility.db
+  # Static-data age is not exposed by the local VVS API.
 
 # System health check
 health_check:

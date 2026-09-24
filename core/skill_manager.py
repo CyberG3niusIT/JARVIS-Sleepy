@@ -128,6 +128,9 @@ class SkillManager:
         # Pre-load the sentence-transformer model so first command isn't slow
         # (avoids audio input overflow from blocking during lazy load)
         _emb_device = embedding_device or config.get("embeddings.voice_device", "cuda:0")
+        # Keep the manager's optional semantic layer in a valid state when
+        # the model or its runtime dependencies are unavailable.
+        self._embedding_model = None
         try:
             from sentence_transformers import SentenceTransformer
             _emb_model = config.get("semantic_matching.model", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
@@ -274,7 +277,7 @@ class SkillManager:
                     thresh = data.get('threshold', 0.75)
                     self.logger.info(f"  📋 {intent_id}: {len(examples)} examples, threshold={thresh}")
                     # Cache embeddings at load time — eliminates per-query re-encoding
-                    if examples and hasattr(self, '_embedding_model'):
+                    if examples and getattr(self, '_embedding_model', None) is not None:
                         self._semantic_embedding_cache[(metadata.name, intent_id)] = \
                             self._embedding_model.encode(examples, convert_to_tensor=True, show_progress_bar=False)
             
@@ -410,10 +413,9 @@ class SkillManager:
     
     def _match_semantic_intents(self, user_text: str) -> Optional[Tuple[str, str, Dict]]:
         """Match using semantic intents (embedding similarity)"""
-        from sentence_transformers import util
-
-        if not hasattr(self, '_embedding_model'):
+        if getattr(self, '_embedding_model', None) is None:
             return None
+        from sentence_transformers import util
 
         try:
             user_embedding = self._embedding_model.encode(user_text, convert_to_tensor=True, show_progress_bar=False)
@@ -716,9 +718,9 @@ class SkillManager:
         so that handlers like get_weather_for_period can compete with
         get_current_weather and get_tomorrow_weather when keyword is 'weather'.
         """
-        from sentence_transformers import util as _st_util
-        if not hasattr(self, '_embedding_model'):
+        if getattr(self, '_embedding_model', None) is None:
             return None
+        from sentence_transformers import util as _st_util
         try:
             _user_emb = self._embedding_model.encode(
                 user_text, convert_to_tensor=True, show_progress_bar=False,
@@ -766,9 +768,9 @@ class SkillManager:
                                         user_text: str,
                                         entities: dict) -> Optional[str]:
         """LAYER 4b: Semantic similarity within the keyword-matched skill."""
-        from sentence_transformers import util
-        if not hasattr(self, '_embedding_model'):
+        if getattr(self, '_embedding_model', None) is None:
             return None
+        from sentence_transformers import util
 
         try:
             user_emb = self._embedding_model.encode(

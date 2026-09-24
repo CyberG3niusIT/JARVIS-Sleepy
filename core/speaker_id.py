@@ -44,7 +44,9 @@ class SpeakerIdentifier:
         # Lazy-loaded SpeechBrain encoder
         self._encoder = None
 
-        # In-memory cache: user_id -> (embedding_np, honorific)
+        self.primary_user_id = config.get("user_profiles.primary_user_id", "primary_user")
+
+        # In-memory cache: user_id -> (reference matrix, honorific)
         self._cache: Dict[str, Tuple[np.ndarray, str]] = {}
 
         self.logger.info("SpeakerIdentifier initialized (encoder loads on first use)")
@@ -84,11 +86,16 @@ class SpeakerIdentifier:
         self._cache.clear()
 
         for profile in profiles:
+            if profile["id"] != self.primary_user_id:
+                continue
             emb_path = Path(profile["embedding_path"])
             if emb_path.exists():
-                embedding = np.load(str(emb_path))
-                self._cache[profile["id"]] = (embedding, profile["honorific"])
-                self.logger.debug(f"Loaded embedding for {profile['id']}")
+                embedding = self._reference_matrix(np.load(str(emb_path), allow_pickle=False))
+                if embedding is not None and len(embedding) >= 3:
+                    self._cache[profile["id"]] = (embedding, profile["honorific"])
+                    self.logger.debug("Loaded %d references for %s", len(embedding), profile["id"])
+                else:
+                    self.logger.warning("Primary speaker references require re-enrollment")
             else:
                 self.logger.warning(
                     f"Embedding file missing for {profile['id']}: {emb_path}"
@@ -98,6 +105,8 @@ class SpeakerIdentifier:
 
     def reload_profile(self, user_id: str):
         """Reload a single profile's embedding (after enrollment update)."""
+        if user_id != self.primary_user_id:
+            return
         profile = self.profile_manager.get_profile(user_id)
         if not profile or not profile.get("embedding_path"):
             self._cache.pop(user_id, None)
@@ -105,9 +114,25 @@ class SpeakerIdentifier:
 
         emb_path = Path(profile["embedding_path"])
         if emb_path.exists():
-            embedding = np.load(str(emb_path))
-            self._cache[user_id] = (embedding, profile["honorific"])
-            self.logger.info(f"Reloaded embedding for {user_id}")
+            embedding = self._reference_matrix(np.load(str(emb_path), allow_pickle=False))
+            if embedding is not None and len(embedding) >= 3:
+                self._cache[user_id] = (embedding, profile["honorific"])
+                self.logger.info("Reloaded %d references for %s", len(embedding), user_id)
+            else:
+                self._cache.pop(user_id, None)
+
+    @staticmethod
+    def _reference_matrix(value: np.ndarray) -> Optional[np.ndarray]:
+        """Validate and normalize stored references, including legacy 1-D data."""
+        matrix = np.asarray(value, dtype=np.float32)
+        if matrix.ndim == 1:
+            matrix = matrix.reshape(1, -1)
+        if matrix.ndim != 2 or matrix.shape[1] != EMBEDDING_DIM or not np.isfinite(matrix).all():
+            return None
+        norms = np.linalg.norm(matrix, axis=1)
+        if not np.all(norms > 1e-8):
+            return None
+        return matrix / norms[:, None]
 
     # ------------------------------------------------------------------
     # Core operations
@@ -166,46 +191,13 @@ class SpeakerIdentifier:
 
     def enroll(self, user_id: str, audio: np.ndarray,
                sample_rate: int = 16000) -> bool:
-        """Enroll a speaker by saving their embedding.
-
-        Args:
-            user_id: Profile ID to enroll
-            audio: Audio samples (float32, mono)
-            sample_rate: Sample rate
-
-        Returns:
-            True if enrollment succeeded
-        """
-        profile = self.profile_manager.get_profile(user_id)
-        if not profile:
-            self.logger.error(f"Cannot enroll: profile {user_id} not found")
-            return False
-
-        embedding = self.extract_embedding(audio, sample_rate)
-        if np.all(embedding == 0):
-            self.logger.error(f"Enrollment failed: audio too short for {user_id}")
-            return False
-
-        # L2-normalize for consistent cosine similarity matching
-        embedding = embedding / np.linalg.norm(embedding)
-
-        # Save embedding
-        emb_path = self.profile_manager.embeddings_dir / f"{user_id}.npy"
-        np.save(str(emb_path), embedding)
-
-        # Update profile with embedding path
-        self.profile_manager.update_profile(
-            user_id, embedding_path=str(emb_path)
-        )
-
-        # Update cache
-        self._cache[user_id] = (embedding, profile["honorific"])
-        self.logger.info(f"Enrolled speaker: {user_id} ({emb_path})")
-        return True
+        """A single clip is insufficient for primary-speaker enrollment."""
+        self.logger.warning("Use explicit multi-clip enrollment for %s", user_id)
+        return False
 
     def enroll_from_multiple(self, user_id: str,
                               audio_samples: List[Tuple[np.ndarray, int]]) -> bool:
-        """Enroll a speaker from multiple audio samples (averaged embedding).
+        """Enroll the primary speaker from multiple independent audio samples.
 
         Args:
             user_id: Profile ID to enroll
@@ -214,22 +206,20 @@ class SpeakerIdentifier:
         Returns:
             True if enrollment succeeded
         """
-        if not audio_samples:
+        if user_id != self.primary_user_id or len(audio_samples) < 3:
             return False
 
         embeddings = []
         for audio, sr in audio_samples:
             emb = self.extract_embedding(audio, sr)
-            if not np.all(emb == 0):
-                embeddings.append(emb)
+            if emb.shape == (EMBEDDING_DIM,) and np.isfinite(emb).all():
+                norm = float(np.linalg.norm(emb))
+                if norm > 1e-8:
+                    embeddings.append(emb / norm)
 
-        if not embeddings:
-            self.logger.error(f"No valid embeddings from {len(audio_samples)} samples")
+        if len(embeddings) < 3:
+            self.logger.error("Need at least three valid enrollment samples")
             return False
-
-        # Average the embeddings and normalize
-        avg_embedding = np.mean(embeddings, axis=0)
-        avg_embedding = avg_embedding / np.linalg.norm(avg_embedding)
 
         profile = self.profile_manager.get_profile(user_id)
         if not profile:
@@ -237,13 +227,15 @@ class SpeakerIdentifier:
             return False
 
         emb_path = self.profile_manager.embeddings_dir / f"{user_id}.npy"
-        np.save(str(emb_path), avg_embedding)
+        references = np.stack(embeddings).astype(np.float32)
+        np.save(str(emb_path), references)
+        emb_path.chmod(0o600)
 
         self.profile_manager.update_profile(
             user_id, embedding_path=str(emb_path)
         )
 
-        self._cache[user_id] = (avg_embedding, profile["honorific"])
+        self._cache[user_id] = (references, profile["honorific"])
         self.logger.info(
             f"Enrolled speaker {user_id} from {len(embeddings)} samples"
         )
@@ -261,7 +253,7 @@ class SpeakerIdentifier:
             (user_id, confidence) if matched above threshold,
             (None, best_score) if no match
         """
-        if not self._cache:
+        if self.primary_user_id not in self._cache:
             return None, 0.0
 
         # Diagnostic: audio stats before embedding extraction
@@ -283,14 +275,9 @@ class SpeakerIdentifier:
         all_scores = {}
 
         for user_id, (enrolled_emb, _honorific) in self._cache.items():
-            # Skip embeddings from a different model (e.g. old 256-dim resemblyzer)
-            if enrolled_emb.shape[0] != embedding.shape[0]:
-                all_scores[user_id] = -1.0
+            if user_id != self.primary_user_id:
                 continue
-            # Cosine similarity
-            score = float(np.dot(embedding, enrolled_emb) / (
-                np.linalg.norm(embedding) * np.linalg.norm(enrolled_emb) + 1e-8
-            ))
+            score = self._score_against_references(embedding, enrolled_emb)
             all_scores[user_id] = score
             if score > best_score:
                 best_score = score
@@ -348,7 +335,7 @@ class SpeakerIdentifier:
         Returns:
             (is_match, score)
         """
-        if user_id not in self._cache:
+        if user_id != self.primary_user_id or user_id not in self._cache:
             return False, 0.0
 
         embedding = self.extract_embedding(audio, sample_rate)
@@ -356,10 +343,17 @@ class SpeakerIdentifier:
             return False, 0.0
 
         enrolled_emb, _ = self._cache[user_id]
-        if enrolled_emb.shape[0] != embedding.shape[0]:
-            return False, 0.0
-        score = float(np.dot(embedding, enrolled_emb) / (
-            np.linalg.norm(embedding) * np.linalg.norm(enrolled_emb) + 1e-8
-        ))
+        score = self._score_against_references(embedding, enrolled_emb)
 
         return score >= self.similarity_threshold, score
+
+    @classmethod
+    def _score_against_references(cls, embedding: np.ndarray,
+                                  references: np.ndarray) -> float:
+        matrix = cls._reference_matrix(references)
+        if matrix is None or embedding.shape != (EMBEDDING_DIM,):
+            return -1.0
+        norm = float(np.linalg.norm(embedding))
+        if not np.isfinite(embedding).all() or norm <= 1e-8:
+            return -1.0
+        return float(np.max(matrix @ (embedding / norm)))

@@ -12,6 +12,7 @@ import numpy as np
 from scipy.signal import resample_poly
 import threading
 import time
+import queue
 from typing import Optional, Callable
 
 from core.logger import get_logger
@@ -87,6 +88,11 @@ class ContinuousListener:
         self.stream = None
         self.speaking = False  # Flag to pause listening while speaking
         self._speaking_event = threading.Event()  # Thread-safe pause signal
+        self._barge_in_enabled = False
+        self._capture_generation = 0
+        self._collection_generation = 0
+        self._collection_during_tts = False
+        self.active_tts_text = ""
         
         # Device monitor (hot-plug recovery)
         self._monitor_thread = None
@@ -194,8 +200,10 @@ class ContinuousListener:
 
     def _on_speech_start(self):
         """Callback when VAD detects speech start"""
-        # Don't start collecting if we're paused for TTS playback
-        if self._speaking_event.is_set() or self.speaking:
+        # During an active response, collect speech for the STT interrupt
+        # gate. Outside that narrow window, retain the normal TTS mic pause.
+        speaking = self._speaking_event.is_set() or self.speaking
+        if speaking and not self._barge_in_enabled:
             return
 
         # Privacy: do not even begin buffering speech while mic ingestion
@@ -215,7 +223,7 @@ class ContinuousListener:
 
         # Pause conversation timeout while speech is being collected —
         # prevents the timer from firing during speaker ID + transcription
-        if self.conversation_window_active:
+        if self.conversation_window_active and not speaking:
             with self._conversation_lock:
                 self._cancel_conversation_timer()
 
@@ -223,6 +231,8 @@ class ContinuousListener:
                           len(self._vad_timestamps))
         print("🗣️  Speech detected...")
         self.collecting_speech = True
+        self._collection_generation = self._capture_generation
+        self._collection_during_tts = speaking
         with self._buffer_lock:
             self.speech_buffer = []
         # Snapshot the pre-speech ring buffer NOW, before more speech frames
@@ -309,11 +319,11 @@ class ContinuousListener:
             # Pad if too short
             audio_int16 = np.pad(audio_int16, (0, self.frame_size - len(audio_int16)))
         
-        # Skip ALL processing if we're speaking (don't feed TTS audio to VAD)
-        # Use Event for thread-safe check (set = speaking/paused)
+        # Skip processing while paused unless the active response has
+        # explicitly opened the barge-in capture window.
         speaking_event_set = self._speaking_event.is_set()
         speaking_flag = self.speaking
-        if speaking_event_set or speaking_flag:
+        if (speaking_event_set or speaking_flag) and not self._barge_in_enabled:
             # Diagnostic: log once per second when blocked
             if self._diag_audio:
                 if not hasattr(self, '_diag_blocked_count'):
@@ -333,7 +343,7 @@ class ContinuousListener:
                 self.logger.info(f"🔊 DIAG audio unblocked after {self._diag_blocked_count} blocked frames")
             self._diag_blocked_count = 0
 
-        # Process through VAD (only when not speaking)
+        # Process through VAD while idle and during the bounded barge-in window.
         in_speech, state_changed = self.vad.process_frame(audio_int16)
 
         # Diagnostic: log VAD state every ~1 second
@@ -428,7 +438,11 @@ class ContinuousListener:
 
         # Event pipeline mode: put audio on queue for STT worker
         if self.audio_queue is not None:
-            self.audio_queue.put(full_audio)
+            self.audio_queue.put({
+                "audio": full_audio,
+                "capture_generation": self._collection_generation,
+                "during_tts": self._collection_during_tts,
+            })
             return
 
         # Legacy mode: transcribe in background thread
@@ -461,28 +475,27 @@ class ContinuousListener:
             
             # Filter out Whisper noise annotations like (music), (laughter), [blank_audio], etc.
             if text.startswith('(') and text.endswith(')'):
-                self.logger.info(f"⚠️  Ignoring noise annotation: {text}")
+                self.logger.info("Ignoring Whisper noise annotation (%d chars)", len(text))
                 print(f"⚠️  Ignoring background noise")
                 return
             
             if text.startswith('[') and text.endswith(']'):
-                self.logger.info(f"⚠️  Ignoring Whisper annotation: {text}")
+                self.logger.info("Ignoring Whisper annotation (%d chars)", len(text))
                 print(f"⚠️  Ignoring background noise")
                 return
 
             # Filter obvious garbage (repetitive chars from TTS bleed, etc.)
             if is_garbage_transcription(text):
-                self.logger.info(f"⚠️  Ignoring garbage transcription: {text[:30]}...")
+                self.logger.info("Ignoring garbage transcription (%d chars)", len(text))
                 return
 
             # Apply brand-name corrections before any routing decisions
             corrected = self._apply_transcription_corrections(text)
             if corrected != text:
-                self.logger.info(f"🔧 Transcription correction: '{text}' → '{corrected}'")
+                self.logger.info("Applied transcription correction (%d chars)", len(text))
                 text = corrected
 
-            self.logger.info(f"📝 Transcribed: {text}")
-            print(f"📝 Heard: \"{text}\"")
+            self.logger.info("Transcription received (%d chars)", len(text))
 
             # Check if conversation window is active.
             # Must hold _conversation_lock to prevent race with _conversation_timeout:
@@ -498,7 +511,7 @@ class ContinuousListener:
             if in_conversation:
                 # Filter out likely noise during conversation window
                 if self._is_conversation_noise(text):
-                    self.logger.info(f"🔇 Filtered noise during conversation: '{text}'")
+                    self.logger.info("Filtered speech during conversation (%d chars)", len(text))
                     # Restart the conversation timer (was paused when speech started)
                     self.open_conversation_window(self._default_duration)
                     return
@@ -506,10 +519,10 @@ class ContinuousListener:
                 # Apply corrections for common mishearings
                 corrected_text = self._apply_command_corrections(text)
                 if corrected_text != text:
-                    self.logger.info(f"🔧 Corrected in conversation: '{text}' → '{corrected_text}'")
+                    self.logger.info("Applied conversation correction (%d chars)", len(text))
                     text = corrected_text
 
-                self.logger.info(f"✅ Response during conversation window: {text}")
+                self.logger.info("Accepting conversation response (%d chars)", len(text))
                 self.on_command(text)
                 return
             
@@ -547,7 +560,7 @@ class ContinuousListener:
                     for alias in wake_aliases
                 )
                 if similarity >= 0.80:  # Raised from 0.7 to eliminate "paris" (0.73) etc.
-                    self.logger.info(f"✅ Wake word detected (similarity: {similarity:.2f}): {word_clean} in {text}")
+                    self.logger.info("Wake word detected (similarity: %.2f)", similarity)
                     wake_word_found = True
                     matched_word = word_clean
                     break
@@ -560,16 +573,14 @@ class ContinuousListener:
 
                 # Correct the wake word before passing to command handler
                 corrected_text = text.replace(matched_word, self.wake_word)
-                self.logger.info(f"🔧 Corrected: '{text}' → '{corrected_text}'")
+                self.logger.info("Normalized wake-word transcript (%d chars)", len(text))
                 self.on_command(corrected_text)
             else:
-                self.logger.info(f"❌ No wake word in: {text}")
+                self.logger.info("No wake word detected (%d chars)", len(text))
                 print(f"❌ No wake word (ignored)")
         
         except Exception as e:
-            self.logger.error(f"Transcription error: {e}")
-            import traceback
-            traceback.print_exc()
+            self.logger.error("Transcription handling failed (%s)", type(e).__name__)
     
     def _find_mic_device(self) -> Optional[int]:
         """Find microphone device index, routing through PipeWire.
@@ -828,6 +839,8 @@ class ContinuousListener:
         If PipeWire switched the default source away from our mic (e.g.
         after a system settings change), fix it with wpctl.
         """
+        # "pulse"/"pipewire" select a PortAudio virtual device, not a
+        # PulseAudio source name. In WSL the actual source may be RDPSource.
         try:
             import subprocess
             result = subprocess.run(
@@ -836,7 +849,8 @@ class ContinuousListener:
             )
             default_source = result.stdout.strip()
             # Check if our configured mic name appears in the default source
-            if self.device and self.device.lower().replace(' ', '_') not in default_source.lower().replace(' ', '_'):
+            if (self.device and self.device.lower() not in ("pulse", "pipewire")
+                    and self.device.lower().replace(' ', '_') not in default_source.lower().replace(' ', '_')):
                 # Also accept partial matches (e.g. "usb_pnp" in source name)
                 mic_key = self.device.lower().split()[0]  # e.g. "usb" from "USB PnP Audio Device"
                 if mic_key not in default_source.lower():
@@ -900,14 +914,39 @@ class ContinuousListener:
         # Set Event FIRST — audio callback checks this immediately (thread-safe)
         self._speaking_event.set()
         self.speaking = True
+        self._capture_generation += 1
+        self._barge_in_enabled = True
+        self.active_tts_text = ""
 
         # Discard any in-progress speech collection — do NOT process/transcribe it,
         # because that would spawn a background thread that races with TTS playback
         self.collecting_speech = False
         with self._buffer_lock:
             self.speech_buffer = []
+        self._collection_during_tts = False
+        self._discard_queued_audio()
 
         self.logger.info("🔇 Listening paused (TTS playback)")
+
+    def invalidate_pending_audio(self):
+        """Make queued and in-flight audio from the interrupted turn stale."""
+        with self._buffer_lock:
+            self._capture_generation += 1
+        self._discard_queued_audio()
+
+    def _discard_queued_audio(self):
+        if self.audio_queue is None:
+            return
+        shutdown_pending = False
+        while True:
+            try:
+                item = self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:
+                shutdown_pending = True
+        if shutdown_pending:
+            self.audio_queue.put(None)
     
     def resume_listening(self):
         """Resume speech collection after TTS playback.
@@ -919,6 +958,10 @@ class ContinuousListener:
         self.vad.clear_buffer()
         self.collecting_speech = False
         self.speech_buffer = []
+        self._barge_in_enabled = False
+        self._capture_generation += 1
+        self.active_tts_text = ""
+        self._discard_queued_audio()
 
         # Reset Silero VAD's internal hidden state after TTS playback.
         # Silero is stateful (carries context across chunks) — stale state
@@ -1016,30 +1059,27 @@ class ContinuousListener:
         # Trailing wake word = command ("how are you, jarvis?")
         is_trailing = word_idx >= len(words) - 2
         if effective_pos >= 3 and not is_trailing:
-            self.logger.info(f"🔇 Ambient rejected (position {word_idx}): {text[:80]}")
+            self.logger.info("Ambient speech rejected (wake word position=%d)", word_idx)
             return True
 
         # Signal 2: Post-wake-word copula/auxiliary without comma
         if word_idx < len(words):
             wake_token = words[word_idx]
             if wake_token.endswith("'s") or wake_token.endswith("\u2019s"):
-                self.logger.info(f"🔇 Ambient rejected (possessive): {text[:80]}")
+                self.logger.info("Ambient speech rejected (possessive wake-word form)")
                 return True
             has_comma = wake_token.endswith(',')
             if not has_comma and word_idx + 1 < len(words):
                 next_word = words[word_idx + 1].strip('.,!?;:').lower()
                 if next_word in self._AMBIENT_FOLLOWERS:
-                    self.logger.info(
-                        f"🔇 Ambient rejected ('{matched_word} {next_word}' "
-                        f"without comma): {text[:80]}"
-                    )
+                    self.logger.info("Ambient speech rejected (wake word followed by ambient wording)")
                     return True
 
         # Signal 5: Long utterance with wake word not at position 0
         if len(words) > 15 and word_idx > 0:
             self.logger.info(
-                f"🔇 Ambient rejected (long utterance {len(words)} words, "
-                f"position {word_idx}): {text[:80]}"
+                "Ambient speech rejected (word_count=%d wake_word_position=%d)",
+                len(words), word_idx,
             )
             return True
 

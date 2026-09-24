@@ -187,14 +187,14 @@ class ConversationManager:
         self._append_to_history_file(message)
 
         # Memory system hook (non-blocking)
-        if self._memory_manager:
+        if self._memory_manager and message["user_id"] != "__guest__":
             try:
                 self._memory_manager.on_message(message)
             except Exception as e:
                 self.logger.warning(f"Memory hook failed (non-fatal): {e}")
 
         # Context window hook (non-blocking)
-        if self._context_window:
+        if self._context_window and message["user_id"] != "__guest__":
             try:
                 self._context_window.on_message(message)
             except Exception as e:

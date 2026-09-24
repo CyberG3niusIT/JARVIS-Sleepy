@@ -498,3 +498,66 @@ class TestAckCacheRace:
             t.join(timeout=10)
 
         assert not errors, f"race caused errors: {errors}"
+
+
+class TestVocalDirections:
+    def test_explicit_pause_keeps_text_out_of_tag_and_inserts_silence(self):
+        tts = FakeTTS()
+        pipeline = _run_pipeline(tts, ["Grüße,[voice:pause=short] Welt."])
+        assert pipeline._error is None
+        assert tts._chatterbox_calls == ["Grüße,", "Welt."]
+        pcm = bytes(tts._aplay_instances[0].written)
+        assert pcm == (
+            b"\x01\x00" * 100
+            + b"\x00" * (24000 * 200 // 1000 * 2)
+            + b"\x01\x00" * 100
+        )
+
+    def test_unsupported_event_has_one_synthesis_call(self):
+        tts = FakeTTS()
+        pipeline = _run_pipeline(tts, ["Hallo[voice:cough]Welt."])
+        assert pipeline._error is None
+        assert tts._chatterbox_calls == ["Hallo Welt."]
+        assert tts._piper_calls == []
+
+    def test_directed_segment_uses_piper_fallback_without_tag(self, monkeypatch):
+        tts = FakeTTS()
+        tts._chatterbox_responses["Welt."] = None
+        tts._piper_responses["Welt."] = (b"\x02\x00" * 100, 22050)
+        resampled = []
+        monkeypatch.setattr(
+            "core.pipeline.resample_pcm_s16le",
+            lambda pcm, source, target: resampled.append((source, target)) or pcm,
+        )
+        pipeline = _run_pipeline(tts, ["Hallo[voice:pause=short]Welt."])
+        assert pipeline._error is None
+        assert tts._chatterbox_calls == ["Hallo", "Welt."]
+        assert tts._piper_calls == ["Welt."]
+        assert resampled == [(22050, 24000)]
+
+    def test_windows_backend_receives_composed_pcm_once(self):
+        tts = FakeTTS()
+        tts.output_backend = "windows"
+        played = []
+        tts._play_pcm_windows = lambda pcm, rate: played.append((pcm, rate)) or True
+        pipeline = _run_pipeline(tts, ["Hallo[voice:pause=medium]Welt"])
+        assert pipeline._error is None
+        assert len(played) == 1
+        assert played[0][1] == 24000
+        assert b"\x00" * (24000 * 500 // 1000 * 2) in played[0][0]
+
+    def test_tag_free_text_preserves_single_call(self):
+        tts = FakeTTS()
+        _run_pipeline(tts, ["Hallo, Welt."])
+        assert tts._chatterbox_calls == ["Hallo, Welt."]
+
+    def test_leading_and_trailing_pause_only_chunks(self):
+        tts = FakeTTS()
+        pipeline = _run_pipeline(tts, [
+            "[voice:pause=short]", "Hallo", "[voice:pause=medium]",
+        ])
+        assert pipeline._error is None
+        assert tts._chatterbox_calls == ["Hallo"]
+        pcm = bytes(tts._aplay_instances[0].written)
+        assert pcm.startswith(b"\x00" * (24000 * 200 // 1000 * 2))
+        assert pcm.endswith(b"\x00" * (24000 * 500 // 1000 * 2))

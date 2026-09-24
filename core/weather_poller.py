@@ -71,8 +71,8 @@ class WeatherPoller:
 
         # API keys / config
         self.owm_key = os.environ.get("OPENWEATHER_API_KEY", "")
-        self.home_lat: float = config.get("location.home_lat", 33.6662)
-        self.home_lon: float = config.get("location.home_lon", -86.8128)
+        self.home_lat: float = float(config.get("location.home_lat"))
+        self.home_lon: float = float(config.get("location.home_lon"))
 
         # Polling intervals (seconds)
         self.poll_interval: int = config.get("weather.poll_interval_seconds", 900)
@@ -573,7 +573,7 @@ class WeatherPoller:
 
             # Build location-aware announcement
             if location_key == "home":
-                location_phrase = "for the Gardendale area"
+                location_phrase = f"for {self.config.get('location.home_address')}"
             else:
                 # Away user — extract label from tracked locations
                 locations = self.db.get_tracked_locations()
@@ -658,7 +658,7 @@ class WeatherPoller:
             location_key = alert.get("location_key", "home")
 
             if location_key == "home":
-                location_phrase = "for the Gardendale area"
+                location_phrase = f"for {self.config.get('location.home_address')}"
             else:
                 location_phrase = "in your area"
 

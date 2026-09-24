@@ -156,8 +156,9 @@ class WeatherDB:
         self._db_lock = threading.Lock()
 
         # Home coordinates from config
-        self.home_lat: float = config.get("location.home_lat", 33.6662)
-        self.home_lon: float = config.get("location.home_lon", -86.8128)
+        self.home_lat: float = float(config.get("location.home_lat"))
+        self.home_lon: float = float(config.get("location.home_lon"))
+        self.home_label: str = config.get("location.home_address")
 
         # Divergence threshold (miles)
         self.divergence_threshold: float = config.get(
@@ -274,8 +275,12 @@ class WeatherDB:
                     INSERT OR IGNORE INTO tracked_locations
                         (location_key, label, lat, lon, user_id, source, created_at, updated_at)
                     VALUES (?, ?, ?, ?, NULL, 'config', ?, ?)
-                """, ("home", "Home - Gardendale, AL",
+                """, ("home", self.home_label,
                       self.home_lat, self.home_lon, now, now))
+                conn.execute("""
+                    UPDATE tracked_locations SET label = ?, lat = ?, lon = ?, updated_at = ?
+                    WHERE location_key = 'home' AND source = 'config'
+                """, (self.home_label, self.home_lat, self.home_lon, now))
                 conn.commit()
             finally:
                 conn.close()

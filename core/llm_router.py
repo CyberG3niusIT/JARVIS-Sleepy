@@ -26,6 +26,7 @@ from core.honorific import get_honorific, get_formal_address
 from core.privacy_gate import get_privacy_gate, Capability
 import requests
 import json
+import threading
 
 
 @dataclass
@@ -105,6 +106,9 @@ class LLMRouter:
         # Accumulated call chain — tracks ALL LLM calls within a pipeline run.
         # Reset at the start of stream_with_tools(), appended by each method.
         self.last_call_chain: list[dict] = []
+        self._active_stream_response = None
+        self._active_stream_lock = threading.Lock()
+        self._stream_cancel_event = threading.Event()
 
         self.api_provider = config.get("llm.api.provider", "anthropic")
         self.api_model = config.get("llm.api.model", "claude-sonnet-4-20250514")
@@ -115,7 +119,10 @@ class LLMRouter:
         self.api_call_count = 0
 
         # Local LLM endpoint (consolidate — was hardcoded in 6 places)
-        self.local_endpoint = "http://127.0.0.1:8080/v1/chat/completions"
+        self.local_endpoint = config.get(
+            "llm.local.endpoint",
+            "http://127.0.0.1:8080/v1/chat/completions",
+        )
 
         # Small model endpoint (4B infrastructure model for synthesis/summarization)
         self.small_endpoint = config.get("llm.small.endpoint")
@@ -673,9 +680,11 @@ class LLMRouter:
                 messages.append({"role": "assistant", "content": line[10:].strip()})
         return messages
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, guest_mode: bool = False) -> str:
         """Build the JARVIS system prompt (delegated to persona module)."""
         from core import persona
+        if guest_mode:
+            return persona.system_prompt_guest()
         return persona.system_prompt(home_location=self.home_location)
 
     @staticmethod
@@ -733,9 +742,9 @@ class LLMRouter:
         return 250
 
     def _build_chat_prompt(self, user_message: str, conversation_history: str = "",
-                           memory_context: str = None) -> str:
+                           memory_context: str = None, guest_mode: bool = False) -> str:
         """Build ChatML-formatted prompt for Qwen"""
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(guest_mode=guest_mode)
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
         if conversation_history:
@@ -745,7 +754,8 @@ class LLMRouter:
 
     def _generate_api_chat(self, user_message: str, conversation_history: str = "",
                            max_tokens: int = None,
-                           conversation_messages: list = None) -> str:
+                           conversation_messages: list = None,
+                           guest_mode: bool = False) -> str:
         """Generate chat response via Claude API with proper message format"""
         if max_tokens is None:
             max_tokens = self._estimate_max_tokens(user_message)
@@ -767,7 +777,7 @@ class LLMRouter:
                 return ""
 
             client = anthropic.Anthropic(api_key=api_key)
-            system_prompt = self._build_system_prompt()
+            system_prompt = self._build_system_prompt(guest_mode=guest_mode)
 
             # Build messages — prefer pre-built list over string parsing
             messages = []
@@ -832,7 +842,7 @@ class LLMRouter:
              use_api: bool = False, max_tokens: int = None,
              memory_context: str = None,
              conversation_messages: list = None,
-             image_data: str = None) -> str:
+             image_data: str = None, guest_mode: bool = False) -> str:
         """
         Generate chat response with smart local-first fallback.
 
@@ -855,7 +865,8 @@ class LLMRouter:
         # If explicitly requesting API, go straight there
         if use_api:
             return self._generate_api_chat(user_message, conversation_history,
-                                           max_tokens, conversation_messages)
+                                           max_tokens, conversation_messages,
+                                           guest_mode=guest_mode)
 
         # --- Attempt 1: Local Qwen ---
         # When image_data is present, use streaming path (supports multimodal
@@ -865,7 +876,8 @@ class LLMRouter:
             for token in self.stream(user_message, conversation_history,
                                      max_tokens, memory_context,
                                      conversation_messages,
-                                     image_data=image_data):
+                                     image_data=image_data,
+                                     guest_mode=guest_mode):
                 tokens.append(token)
             response = "".join(tokens)
             if response:
@@ -873,11 +885,13 @@ class LLMRouter:
             # Fall through to API fallback below if empty
             if self.fallback_enabled:
                 return self._generate_api_chat(user_message, conversation_history,
-                                               max_tokens, conversation_messages)
+                                               max_tokens, conversation_messages,
+                                               guest_mode=guest_mode)
             return ""
 
         prompt = self._build_chat_prompt(user_message, conversation_history,
-                                         memory_context=memory_context)
+                                         memory_context=memory_context,
+                                         guest_mode=guest_mode)
         start = time.time()
         response = self._generate_local(prompt, max_tokens)
         elapsed_ms = (time.time() - start) * 1000
@@ -895,7 +909,7 @@ class LLMRouter:
         self.logger.warning(f"Local LLM quality issue ({quality_issue}): '{response[:80]}' — retrying")
 
         # --- Attempt 2: Retry local with a nudge ---
-        retry_system = self._build_system_prompt()
+        retry_system = self._build_system_prompt(guest_mode=guest_mode)
         if memory_context:
             retry_system += f"\n\n{memory_context}"
         nudge = (
@@ -925,7 +939,8 @@ class LLMRouter:
             return response if response else ""
 
         api_response = self._generate_api_chat(user_message, conversation_history,
-                                                max_tokens, conversation_messages)
+                                                max_tokens, conversation_messages,
+                                                guest_mode=guest_mode)
         if api_response:
             # _generate_api_chat already sets is_fallback=True; overlay quality_gate
             if self.last_call_info:
@@ -936,10 +951,32 @@ class LLMRouter:
         self.logger.error("All LLM attempts failed")
         return response if response else ""
 
+    def _set_active_stream_response(self, response):
+        with self._active_stream_lock:
+            self._active_stream_response = response
+
+    def _clear_active_stream_response(self, response):
+        with self._active_stream_lock:
+            if self._active_stream_response is response:
+                self._active_stream_response = None
+
+    def cancel_active_stream(self):
+        """Close the currently owned local SSE response, if one is active."""
+        self._stream_cancel_event.set()
+        with self._active_stream_lock:
+            response = self._active_stream_response
+            self._active_stream_response = None
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
     def stream(self, user_message: str, conversation_history: str = "",
                max_tokens: int = None, memory_context: str = None,
                conversation_messages: list = None,
-               image_data: str = None) -> Iterator[str]:
+               image_data: str = None,
+               guest_mode: bool = False) -> Iterator[str]:
         """Stream tokens from the local LLM as they're generated.
 
         Uses the llama.cpp /v1/chat/completions endpoint with SSE streaming.
@@ -957,12 +994,13 @@ class LLMRouter:
             Individual tokens as strings
         """
         # Reset call chain if this is a direct stream() call (not via stream_with_tools)
+        self._stream_cancel_event.clear()
         if not self.last_call_chain:
             self.reset_call_chain()
 
         if max_tokens is None:
             max_tokens = self._estimate_max_tokens(user_message)
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(guest_mode=guest_mode)
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
         messages = [{"role": "system", "content": system_prompt}]
@@ -984,6 +1022,7 @@ class LLMRouter:
         stream_error = None
         _stream_input_tokens = None
         _stream_output_tokens = None
+        response = None
         try:
             response = requests.post(
                 self.local_endpoint,
@@ -998,6 +1037,7 @@ class LLMRouter:
                 timeout=30,
                 stream=True,
             )
+            self._set_active_stream_response(response)
 
             # Handle context overflow — trim oldest context and retry once
             if response.status_code == 400:
@@ -1028,6 +1068,7 @@ class LLMRouter:
                         timeout=30,
                         stream=True,
                     )
+                    self._set_active_stream_response(response)
                 else:
                     self.logger.error(f"LLM server rejected request: {err}")
                     stream_error = "context_overflow"
@@ -1065,6 +1106,12 @@ class LLMRouter:
             stream_error = str(e)
             self.logger.error(f"LLM streaming error: {e}")
         finally:
+            if response is not None:
+                self._clear_active_stream_response(response)
+                try:
+                    response.close()
+                except Exception:
+                    pass
             self._record_call({
                 "provider": "qwen", "method": "stream",
                 "input_tokens": _stream_input_tokens,
@@ -1086,6 +1133,7 @@ class LLMRouter:
                           tool_presence_penalty: float = None,
                           image_data: str = None,
                           force_web_search: bool = False,
+                          guest_mode: bool = False,
                           ) -> Iterator[Union[str, ToolCallRequest]]:
         """Stream tokens from the local LLM with tool calling support.
 
@@ -1107,11 +1155,13 @@ class LLMRouter:
             str tokens for regular text, or a single ToolCallRequest.
         """
         # Reset call chain at the start of each pipeline run
+        self._stream_cancel_event.clear()
         self.reset_call_chain()
 
         if not self.tool_calling:
             yield from self.stream(user_message, conversation_history,
-                                   max_tokens, memory_context, conversation_messages)
+                                   max_tokens, memory_context, conversation_messages,
+                                   guest_mode=guest_mode)
             return
 
         # Default to web search only (backward compatible)
@@ -1124,7 +1174,7 @@ class LLMRouter:
 
         if max_tokens is None:
             max_tokens = self._estimate_max_tokens(user_message)
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(guest_mode=guest_mode)
 
         # Determine which tool names are present to customize the prompt
         tool_names = {t["function"]["name"] for t in tools}
@@ -1143,7 +1193,7 @@ class LLMRouter:
                 f"\n\nToday's date is {today}. Current time: {current_time}."
                 "\nFor time or date questions, answer directly from the above — do NOT search.\n\n"
                 + rules_text
-                + f"\n\nREMINDER: You MUST address the user as '{get_honorific()}' in every response."
+                + ("" if guest_mode else f"\n\nREMINDER: You MUST address the user as '{get_honorific()}' in every response.")
             )
         else:
             # --- Web-search-only prompt ---
@@ -1185,7 +1235,7 @@ class LLMRouter:
 
             # Prescriptive rule: tell LLM to use user facts for web search queries
             tool_names = {t.get("function", {}).get("name") for t in tools} if tools else set()
-            if "web_search" in tool_names:
+            if "web_search" in tool_names and not guest_mode:
                 system_prompt += (
                     "\n\nIMPORTANT: When building web_search queries, USE the user's "
                     "personal details (location, workplace, interests) from the context "
@@ -1279,6 +1329,7 @@ class LLMRouter:
         stream_error = None
         _stream_input_tokens = None
         _stream_output_tokens = None
+        response = None
         try:
             response = requests.post(
                 self.local_endpoint,
@@ -1286,6 +1337,7 @@ class LLMRouter:
                 timeout=30,
                 stream=True,
             )
+            self._set_active_stream_response(response)
 
             if response.status_code == 400:
                 try:
@@ -1308,6 +1360,7 @@ class LLMRouter:
                         timeout=30,
                         stream=True,
                     )
+                    self._set_active_stream_response(response)
                 else:
                     self.logger.error(f"LLM server rejected request: {err}")
                     stream_error = "context_overflow"
@@ -1403,6 +1456,12 @@ class LLMRouter:
             stream_error = str(e)
             self.logger.error(f"LLM streaming (tool) error: {e}")
         finally:
+            if response is not None:
+                self._clear_active_stream_response(response)
+                try:
+                    response.close()
+                except Exception:
+                    pass
             self._record_call({
                 "provider": "qwen", "method": "stream_with_tools",
                 "input_tokens": _stream_input_tokens,
@@ -1742,7 +1801,8 @@ class LLMRouter:
                                   tools: list | None = None,
                                   image_data: str | None = None,
                                   synthesis_temperature: float | None = None,
-                                  synthesis_category: str | None = None) -> Iterator[str]:
+                                  synthesis_category: str | None = None,
+                                  guest_mode: bool = False) -> Iterator[str]:
         """Continue LLM generation after a tool call completes.
 
         Sends the tool result back to the LLM and streams its synthesized answer.
@@ -1759,6 +1819,7 @@ class LLMRouter:
         Yields:
             Text tokens of the synthesized answer, or a ToolCallRequest
         """
+        self._stream_cancel_event.clear()
         self.logger.debug(
             "continue_after_tool_call: tool=%s result_len=%d image=%s%s",
             tool_call.name, len(tool_result) if tool_result else 0,
@@ -1802,7 +1863,9 @@ class LLMRouter:
         current_time = now.strftime("%I:%M %p").lstrip("0")
         h = get_honorific()
         formal = get_formal_address()
-        if formal:
+        if guest_mode:
+            honorific_rule = ""
+        elif formal:
             honorific_rule = (
                 f"The user is {formal}. Use EXACTLY ONE address per response — "
                 f"either '{formal}' or '{h}', NEVER both. "
@@ -1813,7 +1876,8 @@ class LLMRouter:
         # When tools are available, prepend a chaining instruction so the
         # LLM can call the next tool if the user's request needs multiple.
         # This is combined with the domain-specific prompt (not instead of).
-        loc_hint = f"The user's home location is {self.home_location}.\n" if self.home_location else ""
+        loc_hint = (f"The user's home location is {self.home_location}.\n"
+                    if self.home_location and not guest_mode else "")
         chaining_prefix = ""
         if tools:
             chaining_prefix = (
@@ -1847,6 +1911,8 @@ class LLMRouter:
             "When the user asks an ambiguous follow-up (e.g. 'is that normal?', 'tell me more', "
             "'why?'), always assume they are referring to the [MOST RECENT] exchange in the "
             "prior context, not an earlier one.\n"
+            "Antworte standardmäßig auf Deutsch, auch wenn Werkzeugergebnisse Englisch sind. "
+            "Wechsle nur auf ausdrücklichen Wunsch des Benutzers die Sprache.\n"
             f"{honorific_rule}"
         )
 
@@ -1925,6 +1991,7 @@ class LLMRouter:
         _stream_input_tokens = None
         _stream_output_tokens = None
         tc_id = None
+        response = None
 
         # Payload-aware timeout: scale with message content length.
         # Base 30s + 1s per 1000 estimated tokens, capped at 120s.
@@ -1947,6 +2014,7 @@ class LLMRouter:
                 timeout=_timeout,
                 stream=True,
             )
+            self._set_active_stream_response(response)
             # 4B fallback: if small model fails, retry on 35B transparently
             if _use_small and response.status_code != 200:
                 self.logger.warning(
@@ -1966,6 +2034,7 @@ class LLMRouter:
                     timeout=_timeout,
                     stream=True,
                 )
+                self._set_active_stream_response(response)
             response.raise_for_status()
             self.logger.debug("continue_after_tool_call: HTTP %d (%s)", response.status_code, _model_label)
 
@@ -2035,6 +2104,8 @@ class LLMRouter:
                     name=tc_name, arguments=args, call_id=tc_id)
 
         except (requests.ConnectionError, requests.Timeout) as e:
+            if self._stream_cancel_event.is_set():
+                return
             if _use_small:
                 # 4B unreachable — fall back to 35B for this synthesis
                 self.logger.warning("Small model connection failed (%s) — falling back to 35B", e)
@@ -2050,6 +2121,7 @@ class LLMRouter:
                     response = requests.post(
                         _endpoint, json=payload, timeout=_timeout, stream=True,
                     )
+                    self._set_active_stream_response(response)
                     response.raise_for_status()
                     for line in response.iter_lines():
                         if not line:
@@ -2077,9 +2149,17 @@ class LLMRouter:
                 stream_error = str(e)
                 self.logger.error(f"LLM continue_after_tool_call error: {e}")
         except Exception as e:
+            if self._stream_cancel_event.is_set():
+                return
             stream_error = str(e)
             self.logger.error(f"LLM continue_after_tool_call error: {e}")
         finally:
+            if response is not None:
+                self._clear_active_stream_response(response)
+                try:
+                    response.close()
+                except Exception:
+                    pass
             elapsed = (time.time() - start) * 1000
             ttft = ((first_token_time - start) * 1000) if first_token_time else None
             self.logger.debug(
