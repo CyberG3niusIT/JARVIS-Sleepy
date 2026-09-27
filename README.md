@@ -18,7 +18,7 @@
   </a>
 </p>
 
-<p align="center"><sub>Originaler Projektscreenshot aus Lovable · Stand 27.09.2026 · Home / Memory &amp; Thinking</sub></p>
+<p align="center"><sub>J.A.R.V.I.S Desktop: aktueller Home-Screen aus dem Projekt</sub></p>
 
 ---
 
@@ -71,7 +71,7 @@ Web-Routing, Browser-State, React-Komponenten und CSS-Materialität werden nicht
 |---|---|
 | Lovable-Preview | [Projekt öffnen](https://lovable.dev/projects/340145c6-1e8a-47c6-9732-b08d3720c610) |
 | Lovable-Quellrepository | [CyberG3niusIT/j.a.r.v.i.s-desktop](https://github.com/CyberG3niusIT/j.a.r.v.i.s-desktop) |
-| Diese README | `CyberG3niusIT/JARVIS-Sleepy`, Branch `claude/jarvis-ui` |
+| Diese README | `CyberG3niusIT/JARVIS-Sleepy`, Branch `J.A.R.V.I.S-UI` |
 | Inhalt dieses Branches | Aktuell diese Übergabe- und Projektdokumentation; der Lovable-Quellcode wurde noch nicht in diesen Branch übertragen |
 | Backend / Live-Runtime | Nicht verbunden |
 | Produktionsreife | Nicht erreicht; dies ist ein UI-Referenzprototyp |
