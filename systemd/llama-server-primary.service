@@ -1,0 +1,56 @@
+# Template in the repo; the LIVE unit lives in ~/.config/systemd/user/ (and is what runs). Keep both in
+# sync by hand: this file mirrors the verified live unit (2026-09). Install/refresh with:
+#   cp systemd/llama-server-primary.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#
+# Primary LLM: Gemma 4 12B (multimodal, audio/vision via --mmproj). It is the resident model.
+# Conflicts=llama-server-expert.service: starting this unit makes systemd stop the expert first;
+# After=llama-server-expert.service orders "expert stopped" before "primary start" in that transaction
+# (one direction only -- the expert has no After= on the primary, that would be a cycle).
+# This is NOT a VRAM guarantee: the GPU memory may still be held a moment after the stop. The
+# authoritative mutex is core/model_handover.py (unit inactive + port free + settle wait) and start.sh.
+# Context size must match llm.primary.context_size in config.yaml (8192).
+# Port must equal llm.primary.endpoint in config.yaml (start.sh checks --host/--port exactly).
+
+[Unit]
+Description=JARVIS Primary LLM - Gemma 4 12B Multimodal
+After=network.target llama-server-expert.service
+Conflicts=llama-server-expert.service
+
+[Service]
+Type=simple
+
+# ROCm on WSL2 (DXG) -- required for GPU offload on the RX 7900 XT
+Environment=HSA_ENABLE_DXG_DETECTION=1
+Environment=HSA_OVERRIDE_GFX_VERSION=11.0.0
+Environment=ROCM_PATH=/opt/rocm
+Environment=LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm-7.2.1/lib/llvm/lib
+Environment=PATH=/opt/rocm/bin:/usr/local/bin:/usr/bin:/bin
+
+WorkingDirectory=/home/alex/llama.cpp/build/bin
+
+ExecStartPre=/usr/bin/test -f /home/alex/jarvis-data/models/llm/gemma-4-12b-heretic-Q6_K.gguf
+ExecStartPre=/usr/bin/test -f /home/alex/jarvis-data/models/llm/gemma-4-12b-mmproj-f16.gguf
+
+ExecStart=/home/alex/llama.cpp/build/bin/llama-server \
+  -m /home/alex/jarvis-data/models/llm/gemma-4-12b-heretic-Q6_K.gguf \
+  --mmproj /home/alex/jarvis-data/models/llm/gemma-4-12b-mmproj-f16.gguf \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --ctx-size 8192 \
+  --n-gpu-layers 999 \
+  --batch-size 256 \
+  --ubatch-size 128 \
+  --parallel 1 \
+  --jinja \
+  --reasoning-effort none
+
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis-llm-primary
+
+[Install]
+WantedBy=default.target

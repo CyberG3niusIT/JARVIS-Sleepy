@@ -1,0 +1,336 @@
+<Window x:Class="Jarvis.ControlHub.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="J.A.R.V.I.S Control Hub"
+        Width="1440" Height="900" MinWidth="1100" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B1118" Foreground="#E8EEF5"
+        FontFamily="Segoe UI" FontSize="14"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <SolidColorBrush x:Key="CanvasBrush" Color="#0B1118" />
+        <SolidColorBrush x:Key="SidebarBrush" Color="#101923" />
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#151F2B" />
+        <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1A2735" />
+        <SolidColorBrush x:Key="LineBrush" Color="#263544" />
+        <SolidColorBrush x:Key="TextBrush" Color="#E8EEF5" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#91A1B2" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#55C7B5" />
+        <SolidColorBrush x:Key="WarningBrush" Color="#E6B86C" />
+        <SolidColorBrush x:Key="DangerBrush" Color="#E27F83" />
+
+        <Style x:Key="NavButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="#A9B6C4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="14,11" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="NavBorder" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="NavBorder" Property="Background" Value="#1A2937" />
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="NavBorder" Property="BorderThickness" Value="1" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PanelStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Padding" Value="20" />
+        </Style>
+        <Style x:Key="EyebrowStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="PageTitleStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="27" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,4,0,8" />
+        </Style>
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style x:Key="BodyMutedStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="LineHeight" Value="21" />
+        </Style>
+        <Style x:Key="ActionButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="#081512" />
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="15,10" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style x:Key="QuietButtonStyle" TargetType="Button" BasedOn="{StaticResource ActionButtonStyle}">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style x:Key="DataValueStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="244" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+            <DockPanel Margin="18,20,16,18">
+                <StackPanel DockPanel.Dock="Top" Margin="4,2,4,24">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Width="34" Height="34" CornerRadius="6" Background="#183B3A" Margin="0,0,11,0">
+                            <TextBlock Text="J" Foreground="{StaticResource AccentBrush}" FontSize="21" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel>
+                            <TextBlock Text="J.A.R.V.I.S" FontSize="15" FontWeight="Bold" Foreground="{StaticResource TextBrush}" />
+                            <TextBlock Text="CONTROL HUB" FontSize="9" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Bottom" Margin="4,18,4,0">
+                    <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,0,0,14" />
+                    <TextBlock Text="RUNTIME SUPERVISOR" Style="{StaticResource EyebrowStyle}" Margin="0,0,0,9" />
+                    <TextBlock Text="{Binding RuntimeState}" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding RuntimeDetail}" Style="{StaticResource BodyMutedStyle}" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,8,0,0"><Run Text="Stand " /><Run Text="{Binding RuntimeUpdatedAt, Mode=OneWay, StringFormat={}{0:HH:mm:ss}}" /></TextBlock>
+                </StackPanel>
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel>
+                        <TextBlock Text="ÜBERSICHT" Style="{StaticResource EyebrowStyle}" Margin="8,0,0,8" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="◫   Dashboard" Tag="Dashboard" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="◉   Live" Tag="Live" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="▥   Systemhistorie" Tag="Systemhistorie" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="⌘   Runtime Supervisor" Tag="Runtime Supervisor" Click="Navigation_Click" />
+                        <TextBlock Text="JARVIS" Style="{StaticResource EyebrowStyle}" Margin="8,18,0,8" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="◈   AI Engines" Tag="AI Engines" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="♫   Voice" Tag="Voice" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="▤   Memory" Tag="Memory" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="⌘   Skills / Tools" Tag="Skills / Tools" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="≡   Logs" Tag="Logs" Click="Navigation_Click" />
+                        <TextBlock Text="AUTOMATION" Style="{StaticResource EyebrowStyle}" Margin="8,18,0,8" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="◎   Agents" Tag="Agents" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="◷   Automations" Tag="Automations" Click="Navigation_Click" />
+                        <Button Style="{StaticResource NavButtonStyle}" Content="⚙   Settings" Tag="Settings" Click="Navigation_Click" />
+                    </StackPanel>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1" Background="{StaticResource CanvasBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="68" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Background="#0E151D">
+                <Grid Margin="28,0,30,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ApiState}" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                        <Ellipse Width="6" Height="6" Fill="{StaticResource AccentBrush}" Margin="10,0,8,0" />
+                        <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="12" VerticalAlignment="Center"><Run Text="API Stand " /><Run Text="{Binding ApiUpdatedAt, Mode=OneWay, StringFormat={}{0:HH:mm:ss}}" /></TextBlock>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="REPOSITORY" Style="{StaticResource EyebrowStyle}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBlock Text="{Binding RepositoryRoot}" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" MaxWidth="440" TextTrimming="CharacterEllipsis" />
+                        <Button Content="Ändern" Style="{StaticResource QuietButtonStyle}" Padding="11,6" Margin="12,0,0,0" Click="ChooseRepository_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid x:Name="PageHost" Margin="30,26,30,36">
+                    <!-- Dashboard -->
+                    <StackPanel x:Name="DashboardPage" Visibility="Visible">
+                        <TextBlock Text="J.A.R.V.I.S / CONTROL" Style="{StaticResource EyebrowStyle}" />
+                        <TextBlock Text="Dashboard" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="Der aktuelle Betriebszustand – getrennt nach echten Live-Werten, API-Status und Runtime Supervisor." Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,22" />
+                        <UniformGrid Columns="3" Rows="1" Margin="0,0,0,16">
+                            <Border Style="{StaticResource PanelStyle}" Margin="0,0,10,0">
+                                <StackPanel><TextBlock Text="RUNTIME SUPERVISOR" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="{Binding RuntimeState}" Style="{StaticResource DataValueStyle}" Margin="0,8,0,4" /><TextBlock Text="{Binding RuntimeDetail}" Style="{StaticResource BodyMutedStyle}" /></StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource PanelStyle}" Margin="5,0">
+                                <StackPanel><TextBlock Text="CPU · JARVIS-HOST" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="{Binding CpuValue}" Style="{StaticResource DataValueStyle}" Margin="0,8,0,4" /><TextBlock Style="{StaticResource BodyMutedStyle}"><Run Text="Live-Alter: " /><Run Text="{Binding LiveAge, Mode=OneWay}" /></TextBlock></StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource PanelStyle}" Margin="10,0,0,0">
+                                <StackPanel><TextBlock Text="ARBEITSSPEICHER · JARVIS-HOST" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="{Binding MemoryValue}" Style="{StaticResource DataValueStyle}" Margin="0,8,0,4" /><TextBlock Text="{Binding MemoryDetail}" Style="{StaticResource BodyMutedStyle}" /></StackPanel>
+                            </Border>
+                        </UniformGrid>
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,14">
+                            <StackPanel><TextBlock Text="Weitere Runtime-Daten · /api/stats" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding RuntimeDataSummary}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,8,0,0" /></StackPanel>
+                        </Border>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*" /><ColumnDefinition Width="0.85*" /></Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource PanelStyle}" Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="JARVIS AI Engines" Style="{StaticResource SectionTitleStyle}" />
+                                    <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Primary · Hauptmodell" FontWeight="SemiBold" /><TextBlock Text="{Binding PrimaryState}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,4,0,0" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding PrimaryModel}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" /></Grid>
+                                    <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,4,0,10" />
+                                     <Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Expert · Übergabe" FontWeight="SemiBold" /><TextBlock Text="{Binding ExpertState}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,4,0,0" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding ExpertModel}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" /></Grid>
+                                    <TextBlock Text="Exklusive Rollenübergabe: Das Expert-Modell ersetzt bei Bedarf das Primary-Modell. Kein paralleler Resident-Betrieb." Style="{StaticResource BodyMutedStyle}" Margin="0,15,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource PanelStyle}" Margin="8,0,0,0">
+                                <StackPanel><TextBlock Text="Ereignisübersicht · letzte 24 h" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding EventsStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,8" /><ItemsControl ItemsSource="{Binding Events}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Timestamp}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,12,0" /><StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" /></StackPanel></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                            </Border>
+                        </Grid>
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Systemmetriken · Historie" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="{Binding MetricsSummary}" Style="{StaticResource BodyMutedStyle}" Margin="0,5,0,0" />
+                                <TextBlock Text="{Binding MetricsTimeseriesStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,7,0,0" />
+                                <ItemsControl ItemsSource="{Binding MetricBuckets}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,5">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="90" /><ColumnDefinition Width="48" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                                <TextBlock Text="{Binding Period}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Interactions}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                <ProgressBar Grid.Column="2" Height="12" Minimum="0" Maximum="100" Value="{Binding RelativeActivity}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Detail}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" FontSize="11" Margin="0,2,0,0" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{Binding HistoryStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,10,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Live: values must come from host telemetry, never a UI clock or history snapshot. -->
+                    <StackPanel x:Name="LivePage" Visibility="Collapsed">
+                        <TextBlock Text="TELEMETRIE · DIREKTABFRAGE" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Live-System" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="Werte werden direkt vom JARVIS-Host gelesen. Erfassungszeit und Alter beschreiben den Messwert, nicht den lokalen Fenster-Refresh." Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,22" />
+                        <UniformGrid Columns="2" Rows="1" Margin="0,0,0,14">
+                            <Border Style="{StaticResource PanelStyle}" Margin="0,0,8,0"><StackPanel><TextBlock Text="CPU-NUTZUNG" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="{Binding CpuValue}" Style="{StaticResource DataValueStyle}" Margin="0,12,0,8" /><TextBlock Text="{Binding LiveAge}" Foreground="{StaticResource AccentBrush}" /><TextBlock Text="Messalter" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel></Border>
+                            <Border Style="{StaticResource PanelStyle}" Margin="8,0,0,0"><StackPanel><TextBlock Text="ARBEITSSPEICHER" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="{Binding MemoryValue}" Style="{StaticResource DataValueStyle}" Margin="0,12,0,8" /><TextBlock Text="{Binding MemoryDetail}" Foreground="{StaticResource MutedBrush}" /></StackPanel></Border>
+                        </UniformGrid>
+                        <Border Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="Datenherkunft" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="CPU und RAM beziehen sich auf den JARVIS-Host – nicht auf den Windows-Desktop des Control Hub. Historische Health-Snapshots werden hier nicht als Live-Telemetrie ausgegeben." Style="{StaticResource BodyMutedStyle}" /><TextBlock Text="{Binding LiveSourceDetail}" Style="{StaticResource BodyMutedStyle}" Margin="0,12,0,0" /></StackPanel></Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="HealthPage" Visibility="Collapsed">
+                        <TextBlock Text="SYSTEM · ZEITREIHEN" Style="{StaticResource EyebrowStyle}" />
+                        <TextBlock Text="Systemhistorie" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="Aggregierte Health-Kennzahlen aus dem Backend. Diese Ansicht zeigt ausdrücklich historische Messpunkte und ersetzt keine sekundenaktuelle Live-Telemetrie." Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,20" />
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Websuche · Performance (24 h)" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="{Binding SearchPerformanceSummary}" Style="{StaticResource DataValueStyle}" Margin="0,6,0,6" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding SearchPerformanceStatus}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource PanelStyle}">
+                            <StackPanel>
+                                <TextBlock Text="CPU · RAM · Netzwerk · weitere Kennzahlen" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="{Binding HistoryStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,10" />
+                                <ItemsControl ItemsSource="{Binding HealthMetrics}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,7">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="210" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" Margin="12,0" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{Binding Timestamp}" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="RuntimePage" Visibility="Collapsed">
+                        <TextBlock Text="BETRIEB · STEUERUNG" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Runtime Supervisor" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="Der Supervisor ist die maßgebliche Runtime-Steuerung. Aktionen werden ausschließlich über die angebundene Supervisor-Integration ausgeführt." Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,22" />
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,14"><StackPanel><TextBlock Text="Supervisor-Zustand" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding RuntimeState}" Style="{StaticResource DataValueStyle}" /><TextBlock Text="{Binding RuntimeDetail}" Style="{StaticResource BodyMutedStyle}" Margin="0,7,0,0" /><TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0"><Run Text="Aktualisiert: " /><Run Text="{Binding RuntimeUpdatedAt, Mode=OneWay, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" /></TextBlock><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"><Run Text="Repository: " /><Run Text="{Binding RepositoryRoot, Mode=OneWay}" /></TextBlock></StackPanel></Border>
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Überwachte Komponenten" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="{Binding RuntimeComponentsStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,10" />
+                                <ItemsControl ItemsSource="{Binding RuntimeComponents}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,6">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" Margin="14,0,8,0" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{Binding Timestamp}" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16"><Button Content="Starten" Style="{StaticResource ActionButtonStyle}" IsEnabled="{Binding CanStart}" Click="StartRuntime_Click" /><Button Content="Stoppen" Style="{StaticResource QuietButtonStyle}" IsEnabled="{Binding CanStop}" Click="StopRuntime_Click" /><Button Content="Neu starten" Style="{StaticResource QuietButtonStyle}" IsEnabled="{Binding CanRestart}" Click="RestartRuntime_Click" /></StackPanel>
+                        <Border Background="#251F14" BorderBrush="#5A492B" BorderThickness="1" CornerRadius="5" Padding="14"><TextBlock Text="Steueraktionen sind vom Supervisor-Status abhängig. Es werden keine Fallback-Service-Aufrufe aus der UI gestartet." Foreground="#E5C58C" TextWrapping="Wrap" /></Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="AiPage" Visibility="Collapsed"><TextBlock Text="MODELLE · ROLLEN" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="AI Engines" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="JARVIS nutzt zwei alternative Übergaberollen, keine zwei gleichzeitig residenten Modelle." Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,22" />
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,12"><StackPanel><TextBlock Text="PRIMARY · HAUPTMODELL" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="{Binding PrimaryModel}" Style="{StaticResource SectionTitleStyle}" Margin="0,7,0,4" /><TextBlock Text="{Binding PrimaryState}" Style="{StaticResource BodyMutedStyle}" /><TextBlock Text="Primäre Modellrolle im normalen JARVIS-Ablauf." Style="{StaticResource BodyMutedStyle}" Margin="0,8,0,0" /></StackPanel></Border>
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,12"><StackPanel><TextBlock Text="EXPERT · ROLLENÜBERGABE" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="{Binding ExpertModel}" Style="{StaticResource SectionTitleStyle}" Margin="0,7,0,4" /><TextBlock Text="{Binding ExpertState}" Style="{StaticResource BodyMutedStyle}" /><TextBlock Text="Wird durch explizite Übergabe anstelle des Primary-Modells genutzt; gleichzeitiges Resident-Halten wird nicht suggeriert." Style="{StaticResource BodyMutedStyle}" Margin="0,8,0,0" /></StackPanel></Border>
+                        <Border Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="Konfigurierte Primary-Parameter" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding LlmConfigurationSummary}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,7,0,0" /></StackPanel></Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="VoicePage" Visibility="Collapsed"><TextBlock Text="AUDIO · SPRACHE" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Voice" Style="{StaticResource PageTitleStyle}" /><Border Style="{StaticResource PanelStyle}" Margin="0,14,0,12"><StackPanel><TextBlock Text="Voice-Status" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding VoiceState}" Style="{StaticResource DataValueStyle}" TextWrapping="Wrap" /></StackPanel></Border><Border Style="{StaticResource PanelStyle}" Margin="0,0,0,12"><StackPanel><TextBlock Text="Konfigurierte Audiokette" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding VoiceConfigurationSummary}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,7,0,0" /></StackPanel></Border>
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,12"><StackPanel><TextBlock Text="Letzte Voice-Aktivität · letzte 24 h" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding VoiceEventsStatus}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,0,0,8" /><ItemsControl ItemsSource="{Binding VoiceEvents}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock Grid.Column="1" Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" Margin="12,0" VerticalAlignment="Center" TextWrapping="Wrap" /><TextBlock Grid.Column="2" Text="{Binding Timestamp}" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><TextBlock Text="Es werden nur Zeitstempel und Leistungsmetadaten gezeigt, keine Transkripte oder gesprochenen Inhalte." Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,8,0,0" /></StackPanel></Border>
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,0,0,12"><StackPanel><TextBlock Text="Gemeldete Komponenten" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="Manager vorhanden bedeutet, dass der Runtime-Snapshot ein Komponentenobjekt meldet; es ist keine Bereitschafts- oder Funktionsprüfung." Style="{StaticResource BodyMutedStyle}" Margin="0,4,0,6" /><TextBlock Text="{Binding RuntimeCapabilitiesSummary}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" /></StackPanel></Border><TextBlock Text="Nur durch die angebundene JARVIS-Runtime gemeldete Zustände erscheinen hier. Kein simuliertes Mikrofon- oder TTS-Signal." Style="{StaticResource BodyMutedStyle}" /></StackPanel>
+
+                    <StackPanel x:Name="MemoryPage" Visibility="Collapsed"><TextBlock Text="KONTEXT · SPEICHER" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Memory" Style="{StaticResource PageTitleStyle}" /><Border Style="{StaticResource PanelStyle}" Margin="0,14,0,12"><StackPanel><TextBlock Text="JARVIS Memory · Runtime-Aggregat" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding MemorySummary}" Style="{StaticResource BodyMutedStyle}" /></StackPanel></Border><Border Style="{StaticResource PanelStyle}" Margin="0,0,0,12"><StackPanel><TextBlock Text="Konfiguration · Aufbewahrung" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding MemoryConfigurationSummary}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,7,0,0" /></StackPanel></Border><TextBlock Text="Es werden keine lokalen Datenbankinhalte, Fakten oder nicht freigegebenen Gesprächsinhalte in dieser Ansicht offengelegt." Style="{StaticResource BodyMutedStyle}" /></StackPanel>
+
+                    <StackPanel x:Name="SkillsPage" Visibility="Collapsed"><TextBlock Text="FÄHIGKEITEN · INTEGRATIONEN" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Skills &amp; Tools" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="Skills sind aufrufbare Fähigkeiten und keine autonomen Agents." Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,20" /><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="12" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="Skills" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding SkillsStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,10" /><ItemsControl ItemsSource="{Binding Skills}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,12"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" FontSize="12" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+                        <Border Grid.Column="2" Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="Tools" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding ToolsStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,10" /><ItemsControl ItemsSource="{Binding Tools}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,12"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" FontSize="12" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+                    </Grid>
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="12" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="Skill-Nutzung · letzte 24 h" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding SkillUsageStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,10" /><ItemsControl ItemsSource="{Binding SkillUsage}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,10"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" FontSize="12" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+                        <Border Grid.Column="2" Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="Routing-Schichten · letzte 24 h" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding RouteUsageStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,10" /><ItemsControl ItemsSource="{Binding RouteUsage}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,10"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" FontSize="12" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+                    </Grid>
+                        <Border Style="{StaticResource PanelStyle}" Margin="0,14,0,0"><StackPanel><TextBlock Text="Routing · Live-Status" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding RoutingLiveStatus}" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" Margin="0,4,0,12" /><TextBlock Text="Letzte Routing-Aktivität · letzte 24 h (Historie)" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding RoutingEventsStatus}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,0,0,8" /><ItemsControl ItemsSource="{Binding RoutingEvents}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="230" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock Grid.Column="1" Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" Margin="12,0" VerticalAlignment="Center" TextWrapping="Wrap" /><TextBlock Grid.Column="2" Text="{Binding Timestamp}" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="LogsPage" Visibility="Collapsed"><TextBlock Text="EREIGNISSE · NACHVOLLZIEHBARKEIT" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Ereignisübersicht" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="Diese Ansicht zeigt echte 24-h-Aggregate, keine chronologischen Rohereignisse. Falls der zentrale Aggregat-Endpunkt fehlt, werden nur verfügbare Zähler aus Routing, STT und TTS kombiniert." Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,20" /><Border Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="{Binding EventsStatus}" Style="{StaticResource BodyMutedStyle}" Margin="0,0,0,8" /><ItemsControl ItemsSource="{Binding Events}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Timestamp}" Foreground="{StaticResource MutedBrush}" /><StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" FontSize="12" /></StackPanel></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border></StackPanel>
+
+                    <StackPanel x:Name="AgentsPage" Visibility="Collapsed"><TextBlock Text="AUTONOME AUSFÜHRUNG" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Agents" Style="{StaticResource PageTitleStyle}" /><Border Style="{StaticResource PanelStyle}" Margin="0,12,0,12"><StackPanel><TextBlock Text="TaskPlanner · tatsächlicher Planstatus" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding AgentSummary}" Foreground="{StaticResource TextBrush}" FontSize="18" FontWeight="SemiBold" Margin="0,4,0,0" /><TextBlock Text="{Binding AgentDetail}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,8,0,0" /></StackPanel></Border><TextBlock Text="Die Ansicht zeigt nur Status und aggregierten Fortschritt. Anfragen, Schritttexte, Ergebnisse und Skill-Namen werden nicht aus dem Backend übernommen." Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" /></StackPanel>
+
+                    <StackPanel x:Name="AutomationsPage" Visibility="Collapsed"><TextBlock Text="GEPLANTE ABLÄUFE" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Automations" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="{Binding AutomationsStatus}" Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,4,0,14" /><ItemsControl ItemsSource="{Binding AutomationSchedulers}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource PanelStyle}" Margin="0,0,0,10"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /><ColumnDefinition Width="190" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock Grid.Column="1" Text="{Binding Detail}" Style="{StaticResource BodyMutedStyle}" Margin="12,0" TextWrapping="Wrap" /><TextBlock Grid.Column="2" Text="{Binding Timestamp}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" /></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><TextBlock Text="Nur systemeigene Scheduler-Metadaten. Einzelne Reminder, Inhalte, Findings oder Health-Messwerte werden hier nicht ausgegeben." Style="{StaticResource BodyMutedStyle}" TextWrapping="Wrap" Margin="0,8,0,0" /></StackPanel>
+
+                    <StackPanel x:Name="SettingsPage" Visibility="Collapsed"><TextBlock Text="KONFIGURATION · VERBINDUNG" Style="{StaticResource EyebrowStyle}" /><TextBlock Text="Settings" Style="{StaticResource PageTitleStyle}" /><Border Style="{StaticResource PanelStyle}" Margin="0,12,0,12"><StackPanel><TextBlock Text="Repository" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding RepositoryRoot}" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" /><Button Content="Repository auswählen" Style="{StaticResource QuietButtonStyle}" HorizontalAlignment="Left" Margin="0,14,0,0" Click="ChooseRepository_Click" /></StackPanel></Border><Border Style="{StaticResource PanelStyle}"><StackPanel><TextBlock Text="API-Verbindung" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding ApiState}" Foreground="{StaticResource TextBrush}" /><TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"><Run Text="Aktualisiert: " /><Run Text="{Binding ApiUpdatedAt, Mode=OneWay, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" /></TextBlock></StackPanel></Border></StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>

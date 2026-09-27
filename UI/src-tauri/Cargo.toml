@@ -1,0 +1,17 @@
+[package]
+name = "jarvis-control-hub"
+version = "0.1.0"
+description = "J.A.R.V.I.S Desktop Control Hub"
+authors = ["JARVIS"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+ureq = { version = "2", features = ["json"] }
+url = "2"
+rfd = { version = "0.15", default-features = false }

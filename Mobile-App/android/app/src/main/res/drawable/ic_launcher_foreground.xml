@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Official J.A.R.V.I.S symbol (src/assets/jarvis-symbol.png), inset to the
+     adaptive icon safe zone. No new mark is generated here. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="24dp"
+    android:insetTop="30dp"
+    android:insetRight="24dp"
+    android:insetBottom="30dp">
+    <bitmap
+        android:src="@drawable/jarvis_symbol"
+        android:gravity="center" />
+</inset>

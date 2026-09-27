@@ -1,0 +1,185 @@
+# Sleepy JARVIS - deutscher Trainingssatzkatalog
+# Nur bewusst eingesprochene Trainingssätze. Keine privaten Hintergrundgespräche.
+# Natürlich sprechen, nicht künstlich langsam.
+
+Jarvis, hörst du mich?
+Hey Jarvis, hörst du mich ganz normal?
+Jarvis, bist du da?
+Hey Jarvis, bist du bereit?
+Jarvis, antworte mir bitte kurz.
+Jarvis, sag mir bitte die Uhrzeit.
+Jarvis, welches Datum haben wir heute?
+Jarvis, öffne den Explorer.
+Jarvis, öffne bitte den Windows Explorer.
+Hey Jarvis, öffne den Rechner für mich.
+Jarvis, starte den Editor.
+Jarvis, öffne PowerShell.
+Jarvis, öffne die Eingabeaufforderung.
+Jarvis, starte Windows Terminal.
+Jarvis, öffne Visual Studio Code.
+Jarvis, starte VS Code.
+Jarvis, öffne Google Chrome.
+Jarvis, öffne Microsoft Edge.
+Jarvis, öffne die Windows Einstellungen.
+Jarvis, mach bitte den Explorer auf.
+Jarvis, kannst du mir den Rechner öffnen?
+Jarvis, öffnest du bitte VS Code?
+Jarvis, starte bitte PowerShell für mich.
+Hey Jarvis, mach mal die Einstellungen auf.
+Jarvis, öffne Explorer und danach den Rechner.
+Jarvis, starte Chrome und öffne danach VS Code.
+Jarvis, schließe das aktuelle Fenster.
+Jarvis, minimiere das aktuelle Fenster.
+Jarvis, maximiere das aktuelle Fenster.
+Jarvis, mach das Fenster wieder groß.
+Jarvis, stell die Lautstärke etwas leiser.
+Jarvis, mach den Ton etwas lauter.
+Jarvis, schalte den Ton stumm.
+Jarvis, mach den Ton wieder an.
+Jarvis, wie viel ist siebzehn mal dreiundzwanzig?
+Jarvis, rechne bitte zweihundertvierunddreißig plus siebenundachtzig.
+Jarvis, was ist eintausend geteilt durch acht?
+Jarvis, rechne fünfzehn Prozent von zweihundertachtzig aus.
+Jarvis, was ergibt neunundneunzig mal zwölf?
+Jarvis, erklär mir das bitte in zwei Sätzen.
+Jarvis, gib mir eine kurze Zusammenfassung.
+Jarvis, erklär das etwas genauer.
+Jarvis, sag mir nur das Ergebnis.
+Jarvis, antworte bitte auf Deutsch.
+Jarvis, bitte ohne unnötige Erklärung.
+Jarvis, erklär mir das Schritt für Schritt.
+Jarvis, such bitte nach der Datei.
+Jarvis, finde meine letzte Datei.
+Jarvis, zeig mir die zuletzt geänderten Dateien.
+Jarvis, such im Projekt nach diesem Begriff.
+Jarvis, welche Prozesse laufen gerade?
+Jarvis, wie viel Arbeitsspeicher ist gerade belegt?
+Jarvis, wie hoch ist die Auslastung der Grafikkarte?
+Jarvis, wie viel VRAM ist noch frei?
+Jarvis, prüf bitte den Status der Grafikkarte.
+Jarvis, läuft der lokale LLM Server?
+Jarvis, prüf bitte den llama Server.
+Jarvis, funktioniert ROCm gerade?
+Jarvis, prüfe bitte WSL.
+Jarvis, läuft Ubuntu unter WSL korrekt?
+Jarvis, zeig mir den Git Status.
+Jarvis, welche Dateien wurden geändert?
+Jarvis, was ist der letzte Git Commit?
+Jarvis, prüf bitte den aktuellen Branch.
+Jarvis, zeig mir die Git Remotes.
+Jarvis, öffne mein GitHub Repository.
+Jarvis, prüf bitte die Python Version.
+Jarvis, welche Python Pakete sind installiert?
+Jarvis, starte die virtuelle Umgebung.
+Jarvis, prüf bitte die YAML Konfiguration.
+Jarvis, validiere die JSON Datei.
+Jarvis, such nach einem Fehler im Log.
+Jarvis, lies mir die letzte Fehlermeldung vor.
+Jarvis, was bedeutet dieser Python Traceback?
+Jarvis, erklär mir den Unterschied zwischen RAM und VRAM.
+Jarvis, was ist der Unterschied zwischen CPU und GPU?
+Jarvis, erklär mir kurz was ROCm macht.
+Jarvis, was bedeutet WSL zwei?
+Jarvis, was ist ein ONNX Modell?
+Jarvis, was ist ein GGUF Modell?
+Jarvis, was bedeutet Quantisierung bei einem Sprachmodell?
+Jarvis, erklär mir Qwen drei ASR.
+Jarvis, was ist ein Hotword?
+Jarvis, was macht ein Voice Activity Detector?
+Jarvis, warum wird Sprache manchmal zu früh abgeschnitten?
+Jarvis, was ist der Unterschied zwischen STT und TTS?
+Jarvis, was ist Piper TTS?
+Jarvis, was ist ein lokales Sprachmodell?
+Jarvis, was ist OpenRouter?
+Jarvis, was ist ein API Schlüssel?
+Jarvis, wie funktioniert eine REST API?
+Jarvis, erklär mir kurz GraphQL.
+Jarvis, was ist Docker?
+Jarvis, was ist ein Container?
+Jarvis, erklär mir Git in einfachen Worten.
+Jarvis, was ist ein Commit?
+Jarvis, was ist ein Branch?
+Jarvis, was ist ein Repository?
+Jarvis, was bedeutet upstream bei Git?
+Jarvis, was bedeutet origin bei Git?
+Jarvis, erklär mir den Unterschied zwischen Pull und Push.
+Jarvis, was bedeutet Fast Forward bei Git?
+Jarvis, wie funktioniert ein Merge?
+Jarvis, was ist ein Python Virtual Environment?
+Jarvis, erklär mir bitte den Unterschied zwischen JSON und YAML.
+Jarvis, was ist ein regulärer Ausdruck?
+Jarvis, erklär mir kurz was ein Thread ist.
+Jarvis, was ist ein Prozess unter Windows?
+Jarvis, was ist PowerShell?
+Jarvis, was ist die Windows Registry?
+Jarvis, erklär mir den Task Manager.
+Jarvis, sag mir bitte, ob du mich verstanden hast.
+Jarvis, wiederhole bitte meinen letzten Satz.
+Jarvis, kannst du etwas langsamer sprechen?
+Jarvis, sprich bitte etwas kürzer.
+Jarvis, mach bitte weiter.
+Jarvis, stopp.
+Jarvis, abbrechen.
+Jarvis, weiter.
+Jarvis, nochmal.
+Jarvis, wiederhole das bitte.
+Jarvis, genau.
+Jarvis, richtig.
+Jarvis, nein, das meinte ich anders.
+Jarvis, ja, genau so.
+Jarvis, okay, machen wir weiter.
+Jarvis, gut, dann nehmen wir das so.
+Jarvis, warte kurz.
+Jarvis, einen Moment bitte.
+Jarvis, ich spreche jetzt absichtlich in normaler Geschwindigkeit mit dir.
+Jarvis, ich möchte testen, ob du auch längere Sätze vollständig verstehst, wenn ich nicht extra langsam spreche.
+Jarvis, wenn ich mehrere Dinge direkt hintereinander sage, sollst du trotzdem den ganzen Satz erkennen.
+Jarvis, ich mache beim Sprechen manchmal kurze Pausen und möchte, dass du den Satz trotzdem vollständig erfasst.
+Jarvis, manchmal spreche ich schnell und verschlucke einzelne Silben, trotzdem solltest du den Zusammenhang erkennen.
+Jarvis, ich mische manchmal deutsche und englische Fachbegriffe in einem Satz.
+Jarvis, öffne bitte VS Code und prüfe danach den Git Status im Projekt.
+Jarvis, starte PowerShell und zeig mir anschließend die aktuelle Windows Version.
+Jarvis, prüfe bitte CPU, RAM und GPU Auslastung und gib mir nur eine kurze Zusammenfassung.
+Jarvis, kontrolliere bitte, ob WSL, Ubuntu und der lokale LLM Server laufen.
+Jarvis, schau bitte nach, ob Qwen drei ASR korrekt geladen wurde.
+Jarvis, prüfe bitte, ob das Mikrofon über Pulse Audio erreichbar ist.
+Jarvis, teste bitte die Sprachausgabe mit Piper.
+Jarvis, starte bitte eine kurze Systemdiagnose und nenne mir nur Auffälligkeiten.
+Jarvis, ich möchte, dass du natürliche Sprache verstehst und nicht nur starre Befehle.
+Jarvis, kannst du aus diesem normalen Satz erkennen, was ich eigentlich von dir möchte?
+Jarvis, wenn ich sage mach mal den Explorer auf, sollst du verstehen, dass du den Windows Explorer starten sollst.
+Jarvis, wenn ich sage mach das Fenster zu, meine ich das aktuell aktive Fenster.
+Jarvis, wenn ich sage etwas leiser, sollst du die Lautstärke reduzieren.
+Jarvis, wenn ich sage nochmal, sollst du die letzte Antwort wiederholen.
+Hey Jarvis, mach bitte den Explorer auf und danach den Rechner.
+Hey Jarvis, kannst du kurz prüfen, ob der lokale Server läuft?
+Hey Jarvis, sag mir bitte nur, ob alles in Ordnung ist.
+Hey Jarvis, was läuft gerade auf der Grafikkarte?
+Hey Jarvis, öffne VS Code und dann PowerShell.
+Also Jarvis, kannst du bitte den Explorer öffnen?
+Okay Jarvis, dann prüf jetzt bitte den Git Status.
+Gut Jarvis, dann machen wir mit der Systemprüfung weiter.
+Sag mir bitte die Uhrzeit, Jarvis.
+Öffne bitte den Rechner, Jarvis.
+Prüf bitte den lokalen Server, Jarvis.
+Kannst du den Explorer öffnen, Jarvis?
+Was ist gerade die CPU Auslastung, Jarvis?
+Wie viel VRAM ist noch frei, Jarvis?
+Bitte öffne PowerShell, Jarvis.
+Bitte starte VS Code, Jarvis.
+Ähm Jarvis, öffne bitte den Explorer.
+Jarvis, ähm, prüf bitte den Git Status.
+Jarvis, also, wie viel VRAM ist gerade frei?
+Jarvis, okay, dann öffne jetzt bitte PowerShell.
+Jarvis, ich hätte gern eine kurze Antwort ohne lange Einleitung.
+Jarvis, ich möchte jetzt einen längeren Satz sprechen, damit wir testen können, ob die Aufnahme vollständig bleibt und die Spracherkennung auch am Ende noch korrekt arbeitet.
+Jarvis, bitte analysiere diesen Satz vollständig, auch wenn ich zwischendurch eine kleine Pause mache und danach einfach normal weiterspreche.
+Jarvis, wenn ich schnell rede, möchte ich nicht jedes einzelne Wort besonders deutlich betonen müssen, damit du mich zuverlässig verstehst.
+Jarvis, natürliche Sprache enthält Pausen, Füllwörter und manchmal kleine Versprecher, und genau damit solltest du im Alltag umgehen können.
+Jarvis, WSL zwei läuft unter Windows elf und Ubuntu vierundzwanzig null vier wird für den lokalen Backend Stack verwendet.
+Jarvis, die Radeon RX siebentausendneunhundert XTX hat vierundzwanzig Gigabyte Videospeicher.
+Jarvis, Qwen drei Punkt fünf läuft lokal über llama.cpp und ROCm.
+Jarvis, Qwen drei ASR übernimmt die automatische Spracherkennung.
+Jarvis, Piper übernimmt aktuell die deutsche Sprachausgabe.
+Jarvis, GitHub speichert den Quellcode, aber die großen Modelle liegen lokal außerhalb des Repositorys.
+Jarvis, das Modell soll meine normale Aussprache lernen und nicht nur besonders sauber eingesprochene Testsätze.

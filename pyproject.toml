@@ -1,0 +1,17 @@
+# Minimale Tooling-Konfiguration (keine Abhaengigkeiten, kein Build-System).
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/routing"]
+pythonpath = ["."]
+markers = [
+    "hardware: braucht echte Hardware (Mikrofon, GPU, NPU, Kamera)",
+    "wsl: braucht laufendes WSL/systemd bzw. Live-Dienste",
+    "slow: langsamer Test (z. B. Modell-Laden)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501", "E402", "E701", "E702", "E731", "E741"]

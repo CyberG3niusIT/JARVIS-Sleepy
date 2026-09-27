@@ -1,0 +1,67 @@
+# Core Dependencies
+pyyaml>=6.0
+numpy>=1.24.0
+sounddevice>=0.4.6
+soundfile>=0.12.1
+
+# Voice Activity Detection
+silero-vad>=6.0.0
+
+# Wake Word Detection
+pvporcupine>=3.0.0
+
+# Speech Recognition (Whisper)
+# Note: whisper.cpp is used via binary, not Python package
+
+# Text-to-Speech (Piper)
+# Note: Piper is used via binary, not Python package
+
+# Optional provider dependency is intentionally not installed by default.
+# For an explicitly configured Anthropic provider only, install:
+#   pip install -r requirements-anthropic.txt
+# OpenRouter uses the existing requests dependency.
+
+# Voice Recognition
+speechbrain>=0.5.16
+torchaudio>=2.0.0
+
+# Vision (Phase 4)
+opencv-python>=4.8.0
+insightface>=0.7.3
+onnxruntime>=1.16.0
+pytesseract>=0.3.10
+
+# Display Control
+screeninfo>=0.8.1
+python-xlib>=0.33
+
+# Web Search (Phase 4)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Document Generation
+python-pptx>=1.0.2
+python-docx>=1.2.0
+
+# MCP (Model Context Protocol) bridge
+mcp[cli]>=1.26.0
+
+# Semantic Embeddings
+sentence-transformers>=2.2.0
+einops>=0.7.0
+
+# Utilities
+python-dotenv>=1.0.0
+keyring>=24.0.0
+gitpython>=3.1.0
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+
+# System / document / calendar runtime
+psutil>=5.9.0
+python-pptx>=0.6.21
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0

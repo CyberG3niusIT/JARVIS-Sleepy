@@ -51,24 +51,13 @@
 
 ## 01 // SNAPSHOT
 
-Dieser Branch ist der definierte technische Referenzpunkt für den **aktuellen J.A.R.V.I.S.-Stand unmittelbar vor dem UI-Expert-Umbau mit Lovable**.
+Dieser Branch enthält den vollständigen technischen Stand aus dem lokalen J.A.R.V.I.S-Sleepy-Workspace zum **27.09.2026**.
 
-Er soll den vollständigen realen Systemzustand dieses Zeitpunkts aufnehmen:
-
-- Backend und Runtime
-- Modelle und Inferenz
-- Voice und Audio
-- Memory und Kontext
-- Tools, Skills und MCP
-- Agenten und Orchestrierung
-- Vision und Presence
-- Privacy und Security
-- Services und Recovery
-- Tests und Dokumentation
+Der Snapshot vereint Runtime und Backend aus `Main/`, den Desktop Control Hub aus `UI/`, die native Android-App aus `Mobile-App/` sowie die technische Dokumentation aus `Dokumentation/`. Lokale Git-Worktree-Verwaltung, Zugangsdaten, Runtime-Daten und Build-Ausgaben gehören nicht zum Repository-Inhalt.
 
 `main` bleibt davon unabhängig.
 
-Der Snapshot dient nicht als Experimentierfläche. Er ist die technische Baseline, gegen die der kommende Desktop-Neuaufbau geprüft werden kann.
+Dieser Branch ist der technische Referenzpunkt vor dem nächsten UI-Expert-Umbau mit Lovable. Die vorhandenen UI-Dateien dokumentieren den Implementierungsstand, sind aber keine visuelle Source of Truth.
 
 ---
 
@@ -157,22 +146,11 @@ Runtime, Services und Modelle müssen ihren tatsächlichen Zustand nachvollziehb
 
 ## 05 // DESKTOP REBUILD
 
-Der nächste große Entwicklungsschritt ist der **vollständige Neuaufbau des J.A.R.V.I.S Desktop Control Centers mit Lovable**.
+Der nächste Entwicklungsschritt ist der UI-Expert-Umbau des J.A.R.V.I.S Desktop Control Centers mit Lovable.
 
-Die bisherige Desktop- und Web-Oberfläche ist dabei **keine visuelle Source of Truth**.
+Die vorhandenen Desktop-, Web- und Mobile-Clients liegen im Snapshot unter `UI/`, `web/` und `Mobile-App/`. Er dokumentiert den technischen Implementierungsstand, ist aber **keine visuelle Source of Truth**.
 
-Erhalten bleiben:
-
-- reale Backend-Schnittstellen
-- Runtime-Zustände
-- Privacy-Gates
-- Modellrollen
-- Tool- und Skill-Zuständigkeiten
-- Memory- und Voice-Pfade
-- Recovery- und Fehlerzustände
-- technische Dokumentation
-
-Neu aufgebaut wird die visuelle und interaktive Ebene.
+Technische Source of Truth bleiben Backend-Schnittstellen, echte Runtime-Zustände, Privacy-Gates und nachweisbare Fähigkeiten.
 
 ### Geplante Hauptbereiche
 
@@ -189,13 +167,6 @@ MOBILITY
 OBSERVABILITY
 SETTINGS
 ```
-
-Ziel ist eine professionelle Desktop-Anwendung für Systemsteuerung, AI Runtime Management, Observability und lokale Assistenz.
-
-Keine generische Chat-App.
-Kein Sci-Fi-HUD.
-Kein Marketing-Mockup.
-Keine Fake-Telemetrie.
 
 ---
 
@@ -233,33 +204,29 @@ Die Visualisierung erklärt Systemaktivität. Sie behauptet keine internen Gedan
 | Bereich | Status |
 |---|---|
 | README / Snapshot Identity | **PREPARED** |
-| Vollständiger technischer Stand | **PENDING IMPORT** |
-| Zentrales Repository-Inhaltsverzeichnis | **FOLGT MIT SNAPSHOT** |
-| Dokumentationssatz | **FOLGT MIT SNAPSHOT** |
-| Lovable Handoff | **AFTER SNAPSHOT** |
-| Desktop UI Rebuild | **NOT STARTED IN THIS BRANCH** |
+| Technischer Stand aus den Projektquellen | **IMPORTED** |
+| Technische Dokumentation | **IMPORTED, geprüft am 24.09.2026** |
+| Zentrales `INHALTSVERZEICHNIS.md` | **IM WORKSPACE NICHT VORHANDEN** |
+| Lovable Handoff | **FOLGT** |
+| UI-Expert-Umbau mit Lovable | **NOCH NICHT BEGONNEN** |
 
-Diese Tabelle beschreibt ausschließlich den Stand dieses Snapshot-Branches. Sie ist keine Runtime-Telemetrie.
+Diese Tabelle beschreibt den übernommenen Datei- und Planungsstand. Sie ist keine Runtime-Telemetrie und bestätigt keinen Live-Betrieb.
 
 ---
 
 ## 08 // REPOSITORY INDEX
 
-Der vollständige Snapshot übernimmt zusätzlich das zentrale Repository-Inhaltsverzeichnis:
+Die technische Dokumentation und ihre Navigation liegen in [Dokumentation/README.md](Dokumentation/README.md). Das Quellen- und Dateiinventar steht in [Dokumentation/INVENTORY.md](Dokumentation/INVENTORY.md).
 
-`INHALTSVERZEICHNIS.md`
-
-Es wird als technischer Navigationspunkt für Quellcode, Runtime, Tests, Dokumentation und Betrieb verwendet.
-
-Der Link wird erst gesetzt, sobald die Datei tatsächlich in diesem Branch vorhanden ist.
+Ein separates `INHALTSVERZEICHNIS.md` ist in den übernommenen Projektdateien nicht vorhanden.
 
 ---
 
 ## 09 // SNAPSHOT RULE
 
-Dieser Branch bleibt als **Referenzzustand vor dem Lovable-Umbau** erhalten.
+Dieser Branch hält den vollständigen lokalen Projektstand zum **27.09.2026** als technischen Referenzpunkt fest.
 
-Änderungen, die ausschließlich zum neuen Desktop-UI-Design gehören, werden nicht rückwirkend als Bestandteil dieser Baseline behandelt.
+Die vorhandenen Desktop-, Web- und Mobile-Clients sind als Implementierungsstand enthalten. Für den kommenden UI-Expert-Umbau mit Lovable sind sie keine visuelle Source of Truth.
 
 Der Zweck dieses Branches ist reproduzierbare Vergleichbarkeit:
 
@@ -267,10 +234,10 @@ Der Zweck dieses Branches ist reproduzierbare Vergleichbarkeit:
 CURRENT J.A.R.V.I.S SYSTEM
             │
             ▼
-PRE-LOVABLE SNAPSHOT
+SLEEPY WORKSPACE SNAPSHOT
             │
             ▼
-DESKTOP UI REBUILD
+LOVABLE UI EXPERT REBUILD
             │
             ▼
 POST-REBUILD VERIFICATION

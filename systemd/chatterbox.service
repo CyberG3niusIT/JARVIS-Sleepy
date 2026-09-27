@@ -1,0 +1,31 @@
+# Sleepy production unit for the local Chatterbox Multilingual V3 server.
+# Hardware/runtime contract:
+#   /home/alex/chatterbox-venv/bin/python3
+#   /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main
+#   /home/alex/jarvis-data/voices/chatterbox/jarvis-reference.wav
+#
+# start_chatterbox.sh verifies the canonical voice SHA before model load.
+
+[Unit]
+Description=Chatterbox Multilingual V3 TTS server for JARVIS
+After=network.target
+
+[Service]
+Type=simple
+User=alex
+WorkingDirectory=/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main
+
+ExecStartPre=/usr/bin/test -x /home/alex/chatterbox-venv/bin/python3
+ExecStartPre=/usr/bin/test -f /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/start_chatterbox.sh
+ExecStart=/bin/bash /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/start_chatterbox.sh
+
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=chatterbox
+
+[Install]
+WantedBy=multi-user.target

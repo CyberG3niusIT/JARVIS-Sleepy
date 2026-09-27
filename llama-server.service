@@ -1,0 +1,32 @@
+# SUPERSEDED — see systemd/llama-server.service instead. This file still
+# has WorkingDirectory=/home/user/llama.cpp/... and -m /mnt/models/...,
+# which don't match Sleepy's real layout (config.yaml uses
+# /home/alex/jarvis-data/...), and --ctx-size 8192 instead of
+# config.yaml's context_size: 32768. Left in place unmodified rather than
+# deleted since it may still be referenced elsewhere; do not install
+# this one.
+
+[Unit]
+Description=Llama Server for JARVIS (Qwen3.5-35B-A3B LLM)
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+Environment=HSA_OVERRIDE_GFX_VERSION=11.0.0
+WorkingDirectory=/home/user/llama.cpp/build/bin
+ExecStart=/home/user/llama.cpp/build/bin/llama-server \
+  -m /mnt/models/llm/Qwen3.5-35B-A3B-Q3_K_M.gguf \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --ctx-size 8192 \
+  --n-gpu-layers 999 \
+  --parallel 1 \
+  --jinja \
+  --reasoning-budget 0 \
+  --log-disable
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

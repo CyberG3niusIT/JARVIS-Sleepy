@@ -1,0 +1,3 @@
+# Optional Anthropic provider SDK. Install only when config.yaml explicitly sets
+# llm.api.provider: anthropic and the owner has enabled cloud use.
+anthropic>=0.40.0

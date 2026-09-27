@@ -1,0 +1,30 @@
+# Sleepy production USER unit. Install to ~/.config/systemd/user/jarvis.service.
+# JARVIS uses native Windows audio, therefore this unit belongs to the logged-in
+# user/session. Chatterbox itself remains a separate headless system service.
+
+[Unit]
+Description=JARVIS Voice Assistant (continuous mode)
+After=network.target sound.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PULSE_SERVER=unix:/mnt/wslg/PulseServer
+WorkingDirectory=/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main
+
+ExecStartPre=/usr/bin/test -x /home/alex/jarvis-venv/bin/python3
+ExecStartPre=/usr/bin/test -f /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/jarvis_continuous.py
+ExecStartPre=/usr/bin/python3 /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/scripts/check_chatterbox_runtime.py --wait 120
+ExecStart=/home/alex/jarvis-venv/bin/python3 /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/jarvis_continuous.py
+
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,487 @@
+"""Tool definition: developer_tools — git, codebase search, system admin."""
+
+import logging
+import shlex
+import subprocess
+import time as _time
+from pathlib import Path
+
+TOOL_NAME = "developer_tools"
+SKILL_NAME = "developer_tools"
+
+DEPENDENCIES = {"config": "_config"}
+
+SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "developer_tools",
+        "description": (
+            "Developer and system administration operations: git status/log/diff/branch "
+            "across repos, codebase search, process info, service status, network info, "
+            "package info, system health check, service logs, or run a shell command. "
+            "Only use when the user explicitly asks about git, code, processes, services, "
+            "network, packages, logs, or shell commands. NOT for casual conversation."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "git_status", "git_log", "git_diff", "git_branch",
+                        "codebase_search", "process_info", "service_status",
+                        "network_info", "package_info", "system_health",
+                        "check_logs", "run_command", "confirm_pending",
+                    ],
+                    "description": (
+                        "git_status: show git status across repos. "
+                        "git_log: show recent commits. "
+                        "git_diff: show uncommitted changes. "
+                        "git_branch: list branches. "
+                        "codebase_search: grep for a pattern in core/ and skills/. "
+                        "process_info: top processes by CPU or memory. "
+                        "service_status: check a systemd service or list JARVIS services. "
+                        "network_info: IP addresses, open ports, ping, or interfaces. "
+                        "package_info: check installed package version. "
+                        "system_health: run full 5-layer health diagnostic. "
+                        "check_logs: view recent JARVIS service logs. "
+                        "run_command: execute a shell command (safety-classified). "
+                        "confirm_pending: execute a previously suggested command that "
+                        "required confirmation. Use when the user says 'yes', 'go ahead', "
+                        "'proceed' after being asked to confirm."
+                    )
+                },
+                "repo": {
+                    "type": "string",
+                    "enum": ["main", "skills", "models", "all"],
+                    "description": "Which git repo (for git_* actions). Default: all."
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of log entries (for git_log). Default: 10, max 50."
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Search pattern (for codebase_search)."
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["cpu", "memory"],
+                    "description": "Sort order for process_info. Default: cpu."
+                },
+                "service_name": {
+                    "type": "string",
+                    "description": "Service name (for service_status). Omit to list JARVIS services."
+                },
+                "info_type": {
+                    "type": "string",
+                    "enum": ["addresses", "ports", "ping", "interfaces"],
+                    "description": "Type of network info. Default: addresses."
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Hostname or IP to ping (for network_info with info_type=ping)."
+                },
+                "package_name": {
+                    "type": "string",
+                    "description": "Package name to look up (for package_info)."
+                },
+                "filter": {
+                    "type": "string",
+                    "enum": ["recent", "errors", "warnings"],
+                    "description": "Log filter (for check_logs). Default: recent."
+                },
+                "minutes": {
+                    "type": "integer",
+                    "description": "How many minutes of logs to show (for check_logs). Default: 15."
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to execute (for run_command)."
+                }
+            },
+            "required": ["action"]
+        }
+    }
+}
+
+SYSTEM_PROMPT_RULE = (
+    "ALWAYS use this when the user asks to search the codebase, grep for code, "
+    "search inside files, find files containing specific text, "
+    "check git status, or view commits. "
+    "For developer operations (git, codebase search, processes, "
+    "services, network info, packages, logs, or shell commands), call "
+    "developer_tools. For codebase_search, extract the pattern. For "
+    "run_command, provide the exact shell command. "
+    "Examples: 'git status' → git_status, 'search for TODO' → codebase_search, "
+    "'find files containing synthesis' → codebase_search with pattern='synthesis', "
+    "'grep for error' → codebase_search with pattern='error', "
+    "'is nginx running?' → service_status. "
+    "NOT for: general programming questions, code explanations, learning git."
+)
+
+from core.logger import get_logger
+logger = get_logger("jarvis.tools.developer_tools")
+
+_JARVIS_ROOT = str(Path(__file__).resolve().parents[2])
+_DEVTOOLS_SKILL_DIR = Path(_JARVIS_ROOT) / "skills" / "system" / "developer_tools"
+_MODELS_ROOT = Path("/home/alex/jarvis-data/models")
+
+
+# ---------------------------------------------------------------------------
+# Runtime dependency — injected via tool_registry.inject_dependencies()
+# ---------------------------------------------------------------------------
+
+_config = None
+
+
+
+
+# ---------------------------------------------------------------------------
+# Lazy-loaded safety module
+# ---------------------------------------------------------------------------
+
+_safety_module = None
+
+
+def _get_safety():
+    """Lazy-load _safety.py from the developer_tools skill directory."""
+    global _safety_module
+    if _safety_module is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            '_safety',
+            _DEVTOOLS_SKILL_DIR / '_safety.py',
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _safety_module = mod
+    return _safety_module
+
+
+# ---------------------------------------------------------------------------
+# Git repo paths
+# ---------------------------------------------------------------------------
+
+_GIT_REPOS = {
+    'main': _JARVIS_ROOT,
+    'skills': str(Path(_JARVIS_ROOT) / 'skills'),
+    'models': str(_MODELS_ROOT),
+}
+
+
+def _resolve_repos(repo: str) -> dict:
+    """Return dict of repo_name->path for the requested repo(s)."""
+    if repo == 'all' or not repo:
+        return dict(_GIT_REPOS)
+    if repo in _GIT_REPOS:
+        return {repo: _GIT_REPOS[repo]}
+    return dict(_GIT_REPOS)
+
+
+def _run_cmd(cmd: str, cwd: str = None, timeout: int = 15) -> str:
+    """Run a shell command and return stdout (or error message)."""
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True,
+            cwd=cwd, timeout=timeout,
+        )
+        output = result.stdout.strip()
+        if result.returncode != 0 and result.stderr.strip():
+            output += f"\n{result.stderr.strip()}" if output else result.stderr.strip()
+        return output or "(no output)"
+    except subprocess.TimeoutExpired:
+        return f"Error: command timed out after {timeout}s"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Pending confirmation state for run_command -> confirm_pending flow
+# ---------------------------------------------------------------------------
+
+import threading as _threading
+_pending_lock = _threading.Lock()
+_pending_command = None  # (command_str, expiry_time) or None
+
+
+# ---------------------------------------------------------------------------
+# Sub-handler registry
+# ---------------------------------------------------------------------------
+
+_DEVTOOLS_HANDLERS = {}
+
+
+def _register_devtool(action: str):
+    """Decorator to register a developer_tools action handler."""
+    def decorator(fn):
+        _DEVTOOLS_HANDLERS[action] = fn
+        return fn
+    return decorator
+
+
+def handler(args: dict) -> str:
+    """Route to the appropriate developer_tools action handler."""
+    action = args.get("action", "")
+    sub_handler = _DEVTOOLS_HANDLERS.get(action)
+    if not sub_handler:
+        available = ", ".join(sorted(_DEVTOOLS_HANDLERS.keys()))
+        return f"Unknown developer_tools action '{action}'. Available: {available}"
+    return sub_handler(args)
+
+
+# ---------------------------------------------------------------------------
+# Action handlers
+# ---------------------------------------------------------------------------
+
+@_register_devtool("git_status")
+def _devtools_git_status(args: dict) -> str:
+    repos = _resolve_repos(args.get("repo", "all"))
+    lines = []
+    for name, path in repos.items():
+        output = _run_cmd("git status --short", cwd=path)
+        if output == "(no output)":
+            output = "clean"
+        lines.append(f"[{name}] ({path}):\n{output}")
+    return "\n\n".join(lines)
+
+
+@_register_devtool("git_log")
+def _devtools_git_log(args: dict) -> str:
+    repos = _resolve_repos(args.get("repo", "all"))
+    count = max(1, min(50, int(args.get("count", 10))))
+    lines = []
+    for name, path in repos.items():
+        output = _run_cmd(f"git log --oneline --decorate -{count}", cwd=path)
+        lines.append(f"[{name}]:\n{output}")
+    return "\n\n".join(lines)
+
+
+@_register_devtool("git_diff")
+def _devtools_git_diff(args: dict) -> str:
+    repos = _resolve_repos(args.get("repo", "all"))
+    lines = []
+    for name, path in repos.items():
+        output = _run_cmd("git diff", cwd=path)
+        if output == "(no output)":
+            output = "no changes"
+        lines.append(f"[{name}]:\n{output}")
+    return "\n\n".join(lines)
+
+
+@_register_devtool("git_branch")
+def _devtools_git_branch(args: dict) -> str:
+    repos = _resolve_repos(args.get("repo", "all"))
+    lines = []
+    for name, path in repos.items():
+        output = _run_cmd("git branch -a", cwd=path)
+        lines.append(f"[{name}]:\n{output}")
+    return "\n\n".join(lines)
+
+
+@_register_devtool("codebase_search")
+def _devtools_codebase_search(args: dict) -> str:
+    pattern = args.get("pattern", "").strip()
+    if not pattern:
+        return "Error: 'pattern' is required for codebase search."
+    search_dirs = [
+        str(Path(_JARVIS_ROOT) / 'core'),
+        str(Path(_JARVIS_ROOT) / 'skills'),
+    ]
+    all_matches = []
+    for d in search_dirs:
+        output = _run_cmd(
+            f"grep -rn --include='*.py' "
+            f"--exclude-dir=.git --exclude-dir=__pycache__ --exclude-dir=venv "
+            f"-- {shlex.quote(pattern)} {d}",
+            timeout=10,
+        )
+        if output and output != "(no output)" and not output.startswith("Error"):
+            all_matches.extend(output.split('\n'))
+    if not all_matches:
+        return f"No matches found for '{pattern}'."
+    if len(all_matches) > 30:
+        truncated = all_matches[:30]
+        truncated.append(f"... ({len(all_matches) - 30} more matches)")
+        return "\n".join(truncated)
+    return "\n".join(all_matches)
+
+
+@_register_devtool("process_info")
+def _devtools_process_info(args: dict) -> str:
+    sort_by = args.get("sort_by", "cpu")
+    if sort_by not in ("cpu", "memory"):
+        sort_by = "cpu"
+    sort_key = "-%mem" if sort_by == "memory" else "-%cpu"
+    output = _run_cmd(f"ps aux --sort={sort_key} | head -15")
+    # Annotate JARVIS's own processes for self-aware reporting
+    lines = output.split('\n')
+    lines = [f"{l}  # (this is me)" if 'jarvis' in l.lower() and 'python' in l.lower() else l for l in lines]
+    return '\n'.join(lines)
+
+
+@_register_devtool("service_status")
+def _devtools_service_status(args: dict) -> str:
+    service_name = args.get("service_name", "").strip()
+    if service_name:
+        # Try user service first, then system
+        output = _run_cmd(f"systemctl --user status {shlex.quote(service_name)}")
+        if "could not be found" in output.lower() or "not loaded" in output.lower():
+            output = _run_cmd(f"systemctl status {shlex.quote(service_name)}")
+        return output
+    # List JARVIS-related services. jarvis.service is confirmed a user
+    # unit (start.sh/stop.sh/etc. and this file's own is-active check
+    # below all use --user for it — see systemd/README.md for the full
+    # evidence trail from session #7). llama-server/chatterbox are
+    # checked under both scopes since their real scope isn't as firmly
+    # established — session #6/#7 wrote them as system units, but that
+    # was a reasoned guess, not confirmed the way jarvis.service is.
+    # jarvis-web is referenced here historically but has no
+    # systemd/*.service file in this repo — flagged, not silently
+    # assumed to exist.
+    lines = ["User services:"]
+    for svc in ["jarvis", "jarvis-web"]:
+        status = _run_cmd(f"systemctl --user is-active {svc} 2>/dev/null")
+        lines.append(f"  {svc}: {status}" + (" (no unit file in repo)" if svc == "jarvis-web" else ""))
+    lines.append("\nModel services (checked --user then system, scope not firmly confirmed):")
+    for svc in ["llama-server", "chatterbox"]:
+        status = _run_cmd(f"systemctl --user is-active {svc} 2>/dev/null")
+        if not status.strip() or status.strip() in ("unknown", "inactive"):
+            status = _run_cmd(f"systemctl is-active {svc} 2>/dev/null")
+        lines.append(f"  {svc}: {status}")
+    return "\n".join(lines)
+
+
+@_register_devtool("network_info")
+def _devtools_network_info(args: dict) -> str:
+    info_type = args.get("info_type", "addresses")
+    target = args.get("target", "")
+    if info_type == "ports":
+        return _run_cmd("ss -tlnp")
+    elif info_type == "ping" and target:
+        return _run_cmd(f"ping -c 4 {shlex.quote(target)}", timeout=10)
+    elif info_type == "interfaces":
+        return _run_cmd("ip link show")
+    # Default: addresses
+    return _run_cmd("ip -brief addr show")
+
+
+@_register_devtool("package_info")
+def _devtools_package_info(args: dict) -> str:
+    package_name = args.get("package_name", "").strip()
+    if package_name:
+        lines = []
+        which = _run_cmd(f"which {shlex.quote(package_name)}")
+        if which and not which.startswith("Error") and which != "(no output)":
+            lines.append(f"Location: {which}")
+        version = _run_cmd(f"{shlex.quote(package_name)} --version 2>&1 | head -1")
+        if version and not version.startswith("Error") and version != "(no output)":
+            lines.append(f"Version: {version}")
+        pip_info = _run_cmd(f"pip show {shlex.quote(package_name)} 2>/dev/null")
+        if pip_info and not pip_info.startswith("Error") and pip_info != "(no output)":
+            lines.append(f"Pip info:\n{pip_info}")
+        return "\n".join(lines) if lines else f"Package '{package_name}' not found."
+    # General info
+    return _run_cmd("python3 --version && pip --version")
+
+
+@_register_devtool("system_health")
+def _devtools_system_health(args: dict) -> str:
+    if not _config:
+        return "Error: config not initialized. Cannot run health check."
+    try:
+        from core.health_check import get_full_health
+        results = get_full_health(_config)
+
+        # Display the visual report on screen (terminal window)
+        try:
+            from core.health_check import format_visual_report
+            visual_report = format_visual_report(results)
+            import importlib.util
+            _spec = importlib.util.spec_from_file_location(
+                '_display',
+                _DEVTOOLS_SKILL_DIR / '_display.py',
+            )
+            _disp_mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_disp_mod)
+            display = _disp_mod.DisplayRouter(_config)
+            display.show(visual_report, content_type='health_check',
+                         title='System Health Report')
+        except Exception as e:
+            logger.warning(f"Could not display visual health report: {e}")
+
+        # Return a conversational brief (LLM will relay it to user)
+        from core.health_check import format_voice_brief
+        return format_voice_brief(results)
+    except Exception as e:
+        return f"Error running health check: {e}"
+
+
+@_register_devtool("check_logs")
+def _devtools_check_logs(args: dict) -> str:
+    log_filter = args.get("filter", "recent")
+    if log_filter not in ("recent", "errors", "warnings"):
+        log_filter = "recent"
+    minutes = max(1, min(1440, int(args.get("minutes", 15))))
+    cmd = f'journalctl --user -u jarvis --since "{minutes} min ago" --no-pager'
+    if log_filter == "errors":
+        cmd += " | grep -i error"
+    elif log_filter == "warnings":
+        cmd += " | grep -iE '(warn|error)'"
+    output = _run_cmd(cmd, timeout=10)
+    safety = _get_safety()
+    return safety.sanitize_output(output)
+
+
+@_register_devtool("run_command")
+def _devtools_run_command(args: dict) -> str:
+    global _pending_command
+    command = args.get("command", "").strip()
+    if not command:
+        return "Error: 'command' is required."
+    safety = _get_safety()
+    tier, reason = safety.classify_command(command)
+    if tier == 'blocked':
+        return f"BLOCKED: {reason}. This command is not allowed."
+    if tier == 'confirmation':
+        with _pending_lock:
+            # Session #7 fix (agentic-system audit finding #10): this is
+            # a single global slot — a second confirmation-tier command
+            # arriving while one is already pending used to silently
+            # overwrite it. A user confirming "yes" to what they believe
+            # is the first command would then actually run the second
+            # one instead — a real "confirm the wrong thing" hazard, not
+            # just theoretical: the LLM itself can issue a second
+            # run_command call mid-conversation while a first
+            # confirmation is still outstanding. Now refuses to
+            # overwrite an unexpired pending command instead.
+            if _pending_command is not None:
+                existing_command, existing_expiry = _pending_command
+                if _time.time() <= existing_expiry:
+                    return (
+                        f"A different command is already awaiting confirmation: "
+                        f"`{existing_command}`. Please confirm or dismiss that one "
+                        f"(it expires in {existing_expiry - _time.time():.0f}s) "
+                        f"before requesting a new one."
+                    )
+            _pending_command = (command, _time.time() + 30)
+        return f"CONFIRMATION REQUIRED: `{command}` — {reason}. Shall I proceed?"
+    # Tier 1 (allowed) or Tier 2 (safe_write) — execute
+    output = _run_cmd(command, cwd=_JARVIS_ROOT, timeout=30)
+    return safety.sanitize_output(output)
+
+
+@_register_devtool("confirm_pending")
+def _devtools_confirm_pending(args: dict) -> str:
+    global _pending_command
+    with _pending_lock:
+        if _pending_command is None:
+            return "No pending command to confirm."
+        command, expiry = _pending_command
+        if _time.time() > expiry:
+            _pending_command = None
+            return "That confirmation has expired. Please issue the command again."
+        _pending_command = None
+    safety = _get_safety()
+    output = _run_cmd(command, cwd=_JARVIS_ROOT, timeout=30)
+    return safety.sanitize_output(output)

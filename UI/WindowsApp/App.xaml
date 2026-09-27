@@ -1,0 +1,20 @@
+<Application x:Class="Jarvis.ControlHub.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="JarvisBackground" Color="#080C12" />
+    <SolidColorBrush x:Key="JarvisSurface" Color="#101722" />
+    <SolidColorBrush x:Key="JarvisSurfaceRaised" Color="#172230" />
+    <SolidColorBrush x:Key="JarvisBorder" Color="#253445" />
+    <SolidColorBrush x:Key="JarvisAccent" Color="#53D7C4" />
+    <SolidColorBrush x:Key="JarvisText" Color="#E5EDF5" />
+    <SolidColorBrush x:Key="JarvisMuted" Color="#91A0B2" />
+    <Style TargetType="Window">
+      <Setter Property="Background" Value="{StaticResource JarvisBackground}" />
+      <Setter Property="Foreground" Value="{StaticResource JarvisText}" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+  </Application.Resources>
+</Application>

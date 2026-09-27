@@ -1,0 +1,147 @@
+package com.jarvis.mobile.feature.start
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.jarvis.mobile.core.designsystem.JarvisSemanticColor
+import com.jarvis.mobile.core.designsystem.JarvisLayout
+import com.jarvis.mobile.core.designsystem.JarvisSpacing
+import com.jarvis.mobile.core.designsystem.component.JarvisButton
+import com.jarvis.mobile.core.designsystem.component.JarvisButtonVariant
+import com.jarvis.mobile.core.designsystem.component.JarvisListGroup
+import com.jarvis.mobile.core.designsystem.component.JarvisListRow
+import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
+import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
+import com.jarvis.mobile.core.model.SystemState
+import com.jarvis.mobile.core.model.comparisonBaseline
+
+/**
+ * Ported 1:1 from src/components/jarvis/screens/start-screen.tsx.
+ *
+ * Operational overview of JARVIS Mobile: is the local runtime usable, what
+ * blocks it, where does work execute, what is the privacy state, is Sleepy
+ * available, what is the local-first decision order. No feature management
+ * here. Every value comes from [comparisonBaseline]; nothing is measured,
+ * nothing is simulated.
+ */
+@Composable
+fun StartScreen(onOpenChat: () -> Unit, onOpenSystem: (() -> Unit)? = null) {
+    val overall = if (comparisonBaseline.runtimeBound) "Bereit" else "Lokale KI nicht verfügbar"
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        StatusSummary(headline = overall)
+
+        JarvisSectionHeader("Einrichtung")
+        JarvisListGroup {
+            JarvisListRow(
+                title = "Lokales Modell",
+                subtitle = "Lokale Modellantworten sind in dieser App-Version nicht verfügbar.",
+                trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = comparisonBaseline.labels.localModel) },
+            )
+            JarvisListRow(
+                title = "Berechtigungen",
+                subtitle = "Die benötigten Android-Zugriffe werden noch nicht vom System geprüft.",
+                trailing = { JarvisStatusTag(state = SystemState.UNAVAILABLE, label = "Status nicht verfügbar") },
+            )
+        }
+        FootNote("Modelle und Zugriffe lassen sich unter System einsehen.")
+
+        JarvisSectionHeader("Sleepy-Verbindung")
+        JarvisListGroup {
+            JarvisListRow(
+                title = "Sleepy",
+                subtitle = "Für eine Übergabe muss Sleepy zuerst sicher gekoppelt werden.",
+                trailing = { JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = "Nicht verfügbar") },
+            )
+        }
+        FootNote("Kopplung und Übergabe sind in dieser App-Version noch nicht verfügbar.")
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = JarvisSpacing.lg, vertical = JarvisSpacing.xl),
+            verticalArrangement = Arrangement.spacedBy(JarvisSpacing.sm),
+        ) {
+            JarvisButton(text = "Chat öffnen", variant = JarvisButtonVariant.PRIMARY, fullWidth = true, onClick = onOpenChat)
+            if (onOpenSystem != null) {
+                Text(
+                    text = "Zum Kontrollzentrum",
+                    color = JarvisSemanticColor.mutedForeground,
+                    fontSize = 12.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = JarvisLayout.touchTargetMin)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                        .clickable(role = Role.Button, onClick = onOpenSystem)
+                        .padding(vertical = JarvisSpacing.sm),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusSummary(headline: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(JarvisSemanticColor.surface)
+            .border(androidx.compose.foundation.BorderStroke(0.5.dp, JarvisSemanticColor.borderSoft))
+            .padding(horizontal = JarvisSpacing.lg, vertical = JarvisSpacing.lg),
+    ) {
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "J.A.R.V.I.S Mobile", color = JarvisSemanticColor.foreground, fontSize = 15.sp, lineHeight = 20.sp)
+                Text(
+                    text = headline,
+                    color = JarvisSemanticColor.subtleForeground,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.padding(top = JarvisSpacing.xs),
+                )
+            }
+            JarvisStatusTag(state = SystemState.NOT_IMPLEMENTED, label = "Nicht verfügbar")
+        }
+        Text(
+            text = "Es sind noch keine verlässlichen Laufzeit- oder Modellinformationen verfügbar.",
+            color = JarvisSemanticColor.mutedForeground,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+            modifier = Modifier.padding(top = JarvisSpacing.sm),
+        )
+    }
+}
+
+@Composable
+private fun FootNote(text: String) {
+    Text(
+        text = text,
+        color = JarvisSemanticColor.mutedForeground,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        modifier = Modifier.padding(horizontal = JarvisSpacing.lg, vertical = JarvisSpacing.sm),
+    )
+}

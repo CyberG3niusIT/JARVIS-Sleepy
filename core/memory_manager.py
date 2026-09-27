@@ -1,0 +1,2738 @@
+"""
+Conversational Memory Manager
+
+Long-term memory system for JARVIS with SQLite-backed fact store and
+real-time pattern-based extraction. Facts are extracted from user messages
+via regex patterns (explicit extraction) and stored with category, confidence,
+and provenance tracking.
+
+Phase 1: Core module + fact store + pattern extraction + CRUD.
+Phase 2: FAISS vector index for semantic search over conversation history.
+Phase 3: Semantic search + recall detection — user-facing memory queries
+         intercepted at Priority 3.5 in pipeline routing, results fed to LLM.
+Phase 4: LLM batch extraction — every N messages, Qwen extracts implicit
+         facts in a background thread. No perceptible latency.
+Phase 5: Proactive memory surfacing — relevant facts injected into LLM
+         system prompt so Qwen can weave them naturally into responses.
+         Admin-only, confidence-gated, max 1 fact per conversation window.
+Phase 6: Forgetting + transparency — user can review stored memories,
+         request targeted deletion with confirmation, and see fact summaries.
+Phase 7: Self-managing memory (MemGPT pattern) — per-turn background
+         extraction (zero latency) + recall_memory LLM tool for proactive
+         memory search. All 7 phases operational.
+
+Uses a singleton pattern (matches reminder_manager.py, news_manager.py).
+"""
+
+import json
+import re
+import sqlite3
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Optional
+
+from core.logger import get_logger
+from core.privacy_gate import get_privacy_gate, Capability
+
+
+# Singleton instance
+_instance: Optional["MemoryManager"] = None
+
+
+def get_memory_manager(config=None, conversation=None, embedding_model=None) -> Optional["MemoryManager"]:
+    """Get or create the singleton MemoryManager.
+
+    Call with all args on first invocation (from jarvis_continuous.py).
+    Call with no args from skills to retrieve the existing instance.
+    """
+    global _instance
+    if _instance is None and config is not None:
+        _instance = MemoryManager(config, conversation, embedding_model)
+    return _instance
+
+
+class MemoryManager:
+    """Long-term conversational memory with fact extraction and storage."""
+
+    # ------------------------------------------------------------------
+    # Pattern-based extraction
+    # ------------------------------------------------------------------
+
+    # Negation window: if any of these appear within N tokens before a positive
+    # preference verb, the match is stored with low confidence.
+    _NEGATION_WORDS = frozenset({
+        "not", "don't", "doesn't", "didn't", "won't", "wouldn't",
+        "can't", "cannot", "never", "no", "nor", "neither",
+    })
+    _NEGATION_WINDOW = 4  # tokens to look back
+
+    # ------------------------------------------------------------------
+    # Candidate vs. confirmed memory tiers (additive on top of the
+    # existing subject-based dedup/supersede mechanism below — see
+    # store_fact()/_find_similar_fact()).
+    #
+    # A fact starts as a "candidate" when it's below-threshold-confidence
+    # or not explicitly stated by the user (source != "explicit"). It
+    # isn't a separate table/status — is_candidate() just names the
+    # existing confidence semantics so callers (awareness surfacing,
+    # transparency responses) can ask "is this confirmed or just
+    # observed?" without re-deriving the threshold each time.
+    #
+    # Repeated evidence for the SAME candidate fact (exact content match
+    # on a later extraction) reinforces it — confidence grows and
+    # evidence_count increments — instead of silently no-op'ing or
+    # creating a duplicate row. Enough reinforcement naturally crosses
+    # CANDIDATE_CONFIDENCE_THRESHOLD and the fact stops being a
+    # candidate. This is the "promotion via repeated evidence" path;
+    # there's no separate promotion algorithm to keep in sync.
+    # ------------------------------------------------------------------
+    CANDIDATE_CONFIDENCE_THRESHOLD = 0.80
+    MAX_FACT_CONFIDENCE = 0.99
+    EVIDENCE_CONFIDENCE_STEP = 0.05
+
+    # ------------------------------------------------------------------
+    # Sensitive-topic risk gate ("Leine"/"Maulkorb"): a non-explicit
+    # (inferred/per_turn) fact touching one of these topics is capped
+    # below CANDIDATE_CONFIDENCE_THRESHOLD forever — no amount of
+    # reinforcement promotes it to "confirmed." Only the user stating it
+    # explicitly (source="explicit") can make it a confirmed fact. This
+    # is a best-effort keyword heuristic, not a real classifier —
+    # deliberately conservative, since a false positive here just keeps
+    # an innocuous fact as a permanent candidate (low cost), while a
+    # false negative could let a sensitive inference get silently
+    # promoted to confirmed truth (much higher cost).
+    # ------------------------------------------------------------------
+    _SENSITIVE_CATEGORIES = frozenset({"health"})
+    _SENSITIVE_KEYWORDS = frozenset({
+        # German
+        "krankheit", "diagnose", "depression", "angststörung", "psychisch",
+        "therapie", "medikament", "religion", "gläubig", "glaube", "kirche",
+        "politisch", "partei", "wahlkampf", "sexualität", "orientierung",
+        "schulden", "insolvenz", "pleite", "straftat", "verurteilt",
+        "verhaftet", "vorstrafe", "affäre", "schwanger",
+        # English (extraction/legacy content is still English sentences)
+        "illness", "diagnosed", "depression", "anxiety", "mental health",
+        "therapy", "medication", "religion", "religious", "political",
+        "sexuality", "orientation", "debt", "bankrupt", "bankruptcy",
+        "arrested", "convicted", "criminal record", "affair", "pregnant",
+    })
+    _SENSITIVE_CAP_CONFIDENCE = 0.75  # stays below CANDIDATE_CONFIDENCE_THRESHOLD
+
+    def _is_sensitive(self, category: str, content: str) -> bool:
+        """Best-effort check for whether a fact touches a risk-gated topic."""
+        if category in self._SENSITIVE_CATEGORIES:
+            return True
+        text = content.lower()
+        return any(kw in text for kw in self._SENSITIVE_KEYWORDS)
+
+    # ------------------------------------------------------------------
+    # Polarity ("liebe X" vs later "hasse X" must never be treated as
+    # REINFORCEMENT just because subject/value match — see
+    # _store_fact_locked). Deliberately a small, explicit keyword
+    # lexicon rather than sentiment analysis: false negatives (polarity
+    # not detected) just fall back to the pre-existing value/content
+    # comparison, which is the same behavior as before this was added —
+    # so an unrecognized phrasing never behaves worse than today.
+    # ------------------------------------------------------------------
+    _POLARITY_CATEGORIES = frozenset({"preference", "opinion"})
+    _POSITIVE_POLARITY_WORDS = frozenset({
+        # German
+        "liebe", "liebt", "liebst", "mag", "mögen", "gerne", "gern",
+        "bevorzuge", "bevorzugt", "genieße", "genießt", "toll", "super",
+        "gefällt", "gefallen",
+        # English
+        "love", "loves", "like", "likes", "enjoy", "enjoys", "prefer",
+        "prefers", "favorite", "favourite", "great", "awesome",
+    })
+    _NEGATIVE_POLARITY_WORDS = frozenset({
+        # German
+        "hasse", "hasst", "hassen", "mag nicht", "mögen nicht",
+        "nicht gern", "nicht gerne", "verabscheue", "verabscheut",
+        "schrecklich", "furchtbar", "kann nicht ausstehen",
+        # English
+        "hate", "hates", "dislike", "dislikes", "can't stand",
+        "cannot stand", "don't like", "doesn't like", "no longer likes",
+        "not anymore", "not a fan",
+    })
+
+    @classmethod
+    def _detect_polarity(cls, category: str, content: str) -> Optional[int]:
+        """Return +1 (positive sentiment), -1 (negative), or None (not
+        a polarity-bearing category, or no recognized sentiment word).
+        Longer, more specific phrases are checked before single words so
+        "mag nicht" wins over the bare "mag" it contains.
+        """
+        if category not in cls._POLARITY_CATEGORIES:
+            return None
+        text = f" {content.lower()} "
+        negative_hits = [w for w in cls._NEGATIVE_POLARITY_WORDS if f" {w} " in text or text.strip().startswith(w)]
+        if negative_hits:
+            return -1
+        positive_hits = [w for w in cls._POSITIVE_POLARITY_WORDS if f" {w} " in text]
+        if positive_hits:
+            # A standalone negation elsewhere in the sentence flips a
+            # positive word ("Alex mag Pizza nicht" — "mag" and "nicht"
+            # aren't adjacent, so the phrase-level negative lexicon
+            # above doesn't catch it, but the sentence is still negative).
+            standalone_negations = {"nicht", "kein", "keine", "not", "n't"}
+            if any(f" {n} " in text for n in standalone_negations):
+                return -1
+            return 1
+        return None
+
+    EXPLICIT_PATTERNS = [
+        # Preferences (positive)
+        (re.compile(r"\b(?:i|I) (?:really )?(?:prefer|like|love|enjoy|always use|always go with)\s+(.+)", re.IGNORECASE), "preference"),
+        (re.compile(r"\bmy (?:favorite|favourite)\s+(\w+)\s+is\s+(.+)", re.IGNORECASE), "preference"),
+        # Preferences (negative)
+        (re.compile(r"\b(?:i|I) (?:don't|do not|hate|dislike|can't stand|never use)\s+(.+)", re.IGNORECASE), "preference"),
+        # Relationships
+        (re.compile(r"\bmy (\w+(?:'s)?)\s+name is\s+(\w+)", re.IGNORECASE), "relationship"),
+        (re.compile(r"\bmy (\w+)\s+is\s+(?:called|named)\s+(\w+)", re.IGNORECASE), "relationship"),
+        # Work
+        (re.compile(r"\b(?:i|I) (?:work|am employed)\s+(?:at|for)\s+(.+)", re.IGNORECASE), "work"),
+        (re.compile(r"\bmy (?:job|role|title|position) is\s+(.+)", re.IGNORECASE), "work"),
+        # Location
+        (re.compile(r"\b(?:i|I) live (?:in|at|on)\s+(.+)", re.IGNORECASE), "location"),
+        # Health
+        (re.compile(r"\b(?:i|I)(?:'m| am| have)\s+(?:allergic to|intolerant of)\s+(.+)", re.IGNORECASE), "health"),
+        # Catch-all: explicit memory requests — MUST BE LAST so specific patterns
+        # above match first (e.g., "remember that my favorite X is Y" hits preference
+        # before this generic catch-all fires)
+        (re.compile(r"(?<!\byou )(?:remember|don't forget|keep in mind)\s+that\s+(.+)", re.IGNORECASE), "general"),
+    ]
+
+    @classmethod
+    def _has_negation_window(cls, text: str, match_start: int) -> bool:
+        """Check if a negation word appears within N tokens before match_start."""
+        prefix = text[:match_start].lower().split()
+        window = prefix[-cls._NEGATION_WINDOW:]
+        return bool(cls._NEGATION_WORDS & set(window))
+
+    def __init__(self, config, conversation, embedding_model=None):
+        self.config = config
+        self.conversation = conversation
+        self.embedding_model = embedding_model  # nomic-embed-text-v1.5, shared from skill_manager
+
+        self.logger = get_logger(__name__, config)
+
+        # Paths
+        self.db_path = Path(config.get("conversational_memory.db_path",
+            "/home/alex/jarvis-data/data/memory.db"))
+        self.faiss_index_path = Path(config.get("conversational_memory.faiss_index_path",
+            "/home/alex/jarvis-data/data/memory_faiss"))
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Batch extraction config (Phase 4)
+        self.batch_interval = config.get("conversational_memory.batch_extraction_interval", 25)
+
+        # Proactive surfacing config (Phase 5)
+        self.proactive_enabled = config.get("conversational_memory.proactive_surfacing", True)
+        self.proactive_threshold = config.get("conversational_memory.proactive_confidence_threshold", 0.45)
+
+        # Autonomy budget (session #6) — bounds on unattended memory
+        # growth. Counters are scoped to this MemoryManager instance's
+        # lifetime, which in practice is one jarvis_continuous.py process
+        # run — there is no shorter "session" boundary in the existing
+        # architecture to reset them against, and inventing one wasn't
+        # judged worth the added complexity for what these bounds are
+        # for (a runaway extraction loop, not fine-grained per-
+        # conversation limits).
+        self.max_new_candidates = config.get(
+            "conversational_memory.autonomy_budget.max_new_candidates", 500)
+        self.max_consolidation_runs = config.get(
+            "conversational_memory.autonomy_budget.max_consolidation_runs", 50)
+        self.decay_days = config.get(
+            "conversational_memory.autonomy_budget.decay_days", 14)
+        self.consolidation_interval_candidates = config.get(
+            "conversational_memory.autonomy_budget.consolidation_interval_candidates", 50)
+        self._new_candidates_created = 0
+        self._consolidation_runs = 0
+        self._last_consolidation_at = 0.0
+
+        # Thread safety
+        # RLock, not Lock: store_fact() wraps its whole read-decide-write
+        # sequence in one acquisition (fixes a TOCTOU race — see its
+        # docstring) but calls _find_similar_fact()/update_fact(), which
+        # each also acquire this same lock internally. A plain Lock would
+        # self-deadlock on that nested acquisition.
+        self._db_lock = threading.RLock()
+        self._privacy_gate = get_privacy_gate(config)
+        self._message_count_since_batch = 0
+        self._surfaced_this_window = set()  # fact_ids surfaced in current conversation window
+        self._pending_forget = None  # Phase 6: pending forget confirmation
+        self._last_recalled_fact_ids: list[int] = []  # Track recalled facts for broad forget
+        self.last_extracted = []  # Facts extracted from most recent user message
+
+        # Per-turn extraction state (Phase 7 — MemGPT store)
+        self._per_turn_in_progress = False
+        self._last_user_message = None
+
+        # FAISS index state (Phase 2)
+        self.faiss_index = None
+        self.faiss_metadata = []
+        self._faiss_dirty = 0  # messages since last persist
+
+        self._init_db()
+        self._init_faiss()
+        self.cleanup_old_interactions()
+        self.logger.info(
+            f"MemoryManager initialized (Phase 7: facts + FAISS + recall + batch + proactive + forget/transparency + per-turn "
+            f"[{self.faiss_index.ntotal if self.faiss_index else 0} vectors, "
+            f"batch every {self.batch_interval} msgs, "
+            f"proactive={'on' if self.proactive_enabled else 'off'} "
+            f"threshold={self.proactive_threshold}])"
+        )
+
+    # ------------------------------------------------------------------
+    # Database
+    # ------------------------------------------------------------------
+
+    def _init_db(self):
+        """Create the facts table and indexes if they don't exist."""
+        with self._db_lock:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS facts (
+                        fact_id         TEXT PRIMARY KEY,
+                        user_id         TEXT NOT NULL DEFAULT 'user',
+                        category        TEXT NOT NULL,
+                        subject         TEXT NOT NULL,
+                        content         TEXT NOT NULL,
+                        source          TEXT NOT NULL,
+                        confidence      REAL NOT NULL DEFAULT 0.90,
+                        source_messages TEXT,
+                        created_at      REAL NOT NULL,
+                        last_referenced REAL NOT NULL,
+                        times_referenced INTEGER NOT NULL DEFAULT 0,
+                        superseded_by   TEXT,
+                        deleted         INTEGER NOT NULL DEFAULT 0
+                    )
+                """)
+
+                # Migrations: evidence_count and value weren't in the
+                # original schema. Idempotent — SQLite has no
+                # "ADD COLUMN IF NOT EXISTS".
+                try:
+                    conn.execute(
+                        "ALTER TABLE facts ADD COLUMN evidence_count "
+                        "INTEGER NOT NULL DEFAULT 1"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+                try:
+                    conn.execute("ALTER TABLE facts ADD COLUMN value TEXT")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+                try:
+                    # Polarity: -1 (negative sentiment/negated), 0 (neutral),
+                    # +1 (positive sentiment). NULL for facts with no
+                    # detectable polarity (most categories) — see
+                    # _detect_polarity(). Legacy rows read back as NULL,
+                    # which compares as "no opinion" rather than as a
+                    # false 0, so old facts remain fully readable and
+                    # simply never trigger the reversal check below.
+                    conn.execute("ALTER TABLE facts ADD COLUMN polarity INTEGER")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+                try:
+                    # Decay (see run_decay_pass()): a low-evidence,
+                    # never-reinforced candidate older than
+                    # conversational_memory.autonomy_budget.decay_days
+                    # gets archived = 1. Archived facts are excluded
+                    # from every active-fact query (get_facts(),
+                    # _find_similar_fact(), etc. — see the blanket
+                    # "AND archived = 0" added to each) but the rows
+                    # are kept, not hard-deleted, so decay stays
+                    # auditable/testable. Never applied to explicit
+                    # facts or anything with evidence_count > 1 — see
+                    # run_decay_pass()'s docstring for the exact rule.
+                    conn.execute(
+                        "ALTER TABLE facts ADD COLUMN archived "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+                try:
+                    # A conflicting inferred/per-turn fact that lost to an
+                    # active explicit fact (see _store_fact_locked's
+                    # "explicit wins" branch) is stored with this set to 1.
+                    # It stays fully visible via get_facts()/etc., but
+                    # _find_similar_fact() excludes it from the dedup/
+                    # reinforcement matching pool — without this, a
+                    # SECOND matching inferred observation would find the
+                    # conflicting candidate itself (as the most recent
+                    # active row for that subject+category) instead of
+                    # the explicit fact, and REINFORCE it, letting a
+                    # contradicted inference climb past the explicit
+                    # fact's own confidence purely through repetition.
+                    # Reproduced and confirmed this session before this
+                    # fix: confidence 0.70 -> 0.99 in 7 reinforcements.
+                    conn.execute(
+                        "ALTER TABLE facts ADD COLUMN excluded_from_matching "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(user_id, category)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(user_id, subject)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_deleted ON facts(deleted)")
+
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS extraction_state (
+                        key   TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    )
+                """)
+
+                # Interaction log — persist significant interactions for
+                # cross-session awareness (research, tool calls, doc gen, skills)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS interaction_log (
+                        interaction_id  TEXT PRIMARY KEY,
+                        user_id         TEXT NOT NULL DEFAULT 'user',
+                        type            TEXT NOT NULL,
+                        query           TEXT NOT NULL,
+                        detail          TEXT,
+                        answer_summary  TEXT NOT NULL,
+                        metadata_json   TEXT,
+                        created_at      REAL NOT NULL,
+                        embedding       BLOB
+                    )
+                """)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_interaction_user "
+                    "ON interaction_log(user_id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_interaction_time "
+                    "ON interaction_log(created_at DESC)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_interaction_type "
+                    "ON interaction_log(type)"
+                )
+
+                conn.commit()
+            finally:
+                conn.close()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Get a new SQLite connection with row_factory set."""
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    # ------------------------------------------------------------------
+    # FAISS vector index (Phase 2)
+    # ------------------------------------------------------------------
+
+    def _get_embedding_dim(self) -> int:
+        """Get the embedding dimension from the loaded model."""
+        dim = self.embedding_model.get_sentence_embedding_dimension()
+        return dim if dim else 768
+
+    def _init_faiss(self):
+        """Load or create FAISS index for semantic search over history."""
+        if not self.embedding_model:
+            self.logger.info("No embedding model provided — FAISS indexing disabled")
+            return
+
+        try:
+            import faiss
+            import numpy as np
+        except ImportError:
+            self.logger.warning("faiss-cpu not installed — FAISS indexing disabled")
+            return
+
+        embed_dim = self._get_embedding_dim()
+        self.faiss_index_path.mkdir(parents=True, exist_ok=True)
+        index_file = self.faiss_index_path / "default.index"
+        meta_file = self.faiss_index_path / "default_meta.jsonl"
+
+        if index_file.exists():
+            self.faiss_index = faiss.read_index(str(index_file))
+            self._load_faiss_metadata(meta_file)
+
+            # Detect embedding model dimension change (e.g. MiniLM 384 → nomic 768)
+            if self.faiss_index.d != embed_dim:
+                self.logger.warning(
+                    f"⚠️ FAISS dimension mismatch: index={self.faiss_index.d}, "
+                    f"model={embed_dim}. Discarding old index — backfill will rebuild."
+                )
+                self.faiss_index = faiss.IndexFlatIP(embed_dim)
+                self.faiss_metadata = []
+                self._save_faiss_index()
+                return
+
+            # Validate index/metadata consistency — a past crash during
+            # non-atomic save could leave them out of sync.
+            n_vectors = self.faiss_index.ntotal
+            n_meta = len(self.faiss_metadata)
+            if n_vectors != n_meta:
+                min_count = min(n_vectors, n_meta)
+                self.logger.warning(
+                    f"⚠️ FAISS desync detected: {n_vectors} vectors vs {n_meta} metadata. "
+                    f"Truncating to {min_count} to restore consistency."
+                )
+                if n_meta > n_vectors:
+                    self.faiss_metadata = self.faiss_metadata[:n_vectors]
+                elif n_vectors > n_meta:
+                    # Rebuild index with only the vectors that have metadata.
+                    # FAISS IndexFlatIP doesn't support remove_ids, so rebuild.
+                    import numpy as np
+                    old_index = self.faiss_index
+                    self.faiss_index = faiss.IndexFlatIP(embed_dim)
+                    if n_meta > 0:
+                        vectors = faiss.rev_swig_ptr(old_index.get_xb(), n_vectors * embed_dim)
+                        vectors = np.array(vectors, dtype=np.float32).reshape(n_vectors, embed_dim)
+                        self.faiss_index.add(vectors[:n_meta])
+                # Persist the corrected state
+                self._save_faiss_index()
+
+            self.logger.info(
+                f"Loaded FAISS index: {self.faiss_index.ntotal} vectors, "
+                f"{len(self.faiss_metadata)} metadata entries"
+            )
+            # Clean up stale temp files from interrupted saves
+            for tmp_name in ("default.index.tmp", "default_meta.jsonl.tmp"):
+                tmp_file = self.faiss_index_path / tmp_name
+                if tmp_file.exists():
+                    tmp_file.unlink()
+                    self.logger.debug(f"Cleaned up stale temp file: {tmp_name}")
+        else:
+            self.faiss_index = faiss.IndexFlatIP(embed_dim)
+            self.faiss_metadata = []
+            self.logger.info(f"Created new FAISS index ({embed_dim}-dim, inner product)")
+
+    def _load_faiss_metadata(self, meta_file: Path):
+        """Load FAISS metadata from JSONL file."""
+        self.faiss_metadata = []
+        if not meta_file.exists():
+            return
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        self.faiss_metadata.append(json.loads(line))
+        except Exception as e:
+            self.logger.error(f"Failed to load FAISS metadata: {e}")
+
+    def _save_faiss_index(self):
+        """Persist FAISS index + metadata to disk atomically.
+
+        Writes both files to temporary paths first, then renames them into
+        place.  os.replace() is atomic on Linux, so a crash mid-save leaves
+        the previous good copy intact instead of a half-written file.
+        """
+        if self.faiss_index is None:
+            return
+        try:
+            import faiss
+            import os
+
+            index_path = self.faiss_index_path / "default.index"
+            meta_path = self.faiss_index_path / "default_meta.jsonl"
+            tmp_index = self.faiss_index_path / "default.index.tmp"
+            tmp_meta = self.faiss_index_path / "default_meta.jsonl.tmp"
+
+            # Write to temp files first
+            faiss.write_index(self.faiss_index, str(tmp_index))
+            with open(tmp_meta, "w", encoding="utf-8") as f:
+                for entry in self.faiss_metadata:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+            # Atomic rename — old files replaced only after new ones are complete
+            os.replace(str(tmp_index), str(index_path))
+            os.replace(str(tmp_meta), str(meta_path))
+
+            self._faiss_dirty = 0
+        except Exception as e:
+            self.logger.error(f"Failed to save FAISS index: {e}")
+            # Clean up temp files on failure
+            for tmp in (tmp_index, tmp_meta):
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def index_message(self, message: dict):
+        """Embed and add a single message to FAISS index. ~1-2ms."""
+        if not self._privacy_gate.allow(Capability.EMBEDDING_GENERATE):
+            return
+        if self.faiss_index is None or not self.embedding_model:
+            return
+
+        content = message.get("content", "")
+        if len(content.strip()) < 10:
+            return
+
+        try:
+            import numpy as np
+            embedding = self.embedding_model.encode(content, normalize_embeddings=True, show_progress_bar=False)
+            self.faiss_index.add(np.array([embedding], dtype=np.float32))
+            self.faiss_metadata.append({
+                "timestamp": message.get("timestamp") or time.time(),
+                "role": message.get("role", "user"),
+                "content": content[:500],
+                "user_id": message.get("user_id") or "primary_user",
+            })
+
+            self._faiss_dirty += 1
+            if self._faiss_dirty >= 50:
+                self._save_faiss_index()
+        except Exception as e:
+            self.logger.warning(f"FAISS index_message failed (non-fatal): {e}")
+
+    def backfill_history(self):
+        """One-time: embed all existing chat_history.jsonl messages into FAISS."""
+        if self.faiss_index is None or not self.embedding_model:
+            self.logger.error("Cannot backfill: FAISS or embedding model not available")
+            return 0
+
+        if not self.conversation:
+            self.logger.error("Cannot backfill: no conversation manager")
+            return 0
+
+        messages = self.conversation.load_full_history()
+        if not messages:
+            self.logger.info("No history to backfill")
+            return 0
+
+        # Filter to messages with enough content
+        eligible = [m for m in messages if len(m.get("content", "").strip()) >= 10]
+        self.logger.info(f"Backfilling {len(eligible)} messages into FAISS index...")
+
+        try:
+            import numpy as np
+            texts = [m["content"][:500] for m in eligible]
+
+            # Batch encode for efficiency
+            embeddings = self.embedding_model.encode(
+                texts, normalize_embeddings=True,
+                batch_size=64, show_progress_bar=False
+            )
+
+            self.faiss_index.add(np.array(embeddings, dtype=np.float32))
+
+            for m in eligible:
+                self.faiss_metadata.append({
+                    "timestamp": m.get("timestamp") or 0,
+                    "role": m.get("role", "user"),
+                    "content": m["content"][:500],
+                    "user_id": m.get("user_id") or "primary_user",
+                })
+
+            self._save_faiss_index()
+            self.logger.info(f"Backfill complete: {len(eligible)} messages indexed "
+                             f"(FAISS total: {self.faiss_index.ntotal})")
+            return len(eligible)
+
+        except Exception as e:
+            self.logger.error(f"Backfill failed: {e}")
+            return 0
+
+    def save(self):
+        """Persist any dirty state (FAISS index) to disk. Call on shutdown."""
+        if self._faiss_dirty > 0:
+            self._save_faiss_index()
+            self.logger.info(f"Saved FAISS index ({self.faiss_index.ntotal} vectors)")
+
+    # ------------------------------------------------------------------
+    # Semantic search (Phase 3)
+    # ------------------------------------------------------------------
+
+    def search_history(self, query: str, user_id: str = "primary_user", top_k: int = 8) -> list[dict]:
+        """Semantic search over FAISS index. Returns top-K matching messages with scores."""
+        if not self.embedding_model or not self.faiss_index or self.faiss_index.ntotal == 0:
+            return []
+
+        try:
+            import numpy as np
+            self.logger.debug("FAISS search: query=%.60s top_k=%d index_size=%d",
+                              query, top_k, self.faiss_index.ntotal)
+            query_embedding = self.embedding_model.encode(query, normalize_embeddings=True, show_progress_bar=False)
+            scores, indices = self.faiss_index.search(
+                np.array([query_embedding], dtype=np.float32), top_k
+            )
+
+            results = []
+            for score, idx in zip(scores[0], indices[0]):
+                if idx < 0 or idx >= len(self.faiss_metadata):
+                    continue
+                meta = self.faiss_metadata[idx]
+                if user_id and meta.get("user_id") not in (user_id, None):
+                    continue  # Per-user filtering
+                results.append({**meta, "score": float(score)})
+
+            self.logger.debug("FAISS search: %d results", len(results))
+            return results
+        except Exception as e:
+            self.logger.error(f"search_history failed: {e}")
+            return []
+
+    def search_combined(self, query: str, user_id: str = "primary_user") -> dict:
+        """Search both fact store and FAISS history. Returns unified results."""
+        facts = self.search_facts_text(query, user_id)
+        history = self.search_history(query, user_id)
+        return {"facts": facts, "history": history}
+
+    def format_recall_context(self, results: dict) -> dict:
+        """Format search results into natural context for LLM response generation.
+
+        Returns dict with 'context' (str for LLM) and 'artifact_ids' (list
+        of cold-tier artifact IDs for rehydration by the router).
+        """
+        from datetime import datetime
+        lines = []
+        if results.get("facts"):
+            lines.append("Facts about the user:")
+            for f in results["facts"][:5]:
+                phrase = self._fact_to_phrase(f) or f['content']
+                lines.append(f"  - {phrase} (confidence: {f['confidence']:.0%})")
+        if results.get("history"):
+            lines.append("Relevant past conversations:")
+            for h in results["history"][:5]:
+                ts = datetime.fromtimestamp(h["timestamp"]).strftime("%b %d, %I:%M %p")
+                lines.append(f"  [{ts}] {h['role'].upper()}: {h['content'][:200]}")
+        if results.get("interactions"):
+            lines.append("Relevant past sessions:")
+            for ix in results["interactions"][:5]:
+                ts = datetime.fromtimestamp(ix["created_at"]).strftime("%b %d, %I:%M %p")
+                summary = ix.get("answer_summary", "")[:200]
+                ix_type = ix.get("type", "interaction")
+                meta = json.loads(ix.get("metadata_json") or "{}")
+                artifact_count = meta.get("artifact_count", 0)
+                suffix = f" ({artifact_count} artifact{'s' if artifact_count != 1 else ''})" if artifact_count else ""
+                lines.append(f"  [{ts}] {ix_type}: {summary}{suffix}")
+        return {
+            "context": "\n".join(lines),
+            "artifact_ids": results.get("artifact_ids", []),
+        }
+
+    # ------------------------------------------------------------------
+    # Recall detection (Phase 3)
+    # ------------------------------------------------------------------
+
+    RECALL_PATTERNS = [
+        r"(?:do you |can you )?remember (?:when|that time|the time)",
+        r"what did (?:i|we) (?:say|talk|discuss|mention) about",
+        r"have (?:we|i) (?:ever )?(?:talked|discussed|spoken)\b",
+        r"did i (?:ever )?(?:mention|tell you|say)\b",
+        r"what (?:was|were) (?:that|those) (?:thing|things?) about",
+        r"when did (?:we|i) (?:last )?(?:discuss|talk about)",
+        r"(?:do you |can you )?recall",
+        r"last time i (?:asked|mentioned|said|talked) about",
+        r"what do you (?:know|remember) about",
+        # Phase 5: artifact-specific cross-session patterns
+        r"what did (?:we|i|you) (?:look up|search|research|find)\b",
+        r"(?:that|the) .+? from (?:yesterday|last (?:week|time|session))",
+        r"(?:pull up|bring up|show me) (?:that|the|those) .+? (?:from|we)",
+        r"what (?:were|was) (?:that|those) (?:results?|recipe|article|search)",
+        # German — this is the primary active language (see docs/ARCHITECTURE.md
+        # §5a); English patterns kept above as a fallback.
+        r"erinnerst du dich (?:noch )?an",
+        r"was (?:hatten wir|haben wir) über .+? (?:besprochen|geredet|gesprochen)",
+        r"was (?:weißt|wusstest) du (?:noch |eigentlich )?über",
+        r"haben wir (?:schon )?(?:mal )?(?:über|von) .+? (?:gesprochen|geredet|geplaudert)",
+        r"was habe ich (?:dir )?(?:mal |schon )?über .+? (?:gesagt|erzählt)",
+        r"wann haben wir (?:zuletzt |das letzte mal )?über .+? gesprochen",
+    ]
+
+    FACT_REQUEST_PATTERNS = [
+        r"^(?:remember|don't forget|keep in mind)\s+that\s+",
+        r"^(?:remember|don't forget|keep in mind)\s+my\s+",
+        r"^(?:remember|don't forget|keep in mind)\s+i\s+",
+        # German
+        r"^(?:merke dir|denk daran|vergiss nicht)\s*,?\s*(?:dass\s+)?",
+        r"^(?:merke dir|denk daran|vergiss nicht)\s+mein(?:e|en|em)?\s+",
+    ]
+
+    # Phrases that look like "remember X" but aren't fact storage requests
+    _FACT_REQUEST_EXCLUSIONS = re.compile(
+        r"^(?:remember|don't forget|keep in mind)\s+my\s+face\b", re.I)
+
+    def is_fact_request(self, text: str) -> bool:
+        """Detect if user is telling JARVIS to remember a fact."""
+        text_lower = text.lower().strip()
+        if self._FACT_REQUEST_EXCLUSIONS.search(text_lower):
+            return False
+        return any(re.search(p, text_lower) for p in self.FACT_REQUEST_PATTERNS)
+
+    def is_recall_query(self, text: str) -> bool:
+        """Detect if user is asking a memory recall question."""
+        text_lower = text.lower().strip()
+        return any(re.search(p, text_lower) for p in self.RECALL_PATTERNS)
+
+    def handle_recall(self, query: str, user_id: str = "primary_user") -> Optional[dict]:
+        """Handle a recall-type query.
+
+        Returns dict with 'context' (str for LLM) and 'artifact_ids'
+        (list of cold-tier artifact IDs for rehydration), or None.
+        """
+        search_topic = self._extract_recall_topic(query)
+        results = self.search_combined(search_topic, user_id)
+
+        # Also search interaction_log (session summaries, tool interactions)
+        interactions = self.recall_interactions(
+            search_topic, top_k=3, days=30, user_id=user_id,
+        )
+        # Extract artifact IDs from session summaries for rehydration
+        artifact_ids = []
+        for ix in interactions:
+            if ix.get("type") == "session_summary":
+                meta = json.loads(ix.get("metadata_json") or "{}")
+                artifact_ids.extend(meta.get("artifact_ids", []))
+
+        results["interactions"] = interactions
+        results["artifact_ids"] = artifact_ids
+
+        if not results["facts"] and not results["history"] and not interactions:
+            return None  # Let LLM handle with "I don't have any record of that"
+
+        # Accumulate recalled fact IDs for broad forget ("forget all of that").
+        # Threshold filters junk; accumulation preserves earlier recalls.
+        _FORGET_SCORE_THRESHOLD = 0.45
+        if results["facts"]:
+            _new_ids = [
+                f["fact_id"] for f in results["facts"]
+                if "fact_id" in f
+                and f.get("score", 1.0) >= _FORGET_SCORE_THRESHOLD
+            ]
+            _existing = set(self._last_recalled_fact_ids)
+            self._last_recalled_fact_ids.extend(
+                fid for fid in _new_ids if fid not in _existing
+            )
+
+        return self.format_recall_context(results)
+
+    def _extract_recall_topic(self, query: str) -> str:
+        """Strip recall framing to get the search topic.
+
+        'what did I say about Docker?' → 'Docker'
+        'remember when we talked about the network migration?' → 'network migration'
+        'do you know anything about my coffee preferences?' → 'coffee preferences'
+        """
+        text = query.strip()
+
+        # Strip common recall prefixes via ordered regexes
+        strip_patterns = [
+            r"^(?:do you |can you )?(?:remember|recall)\s+(?:when\s+)?(?:we\s+|I\s+)?(?:talked|discussed|spoke|said|mentioned)?\s*(?:about\s+)?",
+            r"^what did (?:I|we) (?:say|talk|discuss|mention) about\s+",
+            # Phase 5: artifact-specific strip patterns
+            r"^what did (?:we|I|you) (?:look up|search for|research|find out about)\s+",
+            r"^(?:pull up|bring up|show me)\s+(?:that|the|those)\s+",
+            r"^what (?:were|was) (?:that|those) (?:results?|recipe|article|search)\s+(?:about|for|on)\s+",
+            r"^have (?:we|I) (?:ever )?(?:talked|discussed|spoken) about\s+",
+            r"^did I (?:ever )?(?:mention|tell you|say)\s+(?:anything\s+)?(?:about\s+)?",
+            r"^what (?:was|were) (?:that|those) (?:thing|things?) about\s+",
+            r"^when did (?:we|I) (?:last )?(?:discuss|talk about)\s+",
+            r"^last time I (?:asked|mentioned|said|talked) about\s+",
+            r"^what do you (?:know|remember) about\s+",
+            # German — primary active language; English kept above as fallback.
+            r"^erinnerst du dich (?:noch )?an\s+",
+            r"^was (?:hatten wir|haben wir) über\s+",
+            r"^was (?:weißt|wusstest) du (?:noch |eigentlich )?über\s+",
+            r"^haben wir (?:schon )?(?:mal )?(?:über|von)\s+",
+            r"^was habe ich (?:dir )?(?:mal |schon )?über\s+",
+            r"^wann haben wir (?:zuletzt |das letzte mal )?über\s+",
+        ]
+        for pattern in strip_patterns:
+            result = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+            if result and result != text:
+                text = result
+                break
+
+        # Strip trailing question mark and common suffixes
+        text = re.sub(r"\?$", "", text).strip()
+        text = re.sub(r"\s+(?:again|exactly|specifically)$", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(
+            r"\s+(?:besprochen|geredet|gesprochen|gesagt|erzählt|erwähnt)$",
+            "", text, flags=re.IGNORECASE,
+        ).strip()
+
+        # If stripping failed and we still have the full query, use it as-is
+        # (FAISS semantic search handles noisy queries well)
+        return text if text else query.strip().rstrip("?")
+
+    # ------------------------------------------------------------------
+    # Forgetting + transparency (Phase 6)
+    # ------------------------------------------------------------------
+
+    FORGET_PATTERNS = [
+        # Negative lookbehind (?<!don't )(?<!do not ) throughout: "don't
+        # forget that X" / "do not forget the Y" is a FACT_REQUEST (the
+        # opposite meaning — remember it), not a forget request. Mirrors
+        # the German patterns' (?!\s+nicht) exclusion below.
+        r"(?<!don't )(?<!do not )(?:forget|delete|remove|erase) (?:what (?:i|you) (?:said|know) about|everything about|the fact about)\s+(.+)",
+        r"(?<!don't )(?<!do not )forget (?:that|the) (.+)",
+        r"(?:don't|do not) remember (.+?) (?:anymore|any more|any longer)",
+        # Broad / contextual forget — "forget all of that", "forget everything",
+        # "delete it all", "erase all that".  Capture group is intentionally
+        # non-empty so _extract_forget_topic can detect the vague reference.
+        r"(?:forget|delete|remove|erase) (all(?: of)? (?:that|this|it|them)|it all|everything)",
+        # German — primary active language; English kept above as fallback.
+        # Negative lookahead (?!\s+nicht) throughout: "vergiss nicht, dass..."
+        # means the opposite (a FACT_REQUEST, not a forget) and must not
+        # match here.
+        r"(?:vergiss|lösch(?:e)?|entferne)(?!\s+nicht)\s+(?:die erinnerung an|alles über|was (?:ich|du) über)\s+(.+)",
+        r"(?:vergiss|lösch(?:e)?|entferne)(?!\s+nicht)\s+(?:das über|die tatsache über)\s+(.+)",
+        r"das (?:mit|über) (.+?) (?:kannst du|sollst du) (?:wieder )?vergessen",
+        r"(?:vergiss|lösch(?:e)?|entferne)(?!\s+nicht)\s+(alles(?: davon)?|das alles|es alles)",
+    ]
+
+    # Vague topics that signal "forget whatever we just discussed"
+    _BROAD_FORGET_TOPICS = frozenset({
+        "all of that", "all of this", "all of it", "all of them",
+        "all that", "all this", "all it", "all them",
+        "it all", "everything",
+        # German
+        "alles", "alles davon", "das alles", "es alles",
+    })
+
+    TRANSPARENCY_PATTERNS = [
+        r"what do you (?:know|remember) about me",
+        r"what (?:facts|memories|information) do you have",
+        r"show me (?:my|what you) (?:know|remember|stored)",
+        r"what have you learned about me",
+        r"tell me (?:everything |all (?:that )?)?you (?:know|remember) about me",
+        # German — primary active language; English kept above as fallback.
+        r"was weißt du (?:eigentlich |denn )?über mich",
+        r"was (?:für )?(?:fakten|erinnerungen|informationen) hast du (?:über mich|gespeichert)",
+        r"was hast du (?:so )?über mich (?:gelernt|gespeichert|herausgefunden)",
+        r"zeig mir,? was du (?:über mich )?(?:weißt|gespeichert hast)",
+        r"welche vermutungen hast du (?:so )?über mich",
+        r"erzähl mir,? was du über mich weißt",
+    ]
+
+    WHY_PATTERNS = [
+        # German — primary active language.
+        r"warum (?:glaubst|denkst|meinst) du,? (?:dass\s+)?(.+)",
+        r"woher weißt du,? (?:dass\s+)?(.+)",
+        r"wie kommst du darauf,? (?:dass\s+)?(.+)",
+        # English fallback
+        r"why do you (?:think|believe) (?:that\s+)?(.+)",
+        r"how do you know (?:that\s+)?(.+)",
+    ]
+
+    def is_why_query(self, text: str) -> bool:
+        """Detect a provenance question ("why do you believe X?")."""
+        return any(re.search(p, text.lower()) for p in self.WHY_PATTERNS)
+
+    def handle_why(self, query: str, user_id: str = "primary_user") -> str:
+        """Explain provenance/confidence for the best-matching fact about
+        a topic — the "Warum glaube ich das?" transparency requirement
+        (§8/§41). Distinguishes an explicit user statement from a
+        system observation, and names how many times an inference was
+        reinforced rather than presenting it with false authority."""
+        from core.honorific import get_honorific
+        h = get_honorific()
+
+        _TOPIC_STOPWORDS = frozenset({
+            "ich", "du", "er", "sie", "wir", "es", "das", "dass",
+            "mag", "mögen", "benutze", "benutzt", "nutze", "nutzt",
+            "habe", "bin", "verwende", "verwendet", "i", "you", "it",
+        })
+
+        topic = None
+        for pattern in self.WHY_PATTERNS:
+            m = re.search(pattern, query.lower())
+            if m and m.groups():
+                raw_topic = m.group(1).strip().rstrip(".,!?;:")
+                # Strip pronouns/verbs so "ich VS Code mag" -> "VS Code" —
+                # search_facts_text() is a plain substring match, not
+                # semantic, so a clean topic matters here without an
+                # embedding model to fall back on.
+                words = [w for w in raw_topic.split()
+                         if w.strip(".,!?;:").lower() not in _TOPIC_STOPWORDS]
+                topic = " ".join(words) if words else raw_topic
+                break
+        if not topic:
+            return f"Wozu genau, {h}? Nennen Sie mir bitte noch einmal das Thema."
+
+        matches = self.search_facts_text(topic, user_id)
+        if not matches and self.embedding_model:
+            matches = [
+                f for f in self._search_facts_semantic(topic, user_id, top_k=3)
+                if f.get("score", 0) >= 0.45
+            ]
+        if not matches:
+            return f"Dazu habe ich keine gespeicherte Grundlage, {h}."
+
+        fact = matches[0]
+        phrase = self.render_fact_de(fact)
+        if fact.get("source") == "explicit":
+            return f"Das haben Sie mir selbst so gesagt, {h}: {phrase}."
+
+        evidence = fact.get("evidence_count") or 1
+        if evidence > 1:
+            return (
+                f"Das ist eine Vermutung, {h} — ich habe es {evidence} Mal "
+                f"beobachtet: {phrase}. Bestätigt haben Sie es mir nicht."
+            )
+        return (
+            f"Das ist nur eine einmalige Beobachtung, {h}, keine bestätigte "
+            f"Tatsache: {phrase}."
+        )
+
+    def is_forget_request(self, text: str) -> bool:
+        """Detect if user is requesting memory deletion."""
+        return any(re.search(p, text.lower()) for p in self.FORGET_PATTERNS)
+
+    def is_transparency_request(self, text: str) -> bool:
+        """Detect if user is asking what JARVIS knows about them."""
+        return any(re.search(p, text.lower()) for p in self.TRANSPARENCY_PATTERNS)
+
+    def handle_forget(self, query: str, user_id: str = "primary_user") -> str:
+        """Find matching facts and prepare deletion preview with confirmation."""
+        from core.honorific import get_honorific
+
+        topic = self._extract_forget_topic(query)
+
+        # Broad / contextual forget — "forget all of that", "forget everything"
+        # Use recently recalled fact IDs (exact match to "what we just discussed").
+        if topic.lower().strip().rstrip(".,!?;:") in self._BROAD_FORGET_TOPICS:
+            if self._last_recalled_fact_ids:
+                # Fetch the exact facts that were recalled in this conversation
+                matching_facts = []
+                for fid in self._last_recalled_fact_ids:
+                    fact = self.get_fact_by_id(fid, user_id)
+                    if fact:
+                        matching_facts.append(fact)
+            else:
+                # No recent recalls — ask for clarification instead of dumping everything
+                return (f"Ich bin nicht sicher, was ich vergessen soll, {get_honorific()}. "
+                        f"Können Sie genauer sagen, welche Erinnerung gemeint ist?")
+        else:
+            matching_facts = self.search_facts_text(topic, user_id)
+
+            # Also try semantic search if text search found nothing
+            if not matching_facts and self.embedding_model:
+                semantic = self._search_facts_semantic(topic, user_id, top_k=5)
+                matching_facts = [f for f in semantic if f.get("score", 0) >= 0.5]
+
+        if not matching_facts:
+            return f"Dazu habe ich nichts gespeichert, {get_honorific()}."
+
+        # Store pending deletion for confirmation
+        self._pending_forget = {
+            "facts": matching_facts,
+            "user_id": user_id,
+            "expires": time.time() + 30,
+        }
+
+        count = len(matching_facts)
+        h = get_honorific()
+        # render_fact_de() prefers the structured subject/value pair
+        # (short, mostly language-neutral terms) over the raw English
+        # content sentence — see its docstring for why a full sentence
+        # can't be reliably translated at render time.
+        phrases = [f"\"{self.render_fact_de(f)}\"" for f in matching_facts]
+        if count == 1:
+            return (
+                f"Ich habe dazu einen gespeicherten Eintrag gefunden: {phrases[0]}. "
+                f"Soll ich ihn entfernen, {h}?"
+            )
+        listing = "; ".join(phrases)
+        return (
+            f"Ich habe dazu {count} gespeicherte Einträge gefunden, {h}: {listing}. "
+            f"Soll ich sie alle entfernen?"
+        )
+
+    def confirm_forget(self) -> str:
+        """Execute pending forget after user confirmation."""
+        from core.honorific import get_honorific
+        h = get_honorific()
+
+        if not self._pending_forget or time.time() > self._pending_forget["expires"]:
+            self._pending_forget = None
+            return f"Die Löschanfrage ist abgelaufen, {h}."
+
+        deleted = 0
+        for fact in self._pending_forget["facts"]:
+            if self.delete_fact(fact["fact_id"], soft=True):
+                deleted += 1
+
+        self._pending_forget = None
+        self.logger.info(f"Forget confirmed: {deleted} facts soft-deleted")
+        if deleted == 1:
+            return f"Betrachten Sie es als vergessen, {h}."
+        return f"Betrachten Sie es als vergessen, {h}. {deleted} Einträge entfernt."
+
+    def cancel_forget(self) -> str:
+        """Cancel pending forget request."""
+        from core.honorific import get_honorific
+        self._pending_forget = None
+        return f"Verstanden, {get_honorific()}. Ich behalte diese Erinnerungen."
+
+    def handle_transparency(self, query: str, user_id: str = "primary_user") -> str:
+        """Return a natural German summary of stored facts with examples,
+        distinguishing confirmed facts from candidates/observations
+        (§10 "Leine" transparency requirement — a candidate must never
+        be presented with the same authority as a confirmed fact)."""
+        from core.honorific import get_honorific
+        h = get_honorific()
+        all_facts = self.get_facts(user_id, limit=50)
+
+        # Filter out action/plan extractions and low-quality third-person extractions
+        facts = [f for f in all_facts
+                 if f.get("category") != "plan"
+                 and not f.get("content", "").startswith("The user ")]
+
+        if not facts:
+            return f"Ich habe noch keine konkreten Fakten über Sie gespeichert, {h}."
+
+        confirmed = [f for f in facts if not self.is_candidate(f)]
+        candidates = [f for f in facts if self.is_candidate(f)]
+        total = len(facts)
+
+        if total <= 2:
+            quantity = "ein paar Dinge"
+        elif total <= 5:
+            quantity = "einiges"
+        elif total <= 10:
+            quantity = "so einiges"
+        else:
+            quantity = "eine ganze Menge"
+
+        examples = [
+            phrase for f in confirmed[:3]
+            if (phrase := self.render_fact_de(f))
+        ]
+
+        if not examples:
+            # Only candidates/observations exist — say so explicitly
+            # rather than stating an unconfirmed inference as fact.
+            cand_examples = [
+                phrase for f in candidates[:2]
+                if (phrase := self.render_fact_de(f))
+            ]
+            if cand_examples:
+                listing = " und ".join(cand_examples)
+                return (
+                    f"Dazu habe ich nichts Bestätigtes gespeichert, {h}. Ich habe "
+                    f"aber beobachtet: {listing}. Soll ich mir das als Präferenz merken?"
+                )
+            return f"Ich weiß {quantity} über Sie, {h}. Möchten Sie, dass ich es durchgehe?"
+
+        if len(examples) == 1:
+            example_str = f"zum Beispiel {examples[0]}"
+        elif len(examples) == 2:
+            example_str = f"zum Beispiel {examples[0]} und {examples[1]}"
+        else:
+            example_str = f"zum Beispiel {examples[0]}, {examples[1]} und {examples[2]}"
+
+        candidate_note = ""
+        if candidates:
+            candidate_note = (
+                f" Außerdem habe ich {len(candidates)} unbestätigte "
+                f"Vermutung(en), falls Sie die ebenfalls hören möchten."
+            )
+
+        return (
+            f"Ich weiß {quantity} über Sie, {h}. {example_str}.{candidate_note} "
+            f"Gibt es etwas Bestimmtes, an das ich mich erinnern soll?"
+        )
+
+    @staticmethod
+    def _enrich_birthday(phrase: str) -> str:
+        """If the phrase contains a birthday with a year, append the computed age."""
+        from datetime import datetime
+        m = re.search(
+            r"birthday\b.*?\b(january|february|march|april|may|june|july|august|"
+            r"september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})",
+            phrase, re.IGNORECASE,
+        )
+        if not m:
+            return phrase
+        try:
+            month_str, day, year = m.group(1), int(m.group(2)), int(m.group(3))
+            birth = datetime.strptime(f"{month_str} {day} {year}", "%B %d %Y")
+            today = datetime.now()
+            age = today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+            return f"{phrase}, making you currently {age} years old"
+        except (ValueError, TypeError):
+            return phrase
+
+    @staticmethod
+    def _name_to_you(text: str, name: str) -> str:
+        """Replace a person's name with 'you'/'your' and fix verb conjugation.
+
+        Used when telling someone about their own facts:
+        "the user loves the band Tool" → "You love the band Tool"
+        """
+        # Possessive first: "the user's" → "Your"
+        text = re.sub(rf"\b{re.escape(name)}'s\b", "Your", text, count=1, flags=re.I)
+        # Name → "You"
+        text = re.sub(rf"\b{re.escape(name)}\b", "You", text, count=1, flags=re.I)
+        # Fix verb conjugation after "You": "You loves" → "You love"
+        for third, second in [('loves', 'love'), ('owns', 'own'), ('has', 'have'),
+                              ('is', 'are'), ('drives', 'drive'), ('likes', 'like'),
+                              ('favors', 'favor'), ('prefers', 'prefer'),
+                              ('uses', 'use'), ('works', 'work'), ('plays', 'play'),
+                              ('lives', 'live'), ('maintains', 'maintain'),
+                              ('manages', 'manage'), ('attends', 'attend'),
+                              ('communicates', 'communicate'), ('takes', 'take')]:
+            text = re.sub(rf'\bYou {third}\b', f'You {second}', text, flags=re.I)
+        # Lowercase "You" when not at start of string
+        if not text.startswith("You"):
+            text = text.replace("You ", "you ", 1)
+        return text
+
+    @staticmethod
+    def _first_to_third_person(text: str, name: str) -> str:
+        """Convert first-person statement to third-person with name.
+
+        "I love the band Tool" → "the user loves the band Tool"
+        "I'm allergic to shellfish" → "the user is allergic to shellfish"
+        "I live in Alabama" → "the user lives in Alabama"
+        "my favorite restaurant is Dreamland BBQ" → "the user's favorite restaurant is Dreamland BBQ"
+        """
+        # Possessive: "my X is Y" → "Name's X is Y"
+        if re.match(r"^my\b", text, re.I):
+            return f"{name}'s {text[3:]}"
+        # Handle contractions first
+        text = re.sub(r"^I'm\b", f"{name} is", text, flags=re.I)
+        text = re.sub(r"^I've\b", f"{name} has", text, flags=re.I)
+        text = re.sub(r"^I don't\b", f"{name} does not", text, flags=re.I)
+        text = re.sub(r"^I can't\b", f"{name} cannot", text, flags=re.I)
+        # Simple "I verb" → "Name verbs"
+        # Handle adverbs before the verb: "I usually order" → skip "usually", conjugate "order"
+        _ADVERBS = {'usually', 'typically', 'normally', 'always', 'often', 'sometimes',
+                     'never', 'rarely', 'really', 'also', 'still', 'just'}
+        m = re.match(r"^I\s+(\w+)\s+(\w+)(.*)", text, re.I)
+        if m and m.group(1).lower() in _ADVERBS:
+            adverb = m.group(1)
+            verb = m.group(2)
+            rest = m.group(3)
+            # Conjugate the actual verb, keep adverb as-is
+            if verb in ('have',):
+                verb_3p = 'has'
+            elif verb.endswith(('sh', 'ch', 'x', 'ss', 'o')):
+                verb_3p = verb + 'es'
+            elif verb.endswith('y') and verb[-2] not in 'aeiou':
+                verb_3p = verb[:-1] + 'ies'
+            else:
+                verb_3p = verb + 's'
+            return f"{name} {adverb} {verb_3p}{rest}"
+
+        m = re.match(r"^I\s+(\w+)(.*)", text, re.I)
+        if m:
+            verb = m.group(1)
+            rest = m.group(2)
+            # Conjugate: add 's' or 'es' for third person
+            if verb.endswith(('sh', 'ch', 'x', 'ss', 'o')):
+                verb_3p = verb + 'es'
+            elif verb.endswith('y') and verb[-2] not in 'aeiou':
+                verb_3p = verb[:-1] + 'ies'
+            elif verb in ('have',):
+                verb_3p = 'has'
+            elif verb in ('am',):
+                verb_3p = 'is'
+            else:
+                verb_3p = verb + 's'
+            text = f"{name} {verb_3p}{rest}"
+        # Fix possessives: "my" → "their" (since it's third-person now)
+        # Actually keep "his"/"her" — but we don't know gender reliably,
+        # so just leave as complete sentence without possessive conversion
+        return text
+
+
+    def _fact_to_phrase(self, fact: dict, for_user_id: str = None) -> str:
+        """Convert a stored fact to natural phrasing for the listener.
+
+        Facts are stored as complete third-person sentences:
+          "the user loves the band Tool"
+
+        If for_user_id matches the fact's owner, substitute "You":
+          "You love the band Tool"
+
+        Otherwise return the fact as-is (for cross-user recall):
+          "the user loves the band Tool"
+        """
+        content = fact.get("content", "")
+        if not content:
+            return ""
+
+        fact_owner = fact.get("user_id", "")
+        display_name = self._get_display_name(fact_owner) if fact_owner else ""
+
+        # Enrich birthday facts with computed age
+        content = self._enrich_birthday(content)
+
+        # If speaking to the person this fact is about, convert to second person
+        if for_user_id and for_user_id == fact_owner and display_name:
+            return self._name_to_you(content, display_name)
+
+        # Speaking to someone else (or no target) — return as stored
+        return content
+
+    def render_fact_de(self, fact: dict) -> str:
+        """Render a fact as a short phrase safe to drop into a German
+        sentence, for spoken transparency/forget/recall output.
+
+        Prefers the structured subject/value pair (§5c) — short,
+        often-language-neutral technical terms like "VS Code" or "DHL"
+        read fine embedded in an otherwise-German sentence — over the
+        full stored content sentence, which is still an English
+        third-person sentence produced by _first_to_third_person()'s
+        English grammar engine and can't be reliably translated at
+        render time. Facts extracted before this session (or via the
+        one-group free-form pattern, which has no clean key/value
+        split) have no `value` and fall back to the raw English content
+        — a known, documented limitation (see docs/ARCHITECTURE.md
+        §5b/§5c), not a silent failure.
+        """
+        value = fact.get("value")
+        subject = (fact.get("subject") or "").replace("_", " ").strip()
+        if value:
+            return f"{subject}: {value}" if subject else value
+        return fact.get("content", "")
+
+    def list_facts_by_category(self, user_id: str, category: str = None) -> str:
+        """Detailed listing for voice or console delivery."""
+        from core.honorific import get_honorific
+        facts = self.get_facts(user_id, category=category)
+        if not facts:
+            return f"Keine Fakten in dieser Kategorie, {get_honorific()}."
+
+        lines = []
+        for f in facts:
+            source_label = "von Ihnen bestätigt" if f["source"] == "explicit" else "vermutet"
+            phrase = self.render_fact_de(f)
+            lines.append(f"  - {phrase} ({source_label}, {f['confidence']:.0%} Konfidenz)")
+
+        return "\n".join(lines)
+
+    def _extract_forget_topic(self, query: str) -> str:
+        """Strip forget framing to get the topic to delete.
+
+        'forget what I said about coffee' → 'coffee'
+        'delete the fact about my job' → 'my job'
+        """
+        text = query.strip()
+        for pattern in self.FORGET_PATTERNS:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match and match.group(1):
+                return match.group(1).strip().rstrip(".,!?;:")
+        # Fallback: strip common prefixes
+        for prefix in ["forget ", "delete ", "remove ", "erase ",
+                       "vergiss ", "lösche ", "lösch ", "entferne "]:
+            if text.lower().startswith(prefix):
+                return text[len(prefix):].strip().rstrip(".,!?;:")
+        return text
+
+    # ------------------------------------------------------------------
+    # Real-time fact extraction
+    # ------------------------------------------------------------------
+
+    def extract_facts_realtime(self, message: dict) -> list:
+        """Extract facts from a single user message via regex patterns.
+
+        Designed to be <5ms per message. Only processes user messages.
+        Returns list of stored fact dicts.
+        """
+        if message.get("role") != "user":
+            return []
+
+        content = message.get("content", "")
+        if not content or len(content.strip()) < 5:
+            return []
+
+        user_id = message.get("user_id") or "primary_user"
+        timestamp = message.get("timestamp") or time.time()
+        extracted = []
+
+        for pattern, category in self.EXPLICIT_PATTERNS:
+            match = pattern.search(content)
+            if match:
+                # Build the fact content as a complete third-person sentence:
+                # "{Name} {verb} {object}" — e.g., "the user loves the band Tool"
+                groups = match.groups()
+                display_name = self._get_display_name(user_id)
+
+                if len(groups) == 2:
+                    # Two-group patterns (e.g. "my favorite X is Y", "my X's name is Y")
+                    key, value = groups[0].strip(), groups[1].strip()
+                    subject = key.lower()
+                    if category == "relationship":
+                        fact_content = f"{display_name}'s {key}'s name is {value}"
+                    else:
+                        fact_content = f"{display_name}'s favorite {key} is {value}"
+                elif len(groups) == 1:
+                    fact_content = groups[0].strip()
+                    subject = self._extract_subject(fact_content)
+                    value = None  # free-form sentence — no clean key/value split
+                else:
+                    continue
+
+                # Clean up trailing punctuation
+                fact_content = fact_content.rstrip(".,!?;:")
+
+                # Quality filter: reject captures that are too short or lack
+                # meaningful content (e.g. "get there", "it", single words)
+                words = [w for w in fact_content.split() if len(w) > 1]
+                if len(fact_content) < 10 or len(words) < 3:
+                    continue
+
+                # Ensure fact starts with speaker's name (complete sentence format)
+                if not fact_content.lower().startswith(display_name.lower()):
+                    # Convert first-person to third-person:
+                    # "I love X" → "the user loves X"
+                    fact_content = self._first_to_third_person(fact_content, display_name)
+
+                # Negation windowing: if a negation word appears near a positive
+                # preference verb, reduce confidence (may be contextual negation
+                # like "I don't think I like X")
+                confidence = 0.90
+                if category == "preference" and self._has_negation_window(content, match.start()):
+                    confidence = 0.50
+                    self.logger.debug(
+                        "Negation detected near preference match: %s",
+                        fact_content,
+                    )
+
+                fact = {
+                    "user_id": user_id,
+                    "category": category,
+                    "subject": subject,
+                    "content": fact_content,
+                    "value": value,
+                    "source": "explicit",
+                    "confidence": confidence,
+                    "source_messages": json.dumps([timestamp]),
+                }
+
+                fact_id = self.store_fact(fact)
+                if fact_id:
+                    fact["fact_id"] = fact_id
+                    extracted.append(fact)
+                    self.logger.info(f"Extracted fact [{category}]: {fact_content}")
+
+                # "remember that..." is an explicit instruction — don't also
+                # match implicit patterns (avoids duplicates like Tool→preference + Tool→general)
+                if category == "general":
+                    break
+
+        return extracted
+
+    def _extract_subject(self, text: str) -> str:
+        """Extract a concise subject label (1-2 meaningful words) from fact content."""
+        text = text.strip()
+        # Strip first-person prefix so "I am married to X" → "married to X"
+        text = re.sub(r"^(?:i(?:'m| am| have| will| would| can)\s+)", "", text, flags=re.IGNORECASE)
+        # Strip "my " prefix so "my address is X" → "address is X"
+        text = re.sub(r"^my\s+", "", text, flags=re.IGNORECASE)
+        words = text.split()
+        # Skip stop words and common verb forms that don't make good subject labels
+        skip = {
+            "a", "an", "the", "that", "to", "it",
+            "is", "am", "are", "was", "were", "be", "been",
+            "have", "has", "had", "will", "would", "can", "could",
+            "do", "does", "did", "not", "never", "also", "just",
+        }
+        meaningful = [w for w in words[:6] if w.lower() not in skip]
+        return " ".join(meaningful[:2]).lower().rstrip(".,!?;:")
+
+    # ------------------------------------------------------------------
+    # on_message hook (called from conversation.add_message)
+    # ------------------------------------------------------------------
+
+    def on_message(self, message: dict):
+        """Called on every message. Handles FAISS indexing + fact extraction + batch trigger + per-turn extraction."""
+        # PRIV-003/PRIV-001: while privacy is active, this message's
+        # content must never be indexed, extracted, or queued for
+        # background extraction. No candidate/short-term/long-term write
+        # of any kind starts here.
+        if not self._privacy_gate.allow(Capability.MEMORY_EXTRACT):
+            return
+
+        # Index all messages (user + assistant) in FAISS
+        self.index_message(message)
+
+        if message.get("role") == "user":
+            # Cache for per-turn extraction pairing
+            self._last_user_message = message.get("content", "")
+
+            # Skip fact extraction on meta-commands (forget, recall, transparency)
+            content = message.get("content", "").lower().strip()
+            is_meta = (self.is_forget_request(content) or
+                       self.is_recall_query(content) or
+                       self.is_transparency_request(content) or
+                       self.is_why_query(content))
+            self.last_extracted = [] if is_meta else self.extract_facts_realtime(message)
+            self._message_count_since_batch += 1
+            if self._message_count_since_batch >= self.batch_interval:
+                self._trigger_batch_extraction()
+
+        elif message.get("role") == "assistant" and self._last_user_message:
+            # Per-turn background extraction (Phase 7 — MemGPT store)
+            if (self.config.get("conversational_memory.per_turn_extraction", True)
+                    and not self._per_turn_in_progress
+                    and len(self._last_user_message) >= 15):
+                self._trigger_per_turn_extraction(
+                    self._last_user_message,
+                    message.get("content", ""),
+                    message.get("user_id") or "primary_user",
+                )
+
+    # ------------------------------------------------------------------
+    # LLM batch extraction (Phase 4)
+    # ------------------------------------------------------------------
+
+    BATCH_EXTRACTION_PROMPT = (
+        "Analyze these recent conversation messages from {user_name} and extract personal facts "
+        "that define WHO {user_name} IS as a person.\n\n"
+        "For each fact found, output a JSON line with:\n"
+        '- "category": one of [preference, relationship, habit, opinion, location, work, health, general]\n'
+        '- "subject": brief topic (1-3 words), e.g. "editor", "shipping carrier"\n'
+        '- "value": the short canonical answer for that subject, e.g. "VS Code", "DHL" — '
+        "omit or use null if the fact has no single clean value (e.g. a general habit)\n"
+        '- "content": the fact in third person, ALWAYS using their name "{user_name}" (never "User")\n\n'
+        "RULES:\n"
+        "- Only extract DURABLE identity facts — things true next month (hobbies, relationships, preferences, where they live, what they do).\n"
+        "- Use NEUTRAL phrasing. Say 'mentioned' or 'likes' — NOT 'prefers' or 'favorite' unless they explicitly said those words.\n"
+        "- DO NOT extract: appointments, reminders, calendar events, scheduled calls, one-time plans, "
+        "transient tasks, what they are doing right now, what is on screen, commands to the assistant.\n"
+        "- Each fact must be at least 10 characters with 3+ meaningful words.\n"
+        "- IMPORTANT: use the SAME \"subject\" wording for the same real-world attribute every time "
+        "(e.g. always \"editor\", never sometimes \"IDE\" or \"code editor\") so repeated or changed "
+        "facts about it can be matched up correctly.\n\n"
+        "Messages:\n{messages}\n\n"
+        "Output only JSON lines, one per fact. If no facts found, output nothing."
+    )
+
+    def _trigger_batch_extraction(self):
+        """Launch background thread for LLM batch extraction."""
+        self._message_count_since_batch = 0
+        captured_epoch = self._privacy_gate.epoch()
+        thread = threading.Thread(target=self._run_batch_extraction, args=(captured_epoch,), daemon=True)
+        thread.start()
+
+    def _run_batch_extraction(self, captured_epoch: str = None):
+        """Background: extract implicit facts from last N messages via Qwen.
+
+        `captured_epoch` is the privacy epoch at trigger time. If privacy
+        has transitioned (enter OR exit) by the time this runs, the epoch
+        no longer matches and extraction is aborted — this is what stops
+        content that started extracting before a privacy transition from
+        being written after it (see core/privacy_gate.py docstring).
+        """
+        if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+            return
+        try:
+            from datetime import datetime
+
+            recent = [m for m in self.conversation.session_history
+                      if m.get("role") == "user"][-self.batch_interval:]
+            if not recent:
+                return
+
+            formatted = "\n".join(
+                f"[{datetime.fromtimestamp(m.get('timestamp', 0)).strftime('%b %d %I:%M %p')}] {m['content']}"
+                for m in recent
+            )
+
+            user_id = recent[0].get("user_id") or "primary_user"
+            user_name = self._get_display_name(user_id)
+
+            from core.llm_router import get_llm_router
+            llm = get_llm_router(self.config)
+            response = llm.chat(
+                user_message=self.BATCH_EXTRACTION_PROMPT.format(
+                    user_name=user_name,
+                    messages=formatted,
+                ),
+                max_tokens=300,
+            )
+
+            extracted_count = 0
+            for line in response.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    fact_data = json.loads(line)
+                    if "content" not in fact_data:
+                        continue
+                    content = fact_data["content"].strip()
+                    # Validation gate: fact must start with the user's name
+                    if not content.lower().startswith(user_name.lower()):
+                        self.logger.warning("Batch extraction rejected (no name prefix): %s", content[:80])
+                        continue
+                    if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+                        return
+                    fact_id = self.store_fact({
+                        "user_id": user_id,
+                        "category": fact_data.get("category", "general"),
+                        "subject": fact_data.get("subject", "unknown"),
+                        "value": fact_data.get("value"),
+                        "content": content,
+                        "source": "inferred",
+                        "confidence": 0.70,
+                        "source_messages": json.dumps([m.get("timestamp", 0) for m in recent]),
+                    })
+                    if fact_id:
+                        extracted_count += 1
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+            if extracted_count:
+                self.logger.info(f"Batch extraction: found {extracted_count} facts")
+
+        except Exception as e:
+            self.logger.warning(f"Batch extraction failed (non-fatal): {e}")
+
+    # ------------------------------------------------------------------
+    # Per-turn LLM extraction (Phase 7 — MemGPT store)
+    # ------------------------------------------------------------------
+
+    PER_TURN_EXTRACTION_PROMPT = (
+        "{user_name} just said:\n\"{user_message}\"\n\n"
+        "The assistant responded:\n\"{assistant_message}\"\n\n"
+        "Extract any NEW personal facts that define WHO {user_name} IS from this exchange.\n\n"
+        "For each fact, output a JSON line:\n"
+        '- "category": one of [preference, relationship, habit, opinion, location, work, health, general]\n'
+        '- "subject": brief topic (1-3 words), e.g. "editor", "shipping carrier"\n'
+        '- "value": the short canonical answer for that subject, e.g. "VS Code", "DHL" — '
+        "omit or use null if the fact has no single clean value\n"
+        '- "content": the fact in third person, ALWAYS using their name "{user_name}" (never "User")\n\n'
+        "RULES:\n"
+        "- Only extract DURABLE identity facts — things true next month (hobbies, relationships, preferences, where they live, what they do).\n"
+        "- Use NEUTRAL phrasing. Say 'mentioned' or 'likes' — NOT 'prefers' or 'favorite' unless they explicitly said those words.\n"
+        "- DO NOT extract: greetings, questions, commands, appointments, reminders, calendar events, "
+        "scheduled calls, one-time plans, transient tasks, what is on screen.\n"
+        "- Each fact must be at least 10 characters with 3+ meaningful words.\n"
+        "- IMPORTANT: use the SAME \"subject\" wording for the same real-world attribute every time "
+        "so repeated or changed facts about it can be matched up correctly.\n"
+        "If no facts found, output nothing."
+    )
+
+    def _trigger_per_turn_extraction(self, user_msg: str, assistant_msg: str, user_id: str):
+        """Launch background thread for per-turn LLM extraction."""
+        self._per_turn_in_progress = True
+        captured_epoch = self._privacy_gate.epoch()
+        thread = threading.Thread(
+            target=self._run_per_turn_extraction,
+            args=(user_msg, assistant_msg, user_id, captured_epoch),
+            daemon=True,
+        )
+        thread.start()
+
+    def _get_display_name(self, user_id: str) -> str:
+        """Resolve user_id to a capitalized display name."""
+        try:
+            from core.user_profile import get_profile_manager
+            pm = get_profile_manager()
+            if pm:
+                profile = pm.get_profile(user_id)
+                if profile and profile.get("name"):
+                    return profile["name"]
+        except Exception:
+            pass
+        # Fallback: capitalize the user_id itself
+        return user_id.capitalize() if user_id and user_id != "__guest__" else "User"
+
+    def _run_per_turn_extraction(self, user_msg: str, assistant_msg: str, user_id: str, captured_epoch: str = None):
+        """Background: extract facts from a single exchange via Qwen.
+
+        See _run_batch_extraction's docstring for why captured_epoch matters.
+        """
+        if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+            self._per_turn_in_progress = False
+            return
+        try:
+            # Truncate to avoid excessive token usage
+            user_msg = user_msg[:500]
+            assistant_msg = assistant_msg[:500]
+
+            user_name = self._get_display_name(user_id)
+
+            from core.llm_router import get_llm_router
+            llm = get_llm_router(self.config)
+            response = llm.chat(
+                user_message=self.PER_TURN_EXTRACTION_PROMPT.format(
+                    user_name=user_name,
+                    user_message=user_msg,
+                    assistant_message=assistant_msg,
+                ),
+                max_tokens=200,
+            )
+
+            extracted_count = 0
+            user_name = self._get_display_name(user_id)
+            for line in response.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    fact_data = json.loads(line)
+                    if "content" not in fact_data:
+                        continue
+                    content = fact_data["content"].strip()
+                    # Validation gate: fact must start with the user's name
+                    if not content.lower().startswith(user_name.lower()):
+                        self.logger.warning("Per-turn extraction rejected (no name prefix): %s", content[:80])
+                        continue
+                    if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+                        return
+                    fact_id = self.store_fact({
+                        "user_id": user_id,
+                        "category": fact_data.get("category", "general"),
+                        "subject": fact_data.get("subject", "unknown"),
+                        "value": fact_data.get("value"),
+                        "content": content,
+                        "source": "per_turn",
+                        "confidence": 0.75,
+                    })
+                    if fact_id:
+                        extracted_count += 1
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+            if extracted_count:
+                self.logger.info(f"Per-turn extraction: found {extracted_count} facts")
+
+        except Exception as e:
+            self.logger.warning(f"Per-turn extraction failed (non-fatal): {e}")
+        finally:
+            self._per_turn_in_progress = False
+
+    # ------------------------------------------------------------------
+    # CRUD operations
+    # ------------------------------------------------------------------
+
+    def store_fact(self, fact: dict) -> Optional[str]:
+        """Store a new fact. Returns fact_id (existing, reinforced, or
+        new), or None only if there is truly nothing to do.
+
+        The whole read (_find_similar_fact) -> decide (reinforce/
+        supersede/insert) -> write sequence runs under one self._db_lock
+        acquisition (RLock — see its definition). extract_facts_realtime
+        (main thread), batch extraction, and per-turn extraction (each
+        their own background thread) can all call this concurrently for
+        the same user; without one atomic critical section here, two
+        threads could both see "no existing fact" and insert duplicate
+        rows, or both reinforce from the same stale snapshot and lose one
+        of two observations (TOCTOU race).
+        """
+        if not self._privacy_gate.allow(Capability.MEMORY_WRITE):
+            # PRIV-003: no candidate/confirmed write of any kind while
+            # privacy is active — including from a background extraction
+            # thread that started before privacy was entered (see the
+            # epoch checks in _run_batch_extraction/_run_per_turn_extraction,
+            # this is the second line of defense for anything that slips
+            # past those).
+            return None
+        with self._db_lock:
+            return self._store_fact_locked(fact)
+
+    def _store_fact_locked(self, fact: dict) -> Optional[str]:
+        """store_fact()'s actual logic — must only be called while
+        holding self._db_lock (see store_fact())."""
+        user_id = fact.get("user_id") or "primary_user"
+        # Normalize subject casing/whitespace at the point of both write
+        # and lookup — the exact-match branch of _find_similar_fact()
+        # does a case/whitespace-sensitive SQL comparison, so "Editor"
+        # and "editor " used to silently miss each other and fall
+        # through to the weaker substring-fuzzy path (or miss entirely).
+        subject = (fact.get("subject") or "").strip().lower()
+        content = fact.get("content", "")
+
+        # Check for duplicate/update — constrained to the same category
+        # (see _find_similar_fact's docstring: an unconstrained generic
+        # subject like "mutter" could otherwise match two unrelated facts).
+        category_for_match = fact.get("category", "general")
+        source = fact.get("source", "explicit")
+        confidence = fact.get("confidence", 0.90)
+        new_polarity = self._detect_polarity(category_for_match, content)
+        existing = self._find_similar_fact(user_id, subject, content, category=category_for_match)
+        if existing:
+            new_value = (fact.get("value") or "").strip().lower()
+            existing_value = (existing.get("value") or "").strip().lower()
+
+            if new_value and existing_value:
+                # Structured comparison: same canonical value means this
+                # is the same underlying fact restated in different
+                # words ("Alex nutzt häufig VS Code" vs "Alex arbeitet
+                # meistens mit VS Code" — both value="VS Code") — a
+                # REINFORCEMENT. A different value for the same subject
+                # ("VS Code" -> "Cursor") is a real change — SUPERSEDE.
+                # This is deliberately not text-similarity: measured on
+                # realistic pairs, string similarity scores a genuine
+                # contradiction as MORE similar than a paraphrase of the
+                # same fact (see docs/ARCHITECTURE.md §5c) — comparing
+                # the extracted value instead of the whole sentence
+                # sidesteps that entirely.
+                is_same_fact = (new_value == existing_value)
+            else:
+                # No structured value on one or both sides (older data,
+                # or a one-group free-form extraction with no clean
+                # key/value split) — fall back to exact content
+                # comparison, the only reliable check free text allows.
+                is_same_fact = existing["content"].lower().strip() == content.lower().strip()
+
+            # Polarity reversal always wins over a value/content match.
+            # "Alex liebt Pizza" and "Alex hasst Pizza" can both extract
+            # subject="Pizza"/value="Pizza" (the object of the sentiment,
+            # not the sentiment itself) — a value-only comparison would
+            # wrongly REINFORCE a flat contradiction. See
+            # _detect_polarity()'s docstring.
+            existing_polarity = existing.get("polarity")
+            if (existing_polarity is not None and new_polarity is not None
+                    and existing_polarity != new_polarity):
+                is_same_fact = False
+
+            if is_same_fact:
+                # Reinforce rather than silently no-op or duplicate.
+                # Repeated observation of the same candidate is exactly
+                # the evidence that should grow its confidence over time
+                # (see CANDIDATE_CONFIDENCE_THRESHOLD docstring above).
+                self._reinforce_fact(existing)
+                return existing["fact_id"]
+
+            # Real change (value differed, or a polarity reversal). An
+            # explicit user statement always outranks a mere inference:
+            # a single inferred/per-turn extraction must not silently
+            # overwrite a fact the user stated directly. Only an
+            # explicit correction (or the user restating it themselves)
+            # may supersede an explicit fact — the inferred contradiction
+            # is instead stored as its own non-superseding low-confidence
+            # candidate, visible but not overwriting the trusted answer.
+            existing_is_explicit = existing.get("source") == "explicit"
+            new_is_explicit = source == "explicit"
+            new_id = str(uuid.uuid4())
+            if existing_is_explicit and not new_is_explicit:
+                confidence = min(confidence, self.CANDIDATE_CONFIDENCE_THRESHOLD - 0.01)
+                # excluded_from_matching = 1: without this, a SECOND
+                # matching inferred observation would find THIS candidate
+                # (most recent active row for the subject+category)
+                # instead of the explicit fact, and reinforce it —
+                # letting a contradicted inference climb past the
+                # explicit fact's own confidence purely through
+                # repetition. Reproduced and confirmed before this fix
+                # (confidence 0.70 -> 0.99 in 7 reinforcements). Every
+                # future conflicting inference must keep comparing
+                # against the explicit fact, never against a prior
+                # loser — so this row is permanently excluded from being
+                # anyone's "existing" match, while staying fully visible
+                # via get_facts()/etc.
+                new_fact_excluded_from_matching = True
+                self.logger.info(
+                    "Inferred fact conflicts with explicit fact %s... — "
+                    "stored as candidate %s..., not superseding",
+                    existing["fact_id"][:8], new_id[:8],
+                )
+            else:
+                new_fact_excluded_from_matching = False
+                self.update_fact(existing["fact_id"], superseded_by=new_id)
+                self.logger.info(f"Superseding fact {existing['fact_id'][:8]}... with {new_id[:8]}...")
+        else:
+            new_id = str(uuid.uuid4())
+            new_fact_excluded_from_matching = False
+
+        now = time.time()
+        category = category_for_match
+        if source != "explicit" and self._is_sensitive(category, content):
+            # Risk gate (§7 "Leine"): a non-explicit inference about a
+            # sensitive topic never starts above the cap, no matter what
+            # confidence the extractor assigned it.
+            confidence = min(confidence, self._SENSITIVE_CAP_CONFIDENCE)
+
+        if source != "explicit":
+            # Autonomy budget: bounds unattended/inferred memory growth
+            # (batch + per-turn extraction, both of which call store_fact()
+            # on their own initiative, not in direct response to a user
+            # statement). Explicit user statements are never budget-limited
+            # — the user asked for that fact to be remembered directly.
+            # Reinforcement of an EXISTING row (the branches above that
+            # return early) doesn't count either — only genuinely new rows
+            # do, since unbounded row creation (not reinforcement) is the
+            # actual "background growth" risk this guards against.
+            if self._new_candidates_created >= self.max_new_candidates:
+                self.logger.warning(
+                    "Autonomy budget: max_new_candidates (%d) reached this "
+                    "session — dropping new inferred candidate for subject=%s",
+                    self.max_new_candidates, subject,
+                )
+                return None
+            self._new_candidates_created += 1
+            if (self.consolidation_interval_candidates > 0
+                    and self._new_candidates_created % self.consolidation_interval_candidates == 0):
+                # "N neue Candidates" trigger. Runs after this row is
+                # committed further down (the check happens before the
+                # INSERT below but run_consolidation() opens its own
+                # connection, so ordering here doesn't matter for
+                # correctness — decay only ever touches OTHER old rows,
+                # never the one currently being inserted).
+                try:
+                    self.run_consolidation()
+                except Exception as e:
+                    self.logger.warning(f"N-candidates consolidation trigger failed (non-fatal): {e}")
+
+        with self._db_lock:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                conn.execute("""
+                    INSERT INTO facts
+                        (fact_id, user_id, category, subject, content, value, source,
+                         confidence, source_messages, created_at, last_referenced,
+                         times_referenced, superseded_by, deleted, polarity,
+                         excluded_from_matching)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, ?, ?)
+                """, (
+                    new_id,
+                    user_id,
+                    category,
+                    subject,
+                    content,
+                    fact.get("value"),
+                    source,
+                    confidence,
+                    fact.get("source_messages"),
+                    now,
+                    now,
+                    new_polarity,
+                    1 if new_fact_excluded_from_matching else 0,
+                ))
+                conn.commit()
+            finally:
+                conn.close()
+
+        return new_id
+
+    def is_candidate(self, fact: dict) -> bool:
+        """A fact is a 'candidate' (system-observed, not yet a confirmed
+        long-term fact) if it's below the confidence threshold.
+
+        Deliberately confidence-only, not source-gated: an explicit
+        user statement starts above threshold (0.90) and is confirmed
+        immediately, while an inferred observation (0.70) starts as a
+        candidate — but can still be promoted purely through repeated
+        evidence (_reinforce_fact() raises confidence each time the same
+        fact is re-observed), matching "mehrfach bestätigtem Muster"
+        promotion without requiring the user to ever say it explicitly.
+        """
+        return fact.get("confidence", 0.0) < self.CANDIDATE_CONFIDENCE_THRESHOLD
+
+    def _reinforce_fact(self, existing: dict) -> None:
+        """Repeated evidence for an already-stored fact: bump its
+        confidence (capped) and evidence_count instead of inserting a
+        duplicate row or silently discarding the observation.
+
+        A non-explicit sensitive-topic fact is capped at
+        _SENSITIVE_CAP_CONFIDENCE regardless of how much reinforcement
+        it gets — the risk gate applies for the fact's whole lifetime,
+        not just at creation (see _is_sensitive()).
+        """
+        cap = self.MAX_FACT_CONFIDENCE
+        if (existing.get("source") != "explicit"
+                and self._is_sensitive(existing.get("category", ""), existing.get("content", ""))):
+            cap = self._SENSITIVE_CAP_CONFIDENCE
+        new_confidence = min(
+            cap,
+            existing.get("confidence", 0.70) + self.EVIDENCE_CONFIDENCE_STEP,
+        )
+        new_evidence_count = (existing.get("evidence_count") or 1) + 1
+        self.update_fact(
+            existing["fact_id"],
+            confidence=new_confidence,
+            evidence_count=new_evidence_count,
+            last_referenced=time.time(),
+        )
+
+    def get_facts(self, user_id: str = "primary_user", category: str = None,
+                  limit: int = 50) -> list:
+        """Get active (non-deleted, non-superseded) facts for a user."""
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                if category:
+                    rows = conn.execute("""
+                        SELECT * FROM facts
+                        WHERE user_id = ? AND category = ?
+                              AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                        ORDER BY last_referenced DESC
+                        LIMIT ?
+                    """, (user_id, category, limit)).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT * FROM facts
+                        WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                        ORDER BY last_referenced DESC
+                        LIMIT ?
+                    """, (user_id, limit)).fetchall()
+
+                return [dict(row) for row in rows]
+            finally:
+                conn.close()
+
+    def get_fact_by_id(self, fact_id: int, user_id: str = "primary_user") -> dict | None:
+        """Get a single active fact by ID."""
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                row = conn.execute("""
+                    SELECT * FROM facts
+                    WHERE fact_id = ? AND user_id = ?
+                          AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                """, (fact_id, user_id)).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def search_facts_text(self, query: str, user_id: str = "primary_user") -> list:
+        """Search facts by text (LIKE search on subject and content)."""
+        search_term = f"%{query}%"
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                rows = conn.execute("""
+                    SELECT * FROM facts
+                    WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                          AND (subject LIKE ? OR content LIKE ?)
+                    ORDER BY confidence DESC, last_referenced DESC
+                    LIMIT 20
+                """, (user_id, search_term, search_term)).fetchall()
+                return [dict(row) for row in rows]
+            finally:
+                conn.close()
+
+    def update_fact(self, fact_id: str, **kwargs) -> bool:
+        """Update specific fields on a fact."""
+        if not kwargs:
+            return False
+
+        allowed_fields = {"category", "subject", "content", "value", "confidence",
+                          "last_referenced", "times_referenced", "superseded_by",
+                          "deleted", "evidence_count"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
+        if not updates:
+            return False
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [fact_id]
+
+        with self._db_lock:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                cursor = conn.execute(
+                    f"UPDATE facts SET {set_clause} WHERE fact_id = ?", values
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+
+    def delete_fact(self, fact_id: str, soft: bool = True) -> bool:
+        """Delete a fact. Soft delete by default (sets deleted=1)."""
+        with self._db_lock:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                if soft:
+                    cursor = conn.execute(
+                        "UPDATE facts SET deleted = 1 WHERE fact_id = ?", (fact_id,)
+                    )
+                else:
+                    cursor = conn.execute(
+                        "DELETE FROM facts WHERE fact_id = ?", (fact_id,)
+                    )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+
+    def get_fact_count(self, user_id: str = "primary_user") -> dict:
+        """Get count of active facts by category."""
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                rows = conn.execute("""
+                    SELECT category, COUNT(*) as cnt FROM facts
+                    WHERE user_id = ? AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                    GROUP BY category
+                """, (user_id,)).fetchall()
+                return {row["category"]: row["cnt"] for row in rows}
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Proactive memory surfacing (Phase 5)
+    # ------------------------------------------------------------------
+
+    def get_proactive_context(self, utterance: str, user_id: str = "primary_user") -> Optional[str]:
+        """Check if any stored facts are relevant to the current utterance.
+
+        Returns formatted context string for LLM system prompt injection,
+        or None if nothing relevant found.  Max 1 fact per conversation
+        window (dedup via _surfaced_this_window).
+        """
+        if not self.proactive_enabled:
+            return None
+
+        # Only for admin users
+        from core.user_profile import get_profile_manager
+        pm = get_profile_manager()
+        profile = pm.get_profile(user_id) if pm else None
+        if profile and profile.get("role") not in ("admin", None):
+            return None
+
+        # Search fact store by embedding similarity
+        facts = self._search_facts_semantic(utterance, user_id, top_k=3)
+        self.logger.debug("Proactive surfacing: %d facts, threshold=%.2f, surfaced=%d",
+                          len(facts), self.proactive_threshold,
+                          len(self._surfaced_this_window))
+
+        # Filter by confidence threshold and dedup within window
+        relevant = [f for f in facts
+                    if f["score"] >= self.proactive_threshold
+                    and f["fact_id"] not in self._surfaced_this_window]
+
+        if not relevant:
+            return None
+
+        # Take only the best match (max 1 per response)
+        best = relevant[0]
+        self._surfaced_this_window.add(best["fact_id"])
+
+        # Update reference tracking
+        self.update_fact(best["fact_id"],
+                         last_referenced=time.time(),
+                         times_referenced=best["times_referenced"] + 1)
+
+        # Use natural phrase form for better LLM context
+        phrase = self._fact_to_phrase(best) or best['content']
+
+        self.logger.info(f"Proactive surfacing: '{phrase[:60]}' "
+                         f"(score={best['score']:.3f})")
+
+        # Use stronger injection for facts with pre-computed values (e.g. age)
+        if "currently " in phrase and "years old" in phrase:
+            return (
+                f"KNOWN FACT: {phrase}. "
+                f"Use this pre-computed value — do NOT calculate it yourself."
+            )
+
+        # Candidate vs. confirmed (§16 "Leine"): the LLM must never state
+        # an unconfirmed inference with the same authority as a fact the
+        # user actually said. is_candidate() is confidence-based (see its
+        # docstring) — an inferred fact starts as a candidate and is only
+        # "confirmed" once reinforced past CANDIDATE_CONFIDENCE_THRESHOLD.
+        if self.is_candidate(best):
+            return (
+                f"UNBESTÄTIGTE VERMUTUNG (kein vom Nutzer bestätigter Fakt): {phrase}. "
+                f"Nur äußerst vorsichtig und ausdrücklich als Vermutung erwähnen, "
+                f"niemals als sichere Tatsache — und nur, wenn es wirklich zur "
+                f"aktuellen Frage passt."
+            )
+
+        return (
+            f"BESTÄTIGTER FAKT über den Nutzer: {phrase}. "
+            f"Falls es natürlich passt, darfst du kurz darauf eingehen. "
+            f"Nicht erzwingen — nur erwähnen, wenn es wirklich relevant ist."
+        )
+
+    def get_full_user_context(self, user_id: str = "primary_user",
+                              max_tokens: int = 5000) -> Optional[str]:
+        """Return ALL active facts as a structured block for LLM injection.
+
+        Groups facts by category for better LLM comprehension. Unlike
+        get_proactive_context() (which surfaces 1 relevant fact), this
+        provides passive background knowledge the LLM can draw on.
+
+        At ~2 tokens/fact-line, 250 facts ≈ 4000 tokens — well within budget.
+        If facts exceed max_tokens, falls back to semantic top-50 + all
+        high-confidence (≥0.8).
+        """
+        facts = self.get_facts(user_id, limit=500)
+        if not facts:
+            return None
+
+        block = self._build_user_context_block(facts)
+
+        # Rough token estimate (~4 chars per token for English)
+        est_tokens = len(block) // 4
+        if est_tokens <= max_tokens:
+            self.logger.debug(f"Full user context: {len(facts)} facts, ~{est_tokens} tokens")
+            return block
+
+        # Scale guard: too many facts — keep high-confidence + semantic top-50
+        self.logger.info(f"Full user context exceeds {max_tokens} tokens "
+                         f"(~{est_tokens}), applying scale guard")
+        kept = [f for f in facts if f.get("confidence", 0) >= 0.8]
+        remaining = [f for f in facts if f.get("confidence", 0) < 0.8]
+        remaining.sort(key=lambda x: x.get("times_referenced", 0), reverse=True)
+        kept.extend(remaining[:50])
+
+        return self._build_user_context_block(kept)
+
+    def _build_user_context_block(self, facts: list) -> str:
+        """Build the "WHAT YOU KNOW ABOUT THE USER" prompt block, keeping
+        confirmed facts and unconfirmed candidates in clearly separate,
+        distinctly-labeled sections (§16 "Leine") — the LLM must never
+        state a system-inferred observation with the same authority as
+        something the user actually confirmed."""
+        confirmed: dict[str, list[str]] = {}
+        candidates: dict[str, list[str]] = {}
+        for f in facts:
+            cat = f.get("category", "general") or "general"
+            phrase = self._fact_to_phrase(f) or f.get("content", "")
+            if not phrase:
+                continue
+            bucket = candidates if self.is_candidate(f) else confirmed
+            bucket.setdefault(cat, []).append(phrase)
+
+        lines = ["WHAT YOU KNOW ABOUT THE USER (use naturally, never recite):"]
+        for cat, items in sorted(confirmed.items()):
+            label = cat.replace("_", " ").title()
+            lines.append(f"  {label}: {'; '.join(items)}")
+
+        if candidates:
+            lines.append(
+                "UNCONFIRMED OBSERVATIONS (present only as guesses, "
+                "never state as fact):"
+            )
+            for cat, items in sorted(candidates.items()):
+                label = cat.replace("_", " ").title()
+                lines.append(f"  {label}: {'; '.join(items)}")
+
+        return "\n".join(lines)
+
+    def reset_surfacing_window(self):
+        """Called when conversation window closes — allows facts to be
+        re-surfaced in the next conversation."""
+        if self._surfaced_this_window:
+            self.logger.debug(f"Surfacing window reset ({len(self._surfaced_this_window)} facts cleared)")
+        self._surfaced_this_window.clear()
+
+    # ------------------------------------------------------------------
+    # Interaction log — cross-session awareness persistence
+    # ------------------------------------------------------------------
+
+    def persist_interaction(self, interaction_type: str, query: str,
+                            answer: str, *, detail: str = None,
+                            metadata: dict = None,
+                            user_id: str = "primary_user"):
+        """Persist a significant interaction for cross-session recall.
+
+        Types: 'research', 'tool_call', 'conversation', 'document', 'skill'
+        """
+        self.logger.debug("persist_interaction: type=%s query_len=%d answer_len=%d user=%s",
+                          interaction_type, len(query) if query else 0,
+                          len(answer) if answer else 0, user_id)
+        import numpy as np
+
+        interaction_id = uuid.uuid4().hex[:16]
+        answer_summary = answer[:500] if answer else ""
+
+        # Pre-compute embedding for fast semantic recall
+        embedding_blob = None
+        if self.embedding_model:
+            try:
+                emb = self.embedding_model.encode(
+                    query, normalize_embeddings=True, show_progress_bar=False
+                )
+                embedding_blob = np.array(emb, dtype=np.float32).tobytes()
+            except Exception as e:
+                self.logger.warning(f"Interaction embedding failed (non-fatal): {e}")
+
+        metadata_json = json.dumps(metadata) if metadata else None
+
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """INSERT INTO interaction_log
+                       (interaction_id, user_id, type, query, detail,
+                        answer_summary, metadata_json, created_at, embedding)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (interaction_id, user_id, interaction_type, query, detail,
+                     answer_summary, metadata_json, time.time(), embedding_blob)
+                )
+                conn.commit()
+                self.logger.debug(
+                    f"Persisted {interaction_type} interaction: "
+                    f"'{query[:50]}'"
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to persist interaction: {e}")
+            finally:
+                conn.close()
+
+    def promote_session_artifacts(self, artifacts: list,
+                                  window_id: str,
+                                  duration_seconds: float = 0.0,
+                                  user_id: str = "primary_user"):
+        """Crystallize a session's artifacts into a searchable interaction_log entry.
+
+        Called from a background thread at window close. Composes a session
+        summary from artifact metadata (no LLM needed) and persists it via
+        persist_interaction() for cross-session recall.
+
+        Args:
+            artifacts: Promoted Artifact objects from InteractionCache.promote_window()
+            window_id: The conversation window ID
+            duration_seconds: Window duration in seconds (for metadata)
+            user_id: User who owned the session
+        """
+        if not artifacts:
+            return
+
+        # Group artifacts by source for structured summary
+        from collections import defaultdict
+        groups: dict[str, list[str]] = defaultdict(list)
+        artifact_ids = []
+        type_counts: dict[str, int] = defaultdict(int)
+
+        for art in artifacts:
+            label = art.summary or art.content[:80]
+            groups[art.source].append(label)
+            artifact_ids.append(art.artifact_id)
+            type_counts[art.artifact_type] += 1
+
+        # Build human-readable session summary
+        # Format: "web_search: recipe summary; another result | llm: conversation topic"
+        parts = []
+        for source, summaries in groups.items():
+            joined = "; ".join(s[:80] for s in summaries[:5])
+            parts.append(f"{source}: {joined}")
+        session_summary = " | ".join(parts)
+        if len(session_summary) > 500:
+            session_summary = session_summary[:497] + "..."
+
+        # Build query string for semantic search (unique summaries)
+        seen = set()
+        query_parts = []
+        for art in artifacts:
+            s = art.summary or art.content[:80]
+            if s not in seen:
+                seen.add(s)
+                query_parts.append(s)
+        query_str = ". ".join(query_parts)
+        if len(query_str) > 500:
+            query_str = query_str[:497] + "..."
+
+        metadata = {
+            "artifact_count": len(artifacts),
+            "artifact_ids": artifact_ids[:20],  # cap at 20 to avoid bloat
+            "artifact_types": dict(type_counts),
+        }
+        if duration_seconds > 0:
+            metadata["duration_seconds"] = round(duration_seconds, 1)
+
+        self.persist_interaction(
+            "session_summary", query_str, session_summary,
+            detail=window_id,
+            metadata=metadata,
+            user_id=user_id,
+        )
+        self.logger.info(
+            "Promoted session summary for window %s: %d artifacts, types=%s",
+            window_id, len(artifacts), dict(type_counts),
+        )
+
+    def recall_interactions(self, query: str, *, types: list = None,
+                            top_k: int = 3, days: int = 30,
+                            user_id: str = "primary_user") -> list[dict]:
+        """Find past interactions relevant to current query via semantic search.
+
+        Returns list of {interaction_id, type, query, detail, answer_summary,
+        metadata_json, created_at, score}.
+        """
+        import numpy as np
+
+        cutoff = time.time() - (days * 86400)
+
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                if types:
+                    placeholders = ",".join("?" for _ in types)
+                    rows = conn.execute(
+                        f"""SELECT * FROM interaction_log
+                            WHERE user_id = ? AND created_at > ?
+                              AND type IN ({placeholders})
+                            ORDER BY created_at DESC LIMIT 100""",
+                        (user_id, cutoff, *types)
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """SELECT * FROM interaction_log
+                           WHERE user_id = ? AND created_at > ?
+                           ORDER BY created_at DESC LIMIT 100""",
+                        (user_id, cutoff)
+                    ).fetchall()
+            finally:
+                conn.close()
+
+        if not rows or not self.embedding_model:
+            return [dict(r) for r in rows[:top_k]] if rows else []
+
+        try:
+            query_emb = self.embedding_model.encode(
+                query, normalize_embeddings=True, show_progress_bar=False
+            )
+
+            scored = []
+            query_dim = len(query_emb)
+            for row in rows:
+                row_dict = dict(row)
+                emb_blob = row_dict.get("embedding")
+                if emb_blob:
+                    stored_emb = np.frombuffer(emb_blob, dtype=np.float32)
+                    # Skip embeddings from a different model (e.g. old 384-dim MiniLM)
+                    if stored_emb.shape[0] != query_dim:
+                        score = 0.0
+                    else:
+                        score = float(np.dot(query_emb, stored_emb))
+                else:
+                    score = 0.0
+                row_dict["score"] = score
+                scored.append(row_dict)
+
+            scored.sort(key=lambda x: x["score"], reverse=True)
+            return scored[:top_k]
+        except Exception as e:
+            self.logger.warning(f"Interaction recall search failed: {e}")
+            return [dict(r) for r in rows[:top_k]]
+
+    def get_recent_interactions(self, *, types: list = None, limit: int = 10,
+                                days: int = 7,
+                                user_id: str = "primary_user") -> list[dict]:
+        """Get recent interactions chronologically (for rundowns/recall)."""
+        cutoff = time.time() - (days * 86400)
+
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                if types:
+                    placeholders = ",".join("?" for _ in types)
+                    rows = conn.execute(
+                        f"""SELECT * FROM interaction_log
+                            WHERE user_id = ? AND created_at > ?
+                              AND type IN ({placeholders})
+                            ORDER BY created_at DESC LIMIT ?""",
+                        (user_id, cutoff, *types, limit)
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """SELECT * FROM interaction_log
+                           WHERE user_id = ? AND created_at > ?
+                           ORDER BY created_at DESC LIMIT ?""",
+                        (user_id, cutoff, limit)
+                    ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def cleanup_old_interactions(self, retention_days: int = 30):
+        """Remove interactions older than retention period."""
+        cutoff = time.time() - (retention_days * 86400)
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                result = conn.execute(
+                    "DELETE FROM interaction_log WHERE created_at < ?",
+                    (cutoff,)
+                )
+                if result.rowcount:
+                    conn.commit()
+                    self.logger.info(
+                        f"Cleaned up {result.rowcount} interactions "
+                        f"older than {retention_days} days"
+                    )
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Decay + Consolidation (session #6) — bounded, deterministic
+    # maintenance. No autonomous LLM self-reflection loop: every decision
+    # here is a plain SQL predicate on existing columns
+    # (confidence/evidence_count/source/created_at), not an LLM judgment
+    # call. Call sites are the ones the task named as sensible triggers
+    # (session-end, idle, an explicit maintenance job) — not a background
+    # timer loop this class runs on its own.
+    # ------------------------------------------------------------------
+
+    def run_decay_pass(self, now: float = None) -> dict:
+        """Archive stale, never-reinforced candidates. Never touches
+        explicit facts or anything reinforced even once.
+
+        A candidate qualifies for decay only if ALL of:
+          - source != 'explicit' (the user never stated this directly)
+          - confidence < CANDIDATE_CONFIDENCE_THRESHOLD (still a candidate,
+            never crossed into "confirmed")
+          - evidence_count <= 1 (never reinforced — a second matching
+            observation would have raised this via _reinforce_fact())
+          - created_at older than self.decay_days
+          - not already archived/deleted/superseded/excluded_from_matching
+
+        Archived (not deleted): the row stays in the table with
+        archived=1, excluded from every active-fact query (see the
+        migration comment on the `archived` column) but still readable
+        directly for audit — decay must be "nachvollziehbar/testbar",
+        per the task, not a silent hard delete.
+        """
+        if now is None:
+            now = time.time()
+        cutoff = now - (self.decay_days * 86400)
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                rows = conn.execute("""
+                    SELECT fact_id FROM facts
+                    WHERE source != 'explicit'
+                          AND confidence < ?
+                          AND evidence_count <= 1
+                          AND created_at < ?
+                          AND deleted = 0 AND superseded_by IS NULL
+                          AND archived = 0
+                """, (self.CANDIDATE_CONFIDENCE_THRESHOLD, cutoff)).fetchall()
+                fact_ids = [r["fact_id"] for r in rows]
+
+                if fact_ids:
+                    conn.executemany(
+                        "UPDATE facts SET archived = 1 WHERE fact_id = ?",
+                        [(fid,) for fid in fact_ids],
+                    )
+                    conn.commit()
+                    self.logger.info(
+                        "Decay: archived %d stale candidate(s) (>%dd, "
+                        "never reinforced)", len(fact_ids), self.decay_days,
+                    )
+                return {"archived_count": len(fact_ids), "archived_fact_ids": fact_ids}
+            finally:
+                conn.close()
+
+    def run_consolidation(self) -> dict:
+        """Bounded maintenance pass: DECAY + MERGE (see below for exactly
+        what each does — this docstring is the accurate scope, not an
+        aspiration).
+
+        Call at session-end, after N new candidates, on idle, or from an
+        explicit maintenance job — never from a permanent background
+        loop. Budget-limited via
+        conversational_memory.autonomy_budget.max_consolidation_runs so
+        a misbehaving caller (e.g. a retry loop) can't turn this into
+        unbounded background work either.
+
+        Two of the ten actions from the original consolidation
+        vocabulary (KEEP/REINFORCE/PROMOTE/MERGE/UPDATE/SUPERSEDE/DECAY/
+        ARCHIVE/DELETE/NEEDS_CONFIRMATION) are implemented here, both as
+        plain deterministic SQL, no LLM call:
+          - DECAY (run_decay_pass(), see its own docstring)
+          - MERGE (_merge_duplicate_excluded_candidates(), see its own
+            docstring) — collapses exact-duplicate rows created by
+            repeated identical conflicting inferences (see the
+            "explicit wins" / excluded_from_matching fix in
+            _store_fact_locked): each conflicting observation currently
+            creates its own row rather than reinforcing a prior one
+            (deliberately, to prevent the escalation bug that fix
+            closed), so identical repeats accumulate as separate rows.
+            Merging them into one (summing evidence_count as a visible
+            "observed N times" count, confidence left untouched) cleans
+            that up without reopening the escalation risk: merged rows
+            stay excluded_from_matching, so evidence_count summing here
+            can never let one cross into "confirmed."
+        REINFORCE/SUPERSEDE/UPDATE already happen synchronously in
+        store_fact() (see _store_fact_locked) — not part of this
+        method's job. PROMOTE isn't a discrete action in this
+        architecture: a fact is "confirmed" purely by confidence
+        crossing CANDIDATE_CONFIDENCE_THRESHOLD (is_candidate()),
+        computed on read, not a stored status transition. KEEP,
+        NEEDS_CONFIRMATION, and any judgment call between competing
+        interpretations of ambiguous data would need an LLM (or at
+        least a heuristic well beyond "is this row an exact duplicate")
+        and were explicitly out of scope ("kein autonomer permanenter
+        LLM-Selbstreflexionsloop") — not attempted speculatively.
+        """
+        if self._consolidation_runs >= self.max_consolidation_runs:
+            self.logger.warning(
+                "Autonomy budget: max_consolidation_runs (%d) reached "
+                "this session — skipping", self.max_consolidation_runs,
+            )
+            return {"skipped": True, "reason": "budget_exceeded"}
+
+        self._consolidation_runs += 1
+        self._last_consolidation_at = time.time()
+        decay_result = self.run_decay_pass()
+        merge_result = self._merge_duplicate_excluded_candidates()
+        return {"skipped": False, **decay_result, **merge_result}
+
+    def _merge_duplicate_excluded_candidates(self) -> dict:
+        """MERGE: collapse exact-duplicate excluded_from_matching
+        candidate rows (same user_id, category, subject, value, content)
+        into the oldest one, summing evidence_count as a visible
+        "observed N times" count.
+
+        Only ever touches excluded_from_matching=1 rows — the ones
+        created by _store_fact_locked's "explicit wins" branch, which
+        deliberately creates a fresh row per conflicting observation
+        rather than reinforcing a prior one (see run_consolidation's
+        docstring for why). Confidence is NEVER changed by this merge —
+        only evidence_count — and merged-away rows are linked via
+        superseded_by to the surviving row (the same mechanism already
+        used everywhere else in this file to mean "no longer an active
+        row, but auditable"), so this can't reopen the escalation bug
+        the excluded_from_matching column exists to prevent: a merged
+        row is still permanently excluded from _find_similar_fact()'s
+        matching pool regardless of its evidence_count.
+        """
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                rows = conn.execute("""
+                    SELECT * FROM facts
+                    WHERE excluded_from_matching = 1
+                          AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                    ORDER BY created_at ASC
+                """).fetchall()
+                rows = [dict(r) for r in rows]
+
+                groups: dict[tuple, list[dict]] = {}
+                for row in rows:
+                    key = (row["user_id"], row["category"], row["subject"],
+                           row.get("value"), row["content"])
+                    groups.setdefault(key, []).append(row)
+
+                merged_count = 0
+                for group in groups.values():
+                    if len(group) < 2:
+                        continue
+                    canonical = group[0]  # oldest, per ORDER BY created_at ASC
+                    duplicates = group[1:]
+                    total_evidence = canonical["evidence_count"] + sum(
+                        d["evidence_count"] for d in duplicates
+                    )
+                    conn.execute(
+                        "UPDATE facts SET evidence_count = ? WHERE fact_id = ?",
+                        (total_evidence, canonical["fact_id"]),
+                    )
+                    conn.executemany(
+                        "UPDATE facts SET superseded_by = ? WHERE fact_id = ?",
+                        [(canonical["fact_id"], d["fact_id"]) for d in duplicates],
+                    )
+                    merged_count += len(duplicates)
+
+                if merged_count:
+                    conn.commit()
+                    self.logger.info(
+                        "Consolidation: merged %d duplicate conflicting "
+                        "candidate(s) into %d canonical row(s)",
+                        merged_count, sum(1 for g in groups.values() if len(g) > 1),
+                    )
+                return {"merged_count": merged_count}
+            finally:
+                conn.close()
+
+    def _search_facts_semantic(self, query: str, user_id: str, top_k: int = 3) -> list[dict]:
+        """Embed query and compare against stored fact content embeddings."""
+        facts = self.get_facts(user_id, limit=100)  # All active facts for this user
+        if not facts or not self.embedding_model:
+            return []
+
+        try:
+            import numpy as np
+            query_emb = self.embedding_model.encode(query, normalize_embeddings=True, show_progress_bar=False)
+            # Enrich fact text for better semantic matching
+            # e.g. birthday facts should also match "how old am I", "age"
+            fact_texts = [self._enrich_fact_for_search(f["content"]) for f in facts]
+            fact_embs = self.embedding_model.encode(fact_texts, normalize_embeddings=True, show_progress_bar=False)
+
+            scores = np.dot(fact_embs, query_emb)
+            ranked = sorted(zip(facts, scores), key=lambda x: x[1], reverse=True)
+
+            return [{**f, "score": float(s)} for f, s in ranked[:top_k]]
+        except Exception as e:
+            self.logger.warning(f"Semantic fact search failed (non-fatal): {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _enrich_fact_for_search(content: str) -> str:
+        """Add semantic aliases so related queries match stored facts.
+
+        e.g. "my birthday is June 12th, 1979" also matches "how old am I", "age"
+        """
+        text = content.lower()
+        if "birthday" in text or "born" in text:
+            return f"{content} age how old years old"
+        if "name is" in text:
+            return f"{content} who am I what is my name called"
+        return content
+
+    def _find_similar_fact(self, user_id: str, subject: str, content: str,
+                            category: str = None) -> Optional[dict]:
+        """Find an existing active fact with a similar subject (for dedup/supersede).
+
+        Uses normalized substring matching to catch near-duplicates like
+        "Mt. Olive Group" vs "Mt. Olive Group meetings".
+
+        Constrained to the same `category` when given: a generic subject
+        like "mutter" or "job" can legitimately apply to two completely
+        unrelated facts (e.g. "Mutter heißt Petra" and, in a different
+        category, an unrelated fact whose extractor happened to also pick
+        "mutter" as its subject) — without the category constraint those
+        could match each other and one would silently supersede the
+        other, losing a legitimate independent fact.
+        """
+        if not subject:
+            return None
+        norm_subject = subject.lower().strip()
+        with self._db_lock:
+            conn = self._get_conn()
+            try:
+                cat_clause = " AND category = ?" if category else ""
+                cat_params = (category,) if category else ()
+
+                # First try exact match. excluded_from_matching = 0 skips
+                # conflicting-inferred-vs-explicit candidates (see the
+                # migration comment in _init_db and _store_fact_locked's
+                # "explicit wins" branch) — without it, a second matching
+                # inferred observation would find that candidate itself
+                # (most recent active row) instead of the explicit fact
+                # and reinforce it, letting a contradicted inference climb
+                # past the explicit fact purely through repetition.
+                row = conn.execute(f"""
+                    SELECT * FROM facts
+                    WHERE user_id = ? AND subject = ?{cat_clause}
+                          AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                          AND excluded_from_matching = 0
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (user_id, subject, *cat_params)).fetchone()
+                if row:
+                    return dict(row)
+
+                # Fuzzy match: check if new subject contains or is contained
+                # by an existing subject (normalized, case-insensitive)
+                rows = conn.execute(f"""
+                    SELECT * FROM facts
+                    WHERE user_id = ?{cat_clause} AND deleted = 0 AND superseded_by IS NULL AND archived = 0
+                          AND excluded_from_matching = 0
+                    ORDER BY created_at DESC
+                """, (user_id, *cat_params)).fetchall()
+                for row in rows:
+                    existing_subject = (row["subject"] or "").lower().strip()
+                    if not existing_subject:
+                        continue
+                    # Substring containment in either direction
+                    if (norm_subject in existing_subject or
+                            existing_subject in norm_subject):
+                        return dict(row)
+                return None
+            finally:
+                conn.close()

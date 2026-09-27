@@ -1,0 +1,43 @@
+name: privacy
+version: 1.0.0
+description: Voice control for the central PrivacyGate (core/privacy_gate.py) — enter/exit PRIVACY and PRIVACY_LOCK modes
+category: system
+author: Jarvis Team
+enabled: true
+priority: 9
+
+intents:
+  - "privatsphäre aktivieren"
+  - "privatsphäre an"
+  - "privatsphäre ein"
+  - "privatmodus aktivieren"
+  - "privatmodus an"
+  - "aktiviere privatsphäre"
+  - "aktiviere den privatmodus"
+  - "schalte in den privatmodus"
+  - "schalte den privatmodus ein"
+
+  - "privacy lock aktivieren"
+  - "privatsphäre sperren"
+  - "aktiviere privacy lock"
+  - "sperre die privatsphäre"
+
+  - "privatsphäre beenden"
+  - "privatsphäre aus"
+  - "privatmodus beenden"
+  - "privatmodus deaktivieren"
+  - "beende privatsphäre"
+  - "beende den privatmodus"
+  - "verlasse den privatmodus"
+  - "schalte den privatmodus aus"
+
+  - "bist du im privatmodus"
+  - "privatsphäre status"
+  - "welcher privatsphäre modus ist aktiv"
+
+keywords:
+  - privatsphäre
+  - privatmodus
+  - privacy
+
+dependencies: []

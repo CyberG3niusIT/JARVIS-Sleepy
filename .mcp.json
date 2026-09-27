@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "jarvis": {
+      "command": "/home/alex/jarvis-venv/bin/python",
+      "args": [
+        "/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/mcp_server.py"
+      ]
+    }
+  }
+}

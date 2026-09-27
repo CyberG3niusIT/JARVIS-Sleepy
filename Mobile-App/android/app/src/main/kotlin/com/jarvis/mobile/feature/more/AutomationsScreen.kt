@@ -1,0 +1,162 @@
+package com.jarvis.mobile.feature.more
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.jarvis.mobile.core.designsystem.JarvisSpacing
+import com.jarvis.mobile.core.designsystem.component.JARVIS_MORE_BACK_LABEL
+import com.jarvis.mobile.core.designsystem.component.JarvisActionResultText
+import com.jarvis.mobile.core.designsystem.component.JarvisBottomSheet
+import com.jarvis.mobile.core.designsystem.component.JarvisButton
+import com.jarvis.mobile.core.designsystem.component.JarvisButtonVariant
+import com.jarvis.mobile.core.designsystem.component.JarvisEmptyState
+import com.jarvis.mobile.core.designsystem.component.JarvisExecutionTag
+import com.jarvis.mobile.core.designsystem.component.JarvisInlineNotice
+import com.jarvis.mobile.core.designsystem.component.JarvisListGroup
+import com.jarvis.mobile.core.designsystem.component.JarvisListRow
+import com.jarvis.mobile.core.designsystem.component.JarvisSectionHeader
+import com.jarvis.mobile.core.designsystem.component.JarvisStatusTag
+import com.jarvis.mobile.core.designsystem.component.rememberJarvisActionResult
+import com.jarvis.mobile.core.model.SystemState
+import com.jarvis.mobile.core.util.StringFieldCodec
+import com.jarvis.mobile.feature.common.DetailScaffold
+import kotlinx.coroutines.launch
+
+enum class AutomationType { MACRO, SCHEDULE, ROUTINE }
+
+val automationTypeLabel: Map<AutomationType, String> = mapOf(
+    AutomationType.MACRO to "Makro",
+    AutomationType.SCHEDULE to "Zeitplan",
+    AutomationType.ROUTINE to "Routine",
+)
+
+val automationTypeRows: List<Pair<AutomationType, String>> = listOf(
+    AutomationType.MACRO to "Mehrere definierte Aktionen in fester Reihenfolge.",
+    AutomationType.SCHEDULE to "Ausführung zu einem festgelegten Zeitpunkt oder Intervall.",
+    AutomationType.ROUTINE to "Wiederkehrende Abläufe mit klaren Bedingungen und Grenzen.",
+)
+
+val automationExecutionRules: List<Pair<String, String>> = listOf(
+    "Deterministisch vor generativ" to "Feste Aktionen laufen vor modellgestütztem Verhalten.",
+    "Berechtigungen bleiben nötig" to "Eine Automation umgeht keine Android-Berechtigung.",
+    "Privacy kann blockieren" to "Geschützte Schritte werden im jeweiligen Modus gesperrt.",
+    "Keine automatische Cloud-Eskalation" to "Ein Cloud-Weg entsteht nur nach ausdrücklicher Freigabe.",
+    "Keine Rechteausweitung" to "Eine Automation kann ihre eigenen Grenzen nicht erweitern.",
+)
+
+private data class EditorSession(val mode: AutomationEditorMode, val draft: AutomationDraft)
+
+/**
+ * String-encoded so both the automation list and the open editor session
+ * survive not just rotation but full activity recreation (process death):
+ * a plain [String] is unconditionally Bundle-safe, matching the approach
+ * [AutomationEditorScreen] already uses for its own draft state. Without
+ * this, an in-progress "neue Automation" or a locally saved automation
+ * would silently vanish on recreation - the same class of bug the Codex
+ * review already flagged for the editor's draft field. Built on
+ * [StringFieldCodec], so no field of any automation (name, purpose, step
+ * or condition text) can ever be misread as a list boundary.
+ */
+private val AutomationsListSaver = androidx.compose.runtime.saveable.Saver<List<AutomationDraft>, String>(
+    save = { list -> encodeAutomationDraftList(list) },
+    restore = { raw -> decodeAutomationDraftList(raw) },
+)
+
+private val EditorSessionSaver = androidx.compose.runtime.saveable.Saver<EditorSession?, String>(
+    save = { session ->
+        val writer = StringFieldCodec.writer()
+        writer.write((session != null).toString())
+        if (session != null) {
+            writer.write(session.mode.name)
+            writer.write(encodeAutomationDraft(session.draft))
+        }
+        writer.build()
+    },
+    restore = { raw ->
+        val reader = StringFieldCodec.reader(raw)
+        if (!reader.read().toBoolean()) {
+            null
+        } else {
+            EditorSession(mode = AutomationEditorMode.valueOf(reader.read()), draft = decodeAutomationDraft(reader.read()))
+        }
+    },
+)
+
+/**
+ * Ported 1:1 from src/components/jarvis/screens/automations-screen.tsx,
+ * including the full [AutomationEditorScreen]. Mirrors the web reference's
+ * own architecture: the editor is not a separate navigation route but a
+ * local state swap inside this screen (`editorSession`), so the in-progress
+ * draft never needs to cross a navigation boundary. The automation list
+ * itself is local, in-memory prototype state; nothing is created, scheduled
+ * or stored on the device by this screen.
+ */
+@Composable
+fun AutomationsScreen(onBack: () -> Unit) {
+    DetailScaffold(
+        title = "Automationen",
+        subtitle = "Makros, Zeitpläne und Routinen",
+        onBack = onBack,
+        backLabel = JARVIS_MORE_BACK_LABEL,
+    ) {
+        JarvisSectionHeader("Automationen")
+        JarvisEmptyState(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            title = "Automationen nicht verfügbar",
+            body = "Diese App-Version führt noch keine Makros, Zeitpläne oder Routinen aus.",
+        )
+        JarvisSectionHeader("Typen")
+        JarvisListGroup {
+            automationTypeRows.forEach { (type, detail) -> JarvisListRow(title = automationTypeLabel.getValue(type), subtitle = detail) }
+        }
+
+        JarvisSectionHeader("Ausführungsregeln")
+        JarvisListGroup {
+            automationExecutionRules.forEach { (title, detail) -> JarvisListRow(title = title, subtitle = detail) }
+        }
+    }
+
+}
+
+@Composable
+private fun NewAutomationSheet(open: Boolean, onClose: () -> Unit, onOpenEditor: (AutomationType) -> Unit) {
+    var choice by rememberSaveable(open) { mutableStateOf<AutomationType?>(null) }
+
+    JarvisBottomSheet(
+        open = open,
+        onClose = { choice = null; onClose() },
+        title = choice?.let { automationTypeLabel.getValue(it) } ?: "Neue Automation",
+    ) {
+        val selected = choice
+        if (selected != null) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                JarvisInlineNotice(
+                    text = "Der Editor legt diese Automation nur lokal in dieser Sitzung an, ohne " +
+                        "Android-Scheduler und ohne Runtime-Bindung.",
+                )
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = JarvisSpacing.sm),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(JarvisSpacing.sm),
+                ) {
+                    JarvisButton(text = "Zurück", modifier = Modifier.weight(1f), onClick = { choice = null })
+                    JarvisButton(text = "Editor öffnen", variant = JarvisButtonVariant.PRIMARY, modifier = Modifier.weight(1f), onClick = { onOpenEditor(selected) })
+                }
+            }
+        } else {
+            JarvisListGroup {
+                automationTypeRows.forEach { (type, detail) ->
+                    JarvisListRow(title = automationTypeLabel.getValue(type), subtitle = detail, chevron = true, onClick = { choice = type })
+                }
+            }
+        }
+    }
+}
