@@ -6,6 +6,21 @@ Dieses Repository enthält den aktuellen Sleepy-Stand meiner JARVIS-Anpassung. D
 
 Es gibt hier bewusst keine eingebetteten Demo-Videos, Audioaufnahmen oder externen Medienlinks. Die README beschreibt nur den tatsächlich verwendeten Stand.
 
+
+---
+
+## Repository-Navigation
+
+- [Repository-Inhaltsverzeichnis](INHALTSVERZEICHNIS.md)
+- [Projektüberblick](PROJECT_OVERVIEW.md)
+- [Architektur](docs/ARCHITECTURE.md)
+- [Entwicklung](docs/DEVELOPMENT.md)
+- [Setup](docs/SETUP_GUIDE.md)
+- [Changelog](CHANGELOG.md)
+- [Security](SECURITY.md)
+
+---
+
 ## Aktueller Stand
 
 Der erste funktionierende Sicherungspunkt ist als Tag vorhanden:
