@@ -11,8 +11,8 @@
 </div>
 
 <p align="center">
-  <a href="https://lovable.dev/projects/340145c6-1e8a-47c6-9732-b08d3720c610">
-    <img src="https://screenshot2.lovable.dev/lovp_0sjae8zj2y922aacwh27r29pw4/43bfd9909740080019f6a8bf550cfc3e_1790536781747.png"
+  <a href="https://github.com/CyberG3niusIT/j.a.r.v.i.s-desktop">
+    <img src="docs/assets/jarvis-desktop-home.png"
          alt="J.A.R.V.I.S Desktop: aktueller Home-Screen aus dem Projekt"
          width="100%">
   </a>
@@ -26,7 +26,7 @@
 
 J.A.R.V.I.S Desktop ist als lokales Control Center für **JARVIS Sleepy** gedacht. Die Oberfläche soll Runtime, Modelle, Sprache, Memory, Werkzeuge und Systemzustand an einem Ort verständlich machen: präzise, ruhig und wie professionelle Windows-Systemsoftware.
 
-Der Screenshot zeigt den aktuellen **Lovable-Referenzprototyp**. Er ist kein Beleg für eine laufende JARVIS-Runtime: Die sichtbaren Zustände sind `UNAVAILABLE`, `NO LIVE DATA` oder `NOT_IMPLEMENTED`, weil dieser Prototyp nicht mit einem Backend verbunden ist.
+Der Screenshot zeigt den aktuellen **UI-Quellprojekt-Referenzprototyp**. Er ist kein Beleg für eine laufende JARVIS-Runtime: Die sichtbaren Zustände sind `UNAVAILABLE`, `NO LIVE DATA` oder `NOT_IMPLEMENTED`, weil dieser Prototyp nicht mit einem Backend verbunden ist.
 
 ## Die zwölf Arbeitsbereiche
 
@@ -59,7 +59,7 @@ Die Bereiche bilden die Informationsarchitektur des Zielsystems. Ein Navigations
 
 ## Architekturgrenze
 
-Der Lovable-Code ist ein **visuelles und interaktives Referenzprojekt**, keine Produktionsarchitektur. Das native Produktziel ist:
+Der UI-Quellprojekt-Code ist ein **visuelles und interaktives Referenzprojekt**, keine Produktionsarchitektur. Das native Produktziel ist:
 
 **WinUI 3 · C# · .NET · Windows App SDK · XAML · MVVM**
 
@@ -69,18 +69,18 @@ Web-Routing, Browser-State, React-Komponenten und CSS-Materialität werden nicht
 
 | Artefakt | Aktueller Stand |
 |---|---|
-| Lovable-Preview | [Projekt öffnen](https://lovable.dev/projects/340145c6-1e8a-47c6-9732-b08d3720c610) |
-| Lovable-Quellrepository | [CyberG3niusIT/j.a.r.v.i.s-desktop](https://github.com/CyberG3niusIT/j.a.r.v.i.s-desktop) |
+| UI-Quellprojekt-Preview | [Projekt öffnen](https://UI-Quellprojekt.dev/projects/340145c6-1e8a-47c6-9732-b08d3720c610) |
+| UI-Quellprojekt-Quellrepository | [CyberG3niusIT/j.a.r.v.i.s-desktop](https://github.com/CyberG3niusIT/j.a.r.v.i.s-desktop) |
 | Diese README | `CyberG3niusIT/JARVIS-Sleepy`, Branch `J.A.R.V.I.S-UI` |
-| Inhalt dieses Branches | Aktuell diese Übergabe- und Projektdokumentation; der Lovable-Quellcode wurde noch nicht in diesen Branch übertragen |
+| Inhalt dieses Branches | Aktuell diese Übergabe- und Projektdokumentation; der UI-Quellprojekt-Quellcode wurde noch nicht in diesen Branch übertragen |
 | Backend / Live-Runtime | Nicht verbunden |
 | Produktionsreife | Nicht erreicht; dies ist ein UI-Referenzprototyp |
 
-Die Lovable-Vorschau kann eine Anmeldung im zugehörigen Workspace verlangen. Der oben eingebundene Screenshot wird direkt von Lovable ausgeliefert.
+Die UI-Quellprojekt-Vorschau kann eine Anmeldung im zugehörigen Workspace verlangen. Der oben eingebundene Screenshot wird direkt von UI-Quellprojekt ausgeliefert.
 
-## Lokale Entwicklung des Lovable-Quellprojekts
+## Lokale Entwicklung des UI-Quellprojekt-Quellprojekts
 
-Die folgenden Befehle gelten für das separate Lovable-Quellrepository, nicht für diesen derzeit dokumentationsbasierten Branch:
+Die folgenden Befehle gelten für das separate UI-Quellprojekt-Quellrepository, nicht für diesen derzeit dokumentationsbasierten Branch:
 
 ```bash
 bun install
@@ -94,7 +94,7 @@ bun run build
 bun run lint
 ```
 
-Diese Befehle wurden in diesem Branch nicht ausgeführt, weil der Lovable-Quellcode hier noch nicht liegt.
+Diese Befehle wurden in diesem Branch nicht ausgeführt, weil der UI-Quellprojekt-Quellcode hier noch nicht liegt.
 
 ---
 
