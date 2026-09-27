@@ -1,19 +1,27 @@
 # Installation und Betrieb
 
-## Repository-Einstieg
+## Zielumgebung
 
-Die maßgebliche Installation ist durch `docs/SETUP_GUIDE.md`, `start.sh`, GPU-/Chatterbox-Startskripte, Health-/Statusskripte und Systemd-Units beschrieben. Diese älteren Anleitungen wurden nicht als universell aktuelle Installationsfreigabe übernommen; Hardware-, Pfad- und Paketdetails gegen das Zielsystem validieren.
+JARVIS läuft lokal-first auf Windows 11 mit Ubuntu 24.04 unter WSL2. Der offizielle Operator-Pfad ist die Windows-Runtime-Steuerung, nicht ein zufälliger manueller WSL-Prozess.
 
-## Betriebsartefakte
+## Runtime-Steuerung
 
-Im Repo vorhanden sind `jarvis.service`, `systemd/`, mehrere `.service`-Dateien sowie `start.sh`, `restart.sh`, `stop.sh`, `status.sh` und `startup_checks.sh`. Units/Scriptinhalt ist Versionsstand, kein Beweis installierter oder gestarteter Services.
+```powershell
+$Runtime = "C:\Users\Alex\Projekte\JARVIS-Sleepy\Main\JARVIS-Runtime.ps1"
+& $Runtime -Action getRuntime
+```
 
-## Safe operation
+`start`, `stop` und `restart` sind nur zulässig, wenn die vom Supervisor gemeldeten Capabilities dies erlauben. Im Zustand READY war `start:false`, `stop:true`, `restart:true` korrekt.
 
-1. Git-Root `Main` identifizieren.
-2. Nur `.env.example` und öffentliche Config-Struktur lesen; Secrets lokal halten.
-3. Python-Umgebung und Modellabhängigkeiten gemäß gepflegtem Setup prüfen.
-4. zuerst Config/Health-Checks, dann Console/Textpfad, anschließend STT/TTS- und externe Dienste getrennt prüfen.
-5. Live- und synthetische Tests getrennt protokollieren.
+## Nach Reboot verifiziert
 
-Konkrete private Hostpfade und Runtime-Daten werden bewusst nicht als kanonische Setupwerte gespiegelt.
+Der Supervisor meldete READY ohne Degraded-Gründe. Voice, Primary, STT, Chatterbox, Audio-Bridge und VVS waren READY. Expert und FLUX waren on-demand STOPPED. NPU war nicht initialisiert. Web war im Supervisor NOT_IMPLEMENTED.
+
+## Betriebsregeln
+
+1. Runtime-State immer aus dem Supervisor lesen.
+2. Dienste nicht durch UI oder Configwerte als READY erfinden.
+3. Logs nur zur Diagnose, nicht als Ersatz für einen strukturierten Statusvertrag.
+4. GPU-Handover erst aktivieren, wenn echter Hardwaretest und Recovery akzeptiert sind.
+5. Cloud erst aktivieren, wenn Provider, Modell, Credential und Privacy-Vertrag bewusst gesetzt sind.
+6. Keine Secrets/DBs in Übergabe-ZIPs oder Frontend-Repositories kopieren.

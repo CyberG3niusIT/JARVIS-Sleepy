@@ -1,27 +1,23 @@
 # Tools, MCP und Skills
 
+## Prinzip
+
+Eindeutige Aufgaben werden deterministisch vor generativ gelöst. Skills und Tools sollen vorhandene Architektur wiederverwenden; ein neuer Pfad darf keine zweite Zuständigkeit erzeugen.
+
 ## Skills
 
-`core/skill_manager.py` lädt lokale Skill-Pakete aus `skills/`. Im Checkout vorhanden sind unter anderem System-, Personal-, School- und Mobility-Skills. Discovery/Safe-Mode-Werte stehen in `config.yaml`; ein Lockdown oder menschliches Freigabeverhalten ist nicht aus dem Statusflag abzuleiten.
+`core/skill_manager.py` lädt lokale Skill-Pakete aus `skills/`. School/Mobility und Systemfähigkeiten sind Teil dieser Schicht. Ein geladener Skill ist noch kein Nachweis, dass alle externen Abhängigkeiten verfügbar sind.
 
 ## Tools
 
-`core/tool_registry.py`, `core/tool_executor.py`, `core/tool_gate.py` und `core/tools/` bilden Registrierung, Ausführung und Schutzpfade. `tools/` enthält separate Dienste/Utilities. Fähigkeiten, die ein externes Binary, Netzwerk oder Freigabe benötigen, sind nur unter diesen Voraussetzungen nutzbar.
+`core/tool_registry.py`, `core/tool_executor.py`, `core/tool_gate.py` und `core/tools/` bilden Registrierung, Schema, Ausführung und Schutzpfade. Toolrechte bleiben durch Privacy-/Governance-/Capability-Gates begrenzt.
 
-Die Registry scannt Python-Toolmodule und erwartet Name, Schema und Prompt-Regel; Handler, Skill-Gating und immer verfügbare Tools werden getrennt registriert. MCP-Werkzeuge können dynamisch ergänzt werden. Ein Registry-Eintrag bestätigt weder sichere Konfiguration noch externe Erreichbarkeit.
-
-Die Registry scannt Python-Toolmodule automatisch und erwartet Name, Schema und Prompt-Regel; Handler, Skill-Gating und immer verfügbare Tools werden getrennt registriert. MCP-Werkzeuge können zur Laufzeit ergänzt werden. Ein Registry-Eintrag bestätigt nicht, dass ein externer Handler sicher konfiguriert oder erreichbar ist.
+Im Voice-Design werden Tool-Schemas derzeit nicht direkt an Gemma-Direct-Audio gehängt. Der parallele STT-/Textpfad erkennt Tool-/Skill-Turns und nutzt dann den etablierten deterministischen Pfad.
 
 ## MCP
 
-`core/mcp_client.py` enthält die Client-Bridge und `.mcp.json` liegt im Projekt. Serverinventar, erreichbare Sessions und Credentials werden hier nicht wiedergegeben; diese Werte müssen lokal vertraulich geprüft werden.
+`core/mcp_client.py` ist die Bridge zu explizit konfigurierten MCP-Servern. Externe MCP-Server, Sessions und Credentials sind Runtimekonfiguration und werden nicht aus Projektdateien als aktiv angenommen. `.mcp.json` ist nicht automatisch gleichbedeutend mit produktiver Runtime-Aktivierung.
 
-In der geprüften `config.yaml` ist der `mcp_servers`-Block auskommentiert. Console und Voice starten die Bridge nur bei nichtleerer geladener Serverzuordnung. `.mcp.json` ist nicht gleichbedeutend mit dieser Runtime-Konfiguration; seine Werte werden nicht gespiegelt.
+## Agents
 
-Die Bridge verbindet konfigurierte MCP-Server als Subprozesse, führt einen asyncio-Loop im Hintergrund, entdeckt deren Tools und bindet Handler in den synchronen JARVIS-Toolpfad ein. Timeouts und begrenzte Reconnect-Versuche sind implementiert. Kein Server wurde während der Dokumentation verbunden.
-
-Die Bridge startet konfigurierte MCP-Server als Subprozesse, führt einen asyncio-Loop im Hintergrund, entdeckt deren Tools und bindet synchrone Handler in den JARVIS-Toolpfad ein. Connect-/Call-Timeouts und begrenzte Reconnect-Versuche sind implementiert. Kein aktiver Server wurde in dieser Dokumentationsrunde verbunden.
-
-## Entwicklung und Agents
-
-Skill-Guides und Änderungen sind in älteren Dokuquellen zu finden. Ruflo, ECC und Agency Agents werden nicht als JARVIS-Runtimekomponenten dokumentiert, da Integration im aktiven Code nicht belegt ist.
+Tools und Skills sind keine autonomen Agenten. Mehrschritt-Agenten erhalten begrenztes Ziel, Kontext, Rechte, Budget, Timeout und Abbruchbedingungen. Sie dürfen Governance, Privacy oder Tool-Gates nicht umgehen.

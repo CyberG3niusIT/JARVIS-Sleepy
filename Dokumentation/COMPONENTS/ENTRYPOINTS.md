@@ -1,21 +1,23 @@
 # Entrypoints, Dienste und Audio-Grenzen
 
-## Startup-Komposition
+## Entrypoints
 
-| Einstieg | Code-gebundene Komponenten | Nicht ableitbar |
-|---|---|---|
-| `jarvis_continuous.py` | STT-Auswahl, ConversationManager, LLMRouter, TTS/Audio, SkillManager, optional MCP, Memory/Context, Reminder-/Awareness-/Hintergrundkomponenten | dass benötigte Geräte, Server oder DBs aktuell verfügbar sind |
-| `jarvis_console.py` | ConversationManager, LLMRouter, SkillManager, TaskPlanner, optional MCP, Reminder-/Kalenderpfad | dass Terminalmodus zugleich den Voice-Poller startet |
-| `jarvis_web.py` | HTTP/WebSocket, ConversationManager, LLMRouter, SkillManager, Reminder, News/Weather, Memory/Context, Metrics/EventLogger, Health snapshots, ObservationCollector, TaskPlanner | dass jede Console-/Voice-Funktion gleich implementiert ist |
+- `jarvis_continuous.py`: Voice-/Event-Runtime
+- `jarvis_console.py`: Text-/Operatorpfad
+- `jarvis_web.py`: Web/API-Pfad
+- `JARVIS-Runtime.ps1` / `JARVIS.Runtime.psm1`: autoritative Windows-Runtime-Steuerung
 
-Der Web-Reminder-Manager wird im Web-Modus für explizite Aufrufe bereitgestellt, aber seine Hintergrundpolling-Schleife wird dort laut Code nicht gestartet; Voice behandelt Reminder-Polling. Calendar-, Weather-, News- und Memory-Pfade werden einzeln anhand ihrer Konfigurationsflags initialisiert.
+## Audio
 
-## Voice und WSL
+Continuous Voice bindet VAD, Wake, TurnAssembler, Direct-Audio, Qwen3-ASR, Gemma und Chatterbox. Die Windows-Audio-Brücke wurde im Runtime-Snapshot als READY gemeldet.
 
-Der Continuous-Pfad unterstützt konfigurierbares STT und koppelt Mic-Ingest, VAD/Wakeword, Pipeline und TTS. Die YAML nutzt PulseAudio-Input/Output und enthält Windows-Audio-/Temp-Optionen. TTS-Code löst Linux-Audiogeräte auf; Windows-Programme können über WSLInterop gestartet werden. Reale Audiohardware und WSLInterop wurden nicht getestet.
+## Ports
 
-## Port- und Laufzeitgrenzen
+- 8080 Gemma Primary
+- 8082 Qwen Expert
+- 8088 VVS
+- 8091 JARVIS Web vorgesehen
+- 8190 FLUX on-demand
+- 8765 Chatterbox
 
-`config.yaml` verwendet `web.port: 8088` als Default. Der Mobility-Einsatzwert nennt ebenso `127.0.0.1:8088` für den separaten lokalen VVS-Dienst. Wenn beide Prozesse im selben Netzwerk-Namespace lauschen, können sie nicht beide denselben Socket belegen. Aktuelle Overrides und Namespaces sind offen; siehe [Known Issues](../13_KNOWN_ISSUES.md).
-
-Systemd-Dateien und Startskripte dokumentieren gewünschte Prozessstarts. Installierte Units, laufende Prozesse, Secrets und API-Health wurden nicht geprüft.
+Die frühere Web/VVS-Kollision auf 8088 ist im aktuellen Configstand aufgelöst. Web bleibt im Supervisor noch NOT_IMPLEMENTED.

@@ -1,21 +1,27 @@
 # Security und Privacy
 
-## Projektgrenzen
+## PrivacyGate
 
-Secrets werden ausschließlich als erforderliche Environment-Variablen benannt, niemals mit Werten dokumentiert. Keine lokale `.env`, Datenbank, Logdatei, persönliche Aufzeichnung oder Modellablage wird in diese Dokumentation kopiert. `.env.example` dient als Platzhalterquelle.
+`core/privacy_gate.py` implementiert Capability-Gates für unter anderem Mikrofon/STT, Memory, Cloud-LLM, MCP/Remote-Tools, Kamera/Screen/Clipboard und Content-Logging. Coverage ist verteilt und muss weiterhin an realen Call-Sites auditiert werden.
 
-## Codepfade
+Der Gate-Singleton ist prozesslokal. Mehrere Prozesse teilen Privacy-State nicht automatisch.
 
-Das Repository enthält `core/privacy_gate.py`, `core/privacy_control_watcher.py`, Tool-Gates und eine `SECURITY.md`. Deren Existenz beweist nicht, dass alle Fähigkeiten zentral policy-geprüft werden. Tool-, Skill-, MCP-, Netzwerk- und Beobachtungspfade müssen einzeln geprüft werden.
+## Cloud
 
-`PrivacyGate` ist ein prozesslokales Singleton; der Watcher ist für den langlebigen Voice-Prozess ausgelegt. Ein Privacy-Modus in einem anderen Prozess teilt nicht automatisch denselben Singletonzustand. Im Code existieren konkrete Gates unter anderem für Mikrofon/STT, Memory-Schreib-/Extraktionspfade, Cloud-LLM, MCP und Kamera-/Desktopfunktionen. Daraus folgt keine vollständige zentrale Policy-Abdeckung.
+Aktueller checked-in Zustand:
 
-`self_evolution.auto_consult` ist in der geprüften Konfiguration aktiviert, und Observation-Findings können an Claude gesendet werden. Dieser mögliche externe Datenfluss ist bei Betriebsfreigabe und Privacy-Bewertung zu berücksichtigen.
+- OpenRouter ist bevorzugter Cloud-Provider, aber `llm.api.enabled: false`.
+- `llm.api.model: null`.
+- Anthropic ist kein impliziter Default mehr.
+- Anthropic darf nur bei expliziter Provider-Auswahl, aktivierter Cloud, Modell/Credential und `PrivacyGate(CLOUD_LLM)` erreicht werden.
+- `self_evolution.auto_consult: false`.
 
-## Mobile-Grenze
+Damit gibt es aktuell keinen automatisch aktiven Observation->Claude-Datenfluss mehr.
 
-Das separate Android-Projekt hält offene Entscheidungen zu Pairing/Trust, Privacy-Gating, Permissions und Local Runtime in `android/OPEN_DECISIONS.md`. Konkrete Sleepy-Verbindung und vollständiges Enforcement sind dort nicht als fertig belegt.
+## Voice-/Turn-Cleanup
 
-## Dokumentationsregeln
+Privacy-Flush, stale generation und Turn-Cancel müssen laufende/speculative Requests terminal beenden. Ein später Retry oder Cloud-Fallback aus einem verworfenen Turn wäre ein Privacy- und Zustandsfehler. Der reale Voice-Test zeigte einen verwaisten Retry nach Conversation-Timeout; dieser Punkt bleibt vor Produktivfreigabe zu schließen.
 
-Keine Credentials, personenbezogenen Daten, internen DB-Inhalte, persönlichen Schul-/Mobilitätsdaten, private Stopp-IDs oder realen Logauszüge aufnehmen. Netzwerkendpunkte nur soweit erforderlich und bereits ausdrücklich als lokale Schnittstelle freigegeben nennen.
+## Secrets
+
+`.env`, API-Keys, Tokens, private DBs und persönliche Logs gehören weder in Git noch in den Lovable-Handoff. `.env.example` darf nur Variablennamen/Platzhalter enthalten.

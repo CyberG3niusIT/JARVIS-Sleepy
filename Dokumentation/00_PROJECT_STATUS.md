@@ -1,50 +1,76 @@
-# Projektstatus (24.09.2026)
-
-**Gesamt: PARTIAL / aktive Entwicklung.** Geprüft wurden Repository `Main`, `config.yaml`, `.env.example` (Namen/Platzhalter, keine lokale `.env`), Quellverzeichnisse und Git-Metadaten. Keine Live-Dienste, privaten Datenbanken oder externen Modellverzeichnisse wurden geprüft.
+# Projektstatus (27.09.2026)
 
 ## Git-Evidenz
 
-- Branch: `main`
-- HEAD: `5603945ee0ff6fe6b7b1fac5cbadd3a64191cab6`
-- Lokale Statusanzeige: `main...origin/main`; dies wurde nur aus lokalem Git-Status abgelesen, kein Remote kontaktiert.
-- Arbeitsverzeichnis: zahlreiche vorhandene Änderungen und neue Dateien, unter anderem Pipeline/Reminder/TTS, Konfiguration, Mobility, School und Voice. Zusätzlich wurde in dieser Doku-Runde der README-Einstieg auf die zentrale Doku verlinkt.
+Aktuell zuletzt verifiziert für `Main`:
 
-Weitere getrennte Quellcheckouts im Workspace:
+- Branch: `backup/jarvis-runtime-voice-2026-09-24`
+- HEAD: `a977e1e77ff7f2531dbdfe1a9251b4341541586a`
+- Worktree: umfangreich dirty; der reale Entwicklungsstand liegt deutlich über dem HEAD.
+- Keine Historienumschreibung, kein Reset/Clean und kein automatischer Commit im Rahmen der dokumentierten Arbeiten.
 
-| Checkout | Branch / HEAD | Arbeitsstatus am Ende der Doku-Runde |
-|---|---|---|
-| `Architecture` | `claude/jarvis-architecture` / `833bcebd74e1c0da506c3c5e71bf93b8625190a8` | zuvor sauber; README in dieser Doku-Runde markiert |
-| `Backend-RC` | `claude/jarvis-sleepy-backend-rc-nhtfgm` / `b8067965fe0514c8359b46807b8d97f187229b18` | zuvor sauber; README in dieser Doku-Runde markiert |
-| `UI` | `claude/jarvis-ui` / `08c3c17bbdf6e3a2e112ae2eedd371d755530cc0` | zuvor sauber; README in dieser Doku-Runde markiert |
-| `Mobile-App` | `J.A.R.V.I.S-Mobile-App` / `a5b87137926c81e205e7036e1cd89150f43cb03f` | vorbestehendes `.gitignore` geändert und `.gitattributes` untracked; README in dieser Doku-Runde markiert |
+Branch/HEAD sind nur Baseline. Für Funktionsstatus ist der aktuelle Worktree maßgeblich.
 
-Der angezeigte Tracking-Name ist nur lokaler Git-Status; es wurde kein Remote kontaktiert.
+## Reale Runtime-Evidenz nach Windows-Neustart
 
-## Komponentenstatus (Kurzform)
+Am 26.09.2026 meldete `JARVIS-Runtime.ps1 -Action getRuntime`:
 
-| Teil | Status | Nachweisgrenze |
-|---|---|---|
-| Python Core / TaskPlanner / Router / Memory / People / Skills / Reminder / Tools | implemented | Codepfade vorhanden; Runtime und persistente Daten nicht geprüft |
-| Console / Web / Continuous Voice | partial | getrennte Frontends mit unterschiedlichen Startpfaden; Live-/Audio-Abnahme offen |
-| lokale LLM-, STT-, TTS- und MCP-Anbindungen | partial | Adapter/Config vorhanden; Dienste/Modelle nicht live geprüft; MCP-Serverkonfiguration auskommentiert |
-| School/Mobility | experimental | uncommitteter Code, Skill, Doku und Tests; Live-Abnahme offen |
-| Vocal Directions | experimental | uncommitteter Parser-/Pipelinecode und Probes; Hörfreigabe nicht belegt |
-| Ruflo, ECC, Agency Agents, OpenClaw, LM Studio | not implemented / not evidenced | keine aktive Main-Runtime-Integration festgestellt |
-| Android | partial | separates Repo; UI vorhanden, echte Runtime-/Trust-Bindungen offen |
+- Gesamtzustand `READY`
+- `degradedReasons: []`
+- `voice-daemon`: READY
+- `llm-primary` / Alias `llm-main`: READY
+- `stt-model`: READY
+- `chatterbox`: READY
+- `audio-bridge`: READY
+- `vvs`: READY
+- `llm-expert`: STOPPED, on-demand
+- `flux`: STOPPED, on-demand
+- `npu-sensor`: STOPPED, Backend nicht initialisiert
+- `web`: NOT_IMPLEMENTED im Supervisor
 
-Reifezustände folgen den Definitionen in [02_COMPONENTS.md](02_COMPONENTS.md). `planned`, `blocked` und `deprecated` werden nur bei konkreter Planungs-, Blocker- oder Ablöse-Evidenz verwendet.
+`start` wurde im Zustand `READY` korrekt abgewiesen. Daraus folgt nicht automatisch, welcher Boot-/Autostartmechanismus den Zustand hergestellt hat.
 
-## Angegebene School/Mobility-Testhistorie
-
-Die Zahlen 600 Unit-Tests und bestandener 65-Minuten-DORMANT-Soak sowie der Stand des Live-Canarys am 24.09. (Exitcode 1), die Vorbereitung für 25.09. und die noch offene Live-Abnahme stammen aus dem vom Auftraggeber gelieferten Status. Sie wurden in dieser Dokumentationsrunde nicht erneut ausgeführt und sind daher **historisch berichtet, nicht unabhängig verifiziert**.
-
-## Modellstatus (25.09.2026, nicht committet)
+## Komponentenstatus
 
 | Teil | Status | Nachweisgrenze |
 |---|---|---|
-| Gemma 4 12B Primary (Audio/Vision) | partial | Logik nur Unit-Test (Fakes); Integration nicht auf Hardware getestet; Unit-Namen/mmproj Platzhalter |
-| Qwen3.5-35B-A3B Expert + GPU-Handover | partial | Ladezeit ca. 90-100 s gemessen; Handover nur mit Fake-`systemctl` getestet |
-| NPU-Präsenz (buffalo_l) | partial | auf Dateieingabe belegt; Live-Kamera auf NPU und NPU-Wake-Word NOT_IMPLEMENTED |
-| Vision-Gate | experimental | standardmäßig aus (`vision.presence.llm_gate.enabled: false`) |
+| Core / Router / Skills / Tools / Memory | implemented / partial | Code und breite Tests vorhanden; einzelne Runtimepfade weiter in Abnahme |
+| Runtime Supervisor | implemented, live belegt | READY-Snapshot nach Reboot; Lifecycle-State-Guard belegt |
+| Gemma 4 12B Primary | partial, live geladen | Primary-Service READY; reale Voice-Acceptance noch fehlerhaft |
+| Qwen3.5-35B-A3B Expert | partial | Service on-demand/STOPPED; Handover weiterhin nicht für normalen Betrieb freigegeben |
+| Qwen3-ASR | live | STT-Ausgaben im realen Voice-Test beobachtet |
+| Chatterbox | live | reale TTS-Ausgabe beobachtet; Watchdog/TTS-State-Interaktion fehlerhaft |
+| Direct-Audio / Turn Aggregation | partial | realer Acceptance-Test durchgeführt, aber nicht bestanden |
+| NPU Presence | partial | Backendpfad vorhanden; Runtime nach Reboot nicht initialisiert; NPU-Wake weiterhin nicht implementiert |
+| VVS / Mobility API | partial / live service | Supervisor meldete VVS READY; fachliche School/Mobility-End-to-End-Abnahme bleibt separat |
+| Web API | partial | Quellcode vorhanden; Supervisor behandelt Web weiterhin als NOT_IMPLEMENTED |
+| Desktop UI | redesign | bisherige Desktop-Implementierung wird ersetzt; Backend-/State-Vertrag bleibt relevant |
+| Android | separates Projekt | nicht Teil des Desktop-Neuaufbaus |
 
-Details: [03](03_RUNTIME_AND_MODELS.md), [13](13_KNOWN_ISSUES.md).
+## Cloud-Status
+
+Nach dem Anthropic-/Provider-Audit:
+
+- kein impliziter `anthropic`-Default mehr im Router
+- kein Claude-Modell als Default
+- `llm.api.provider: openrouter`
+- `llm.api.enabled: false`
+- `llm.api.model: null`
+- `OPENROUTER_API_KEY` als vorgesehener Credential-Name
+- Anthropic bleibt optional und nur explizit auswählbar
+- `self_evolution.auto_consult: false`
+- keine projektlokale Co-Author-Automatik gefunden
+
+Die Cloud kann mit dieser checked-in Konfiguration aktuell keinen Request ausführen.
+
+## Reale Voice-Abnahme 26.09.2026
+
+Der erste Hardware-/E2E-Test zeigte:
+
+1. Wake-only `Aura` wurde bei einer natürlichen Pause zu früh abgeschlossen.
+2. Watchdog setzte Speaking-Flags während noch laufender Chatterbox-Ausgabe zurück.
+3. speculative Direct-Audio-Cancel erzeugte `NoneType ... read` statt eines sauberen Cancel-Pfads.
+4. nach Conversation-Timeout lief ein alter LLM-Retry weiter und erreichte anschließend den Cloud-Fallbackpfad.
+5. eine danach vollständig erneut gesprochene Anfrage wurde von Gemma beantwortet; der genaue Direct-Audio-vs-Text-Pfad war im vorhandenen Log nicht eindeutig markiert.
+
+Bis diese Punkte erneut auf Hardware bestanden sind, gilt Voice nicht als abgenommen.

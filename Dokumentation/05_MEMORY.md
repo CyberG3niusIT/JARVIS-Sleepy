@@ -1,19 +1,29 @@
 # Memory und Datenhaltung
 
-## Implementierte Pfade
+## Runtime-Bausteine
 
-`core/memory_manager.py`, `core/context_window.py`, `core/interaction_cache.py` und `core/tts_cache.py` implementieren getrennte Memory-/Cache-Aufgaben. `config.yaml` enthält Schalter, Retention-/Schwellwerte und externe DB-Pfadkonfigurationen für Memory, Metrics, People, School, Mobility und Reminder.
+`core/memory_manager.py`, `core/context_window.py`, `core/interaction_cache.py` und weitere Stores trennen Langzeitfakten, Interaktionen, Arbeitskontext und Caches. Semantische Suche nutzt FAISS; persistente Daten liegen außerhalb des Quellrepositorys.
 
-Der MemoryManager hält getrennte Fakten, Interaktionen und kontextuelle Historie; er unterstützt semantische Suche über FAISS, Recall-/Transparenz-/Vergessen-Pfade, Interaktionsabruf und konfigurierbare Retention. Extraktion kann pro Turn und in Batches angestoßen werden. `context_window.py` verwaltet thematisch segmentierten Arbeitskontext mit begrenzten jüngsten Originalnachrichten und Zusammenfassung älterer Segmente. Diese Codepfade sind implementiert; reale Index-/Datenbankinitialisierung und vollständige Lebenszyklusabnahme sind nicht bestätigt.
+Memory muss explizite Aussagen, bestätigte Fakten, Beobachtungen, Inferenz, Hypothesen, temporären Kontext, Korrekturen und veraltete Informationen unterscheiden. Nutzerkorrekturen haben Vorrang; Unsicherheit und Provenance müssen erhalten bleiben.
 
-PeopleManager ist ein separater Kontakt- und Aussprachespeicher (`core/people_manager.py`) und registriert Aussprachekorrekturen für den TTS-Normalizer. Konversationsfakten im Memory und strukturierte Personenprofile sind verschiedene Datenbereiche.
+## UI-Vertrag
 
-Weitere persistente Bereiche liegen in eigenen Modulen/Stores: ReminderManager, EventLogger, MetricsTracker, News-/Weather-Stores sowie TTS-/Interaction-Caches und School-/Mobility-Profile. Hier werden keine konkreten Runtime-Pfade, Tabelleninhalte oder persönlichen Daten dokumentiert. Retention, Backup, Löschung und Dateirechte sind für jedes Betriebsprofil separat nachzuweisen.
+Die neue Desktop-Oberfläche darf Memory visualisieren, aber keine internen Zustände erfinden. Die geplante Gehirn-/Synapsenansicht ist eine **Visualisierung beobachtbarer Verarbeitungsschritte**, zum Beispiel:
 
-## Speichergrenze
+- aktiver Arbeitskontext,
+- Memory-Retrieval,
+- semantische Verknüpfungen,
+- Tool-/Skill-Entscheidungen,
+- Modellrouting,
+- Antwortgenerierung,
+- neue bestätigte Memory-Verknüpfungen.
 
-Die Runtime-Daten liegen außerhalb des Quellrepositorys. Diese Dokumentation nennt absichtlich keine privaten Datensätze, Inhalte, persönlichen Pfade oder Schema-/Zeileninhalte. Datenbanken wurden nicht geöffnet. Vorhandensein eines `db_path` belegt weder initialisierte Datenbank noch erfolgreiche Zugriffe.
+Sie ist kein wörtliches Auslesen oder Anzeigen verborgener Modell-Gedankenketten. Nicht verfügbare Daten werden als unbekannt/unavailable dargestellt.
 
-## Status und offene Prüfung
+## Datenschutz und Persistenz
 
-Fakten-Retrieval, Interaktionscache und kontextuelle Segmente sind codegestützt, aber tatsächliche Initialisierung, Embedding-Modellverfügbarkeit, Datenintegrität, Löschpfade und Retention wurden nicht live geprüft. Ein belastbarer Runtime-Health-Nachweis fehlt.
+Private Datenbanken, konkrete persönliche Inhalte und Secrets werden nicht in dieser Doku gespiegelt. Memory Learning ist keine Self-Modification: Memory darf keine Rechte erweitern, Privacy umgehen, Tools freischalten, Cloud aktivieren oder Code verändern.
+
+## Status
+
+Memory-/Context-Code ist implementiert. Die Desktop-UI soll Backenddaten verwenden und keine Speichergrößen, Confidence-Werte oder Wissenswachstumsmetriken simulieren, wenn dafür keine reale Quelle existiert.

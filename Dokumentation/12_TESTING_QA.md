@@ -1,29 +1,40 @@
 # Testing und QA
 
-## Teststruktur
+## Testklassen
 
-`tests/unit/`, `tests/integration/`, `tests/routing/` und `tests/components/` enthalten getrennte Testbereiche. Mobile hat einen eigenen Android-Test-/Buildpfad im separaten Repository. Kein Test wurde für diese Dokumentationsarbeit ausgeführt.
+Code vorhanden != Unit-Test != Integrationstest != Runtime-Test != Hardware-/E2E-Test. Jede Statusbehauptung muss die tatsächlich erreichte Stufe nennen.
 
-## Aussagekraft
+## Berichtete aktuelle Regression
 
-Unit-Tests mit Fakes/Fixtures belegen Logik unter Testbedingungen, keine Erreichbarkeit externer Dienste, Modellqualität, Hardwareleistung oder reale Datenkorrektheit. Live-Abnahme braucht getrennte Evidenz mit Zeit, Build/HEAD, Dienstgesundheit, Eingabequelle und Resultat.
+Vor dem späteren Live-Voice-Test wurde ein gezielter Regressionslauf mit **583 passed, 1 skipped (Hardware-Smoke)** berichtet. Zusätzlich wurden `py_compile`, `bash -n`, YAML-Load und Zeilenenden geprüft. Diese Ergebnisse wurden im Rahmen dieses Doku-Refreshs nicht erneut ausgeführt.
 
-## School/Mobility
+Nach der Cloud-/Provider-Bereinigung berichtete Codex **80 fokussierte Router/Provider/Privacy-Tests bestanden**, außerdem `py_compile`, YAML Parsing und `git diff --check`. Es wurden keine echten Cloud-Calls ausgeführt und kein Daemon für diesen Testlauf neu gestartet.
 
-Im Arbeitsbaum liegen neue Testmodule für Contract, Planner, DB, Flow, Skill-Loading und Reiseevents. Auftraggeberseitig wurde zuletzt ein Umfang von 600 Unit-Tests genannt; hier nicht erneut verifiziert. 65-Minuten-DORMANT-Soak und Canary-Angaben sind in [08](08_SCHOOL_MOBILITY.md) als berichtet markiert.
+## Reale Runtime-/Hardware-Evidenz
 
-## Voice
+### Reboot
 
-Neue Vocal-Direction- und Runtime-Check-Tests liegen uncommittet. Ein erfolgreicher Unit-Test wäre keine hörbasierte Produktfreigabe und kein Nachweis GPU-fähiger Chatterbox-Turbo-Ausführung.
+`getRuntime` nach vollständigem Windows-Neustart: READY, keine Degraded-Gründe.
 
-## Modell-/Voice-Umbau (25.09.2026)
+### Voice Acceptance 26.09.2026
 
-Neue Testdateien: `test_turn_assembler`, `test_direct_audio_routing`, `test_speculative_audio_side_effects`, `test_model_handover`, `test_expert_delegation`, `test_vision_gate`, `test_expert_handover_integration`, `test_stop_fastpath_integration`. Sie arbeiten mit Fakes (u. a. Fake-`systemctl`, Fake-LLM) und belegen Logik, keine Hardware-Funktion.
+**Nicht bestanden.** Reproduzierte Punkte:
 
-Ausführung (WSL Ubuntu-24.04, venv):
+- Wake-only/Turn-Aggregation trennt natürliche Pause falsch.
+- Watchdog öffnet Listening während laufender TTS.
+- speculative Stream-Cancel endet mit `NoneType ... read`.
+- stale/orphaned Retry läuft nach Conversation-Timeout weiter.
+- eine danach vollständig gesprochene Anfrage wird beantwortet, aber der Direct-Audio-Pfad ist im Log nicht eindeutig beweisbar.
 
-```
-wsl.exe -d Ubuntu-24.04 -- /home/alex/jarvis-venv/bin/python3 -m pytest <Testdatei>
-```
+Daher darf Voice trotz funktionierender Teilpfade noch nicht als E2E-verifiziert bezeichnet werden.
 
-Es wird **keine** Aussage über eine vollständige Suite gemacht; nur die genannten Dateien wurden gezielt betrachtet. Nicht getestet auf Hardware: Direct-Audio mit Gemma, Handover mit echtem systemd, NPU-Live-Kamera.
+## Nächste Acceptance-Matrix
+
+1. normaler Aura-Dialog, ein Turn, Gemma Direct-Audio
+2. Satz mit natürlicher Pause, weiterhin ein Turn
+3. Zeit/Tool-/Skill-Frage über Textpfad
+4. bare `Aura` erst nach Grace als Minimal-Greeting
+5. `Aura, stopp` während TTS unterbricht sauber
+6. Privacy während aktivem Request verwirft Turn ohne spätere Antwort
+7. kein orphaned Retry nach Cleanup
+8. explizite Pfadmarker belegen Direct-Audio vs. Textpfad

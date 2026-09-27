@@ -1,18 +1,24 @@
-# JARVIS Sleepy — Technische Dokumentation
+# JARVIS Sleepy - Technische Dokumentation
 
-Diese Dokumentation beschreibt den überprüften Stand des Repositorys `Main` am 24.09.2026. Quellcode, aktive Konfiguration und der lokale Git-Arbeitsstand sind maßgeblich. Statusangaben unterscheiden implementierte Software von historischen Behauptungen, Planung und nicht verifizierter Runtime.
+**Stand: 27.09.2026.** Diese Dokumentation beschreibt den derzeit belegten Entwicklungsstand von `C:\Users\Alex\Projekte\JARVIS-Sleepy\Main`. Maßgeblich sind aktueller Runtime-Befund, aktueller Worktree und reale Tests. Ältere Branch-/HEAD-Angaben, UI-Prototypen und historische Doku sind nachrangig.
 
-## Was ist JARVIS Sleepy?
+## Aktueller Gesamtstatus
 
-Ein modularer, primär lokaler Sprachassistent mit Python-Core, Skill-/Tool-Routing, Memory- und Reminder-Komponenten sowie Voice-, Konsolen- und Web-Einstiegspunkten. Er läuft in einer Windows/WSL-Entwicklungsumgebung. Externe Dienste und lokale Modelle sind konfigurierbare Integrationen; ihre Verfügbarkeit wird hier nicht aus Konfiguration abgeleitet.
+**PARTIAL / aktive Entwicklung.** Der produktionsnahe Kern läuft lokal-first. Nach einem vollständigen Windows-Neustart meldete der offizielle Runtime-Supervisor am 26.09.2026 `READY` ohne Degraded-Gründe. Voice-Daemon, Gemma Primary, Qwen3-ASR, Chatterbox, Windows-Audio-Brücke und VVS wurden dabei als `READY` gemeldet. Expert-Qwen und FLUX waren erwartungsgemäß `STOPPED`/on-demand; NPU-Presence war `STOPPED` mit nicht initialisiertem Backend; Web war im Supervisor `NOT_IMPLEMENTED`.
 
-## Gesamtstatus
+Der erste reale Voice-Acceptance-Test nach diesem Neustart war **nicht bestanden**: Wake/Turn-Aggregation, Watchdog während TTS, speculative Stream-Cancel und ein verwaister Retry zeigten Fehler. Eine spätere vollständige Sprachfrage wurde beantwortet, der konkrete Direct-Audio-Pfad war im Log aber nicht eindeutig bewiesen. Diese Grenze ist in [06 Voice](06_VOICE_STT_TTS.md) und [13 Known Issues](13_KNOWN_ISSUES.md) dokumentiert.
 
-**PARTIAL / in Entwicklung.** Core, Router, Skills, Tools, STT/TTS-Adapter und Web-/Konsolenpfade sind im Code vorhanden. Das aktuelle Checkout enthält umfangreiche uncommittete Änderungen. School/Mobility und Vocal Directions sind neu hinzugekommene, noch nicht live abgenommene Bereiche. Android ist ein separates Repository und ein UI-Port mit wesentlichen Runtime-Bindungen offen. Reale Produktivlaufzeit, Modelle, Datenbanken und persönliche Daten sind nicht Bestandteil dieser Dokumentation.
+## Aktuelle Modellrollen
 
-## Architekturüberblick
+- **Gemma 4 12B** ist PRIMARY auf Port 8080. Sie ist für normalen Dialog, Direct-Audio und Vision via mmproj vorgesehen.
+- **Qwen3.5-35B-A3B** ist EXPERT auf Port 8082. Er wird nur bei gezielter Eskalation und GPU-Handover verwendet; das Handover ist derzeit weiterhin deaktiviert, bis die Hardware-Abnahme vollständig ist.
+- **Qwen3-ASR** bleibt für STT und den parallelen Text-/Routing-Pfad aktiv.
+- **Chatterbox** ist aktive TTS-Engine.
+- **OpenRouter** ist als bevorzugter Cloud-Provider vorbereitet, aber aktuell deaktiviert und ohne Modell konfiguriert. Anthropic ist nur optional und darf nur bei expliziter Provider-Auswahl erreicht werden.
 
-`jarvis_console.py`, `jarvis_continuous.py` und `jarvis_web.py` initialisieren gemeinsam genutzte Core-Komponenten. `core/pipeline.py` koordiniert Ereignisse und den Voice-Ablauf; `ConversationRouter`, `TaskPlanner`, `SkillManager`, `ToolRegistry` und `MemoryManager` übernehmen Routing, Zerlegung, Fähigkeiten, Tools und Gedächtnis. Weitere Manager decken Personen, Reminder, Awareness, Beobachtung, MCP, Audio und Desktop ab. Details: [01 Architektur](01_ARCHITECTURE.md), [02 Komponenten](02_COMPONENTS.md).
+## Desktop-UI
+
+Die bisherige Desktop-Anwendung gilt nicht mehr als visuelle Zielimplementierung. Sie wird neu aufgebaut. Die bestehende Doku `16_UI_CONTROL_HUB.md` wurde deshalb in eine aktuelle Backend-/State-Vertrags- und Redesign-Baseline überführt. Die neue visuelle Richtung und der Lovable-Handoff stehen in [18 Desktop Redesign / Lovable](18_DESKTOP_REDESIGN_LOVABLE.md).
 
 ## Dokumentenindex
 
@@ -32,25 +38,27 @@ Ein modularer, primär lokaler Sprachassistent mit Python-Core, Skill-/Tool-Rout
 - [13 Bekannte Probleme](13_KNOWN_ISSUES.md)
 - [14 Roadmap](14_ROADMAP.md)
 - [15 Entwicklungshistorie](15_CHANGELOG_DEVELOPMENT.md)
-- [16 UI Control Hub (Desktop-UI, Branch `claude/jarvis-ui`)](16_UI_CONTROL_HUB.md)
-- [Dokumentationsinventar und Klassifikation](INVENTORY.md)
-- [Vollständiges Quellenregister (137 Pfade, 43 Inhaltsgruppen)](LEGACY/SOURCE_REGISTER.md)
+- [16 Desktop Control Hub / Backend-State-Vertrag](16_UI_CONTROL_HUB.md)
+- [17 Tooling und GitHub](17_TOOLING_UND_GITHUB.md)
+- [18 Desktop Redesign / Lovable](18_DESKTOP_REDESIGN_LOVABLE.md)
+- [Inventar](INVENTORY.md)
 - [Komponentenregister](COMPONENTS/README.md)
-- [Legacy-Bestände](LEGACY/README.md)
+- [Legacy](LEGACY/README.md)
 - [ADR](ADR/README.md)
 
-## Wichtigste Quellpfade
+## Source-of-Truth
 
-Core: `core/`; Skills: `skills/`; Tools: `core/tools/`, `tools/`; Services: `services/`; Konfiguration: `config.yaml`, `.env.example`; Tests: `tests/`; Betrieb: `systemd/`, `*.service`, `*.sh`; Mobile getrennt: `../Mobile-App/`.
+1. laufendes System / reale Runtime
+2. aktueller `Main`-Worktree
+3. Git-Stand und Konfiguration
+4. reale Tests und Messwerte
+5. diese zentrale Dokumentation
+6. ältere Doku, Legacy-Checkouts und frühere UI-Prototypen
 
-## Entwicklungsregeln
+## Dokumentationsregeln
 
-1. Laufzeitbehauptungen nur mit aktueller Runtime-Evidenz; `enabled: true` bedeutet nicht, dass ein Dienst erreichbar oder live abgenommen ist.
-2. Private Runtime-Daten und Modellbestände bleiben außerhalb der Dokumentation. Keine Secrets, personenbezogenen Angaben oder DB-Inhalte aufnehmen.
-3. Vor Änderungen Git-Status prüfen und bestehende Änderungen bewahren. Die Dokumentation nennt den am Prüftag sichtbaren Branch und HEAD.
-4. Entwürfe, Experimente, Codeimplementierung, Tests und Live-Abnahme getrennt kennzeichnen.
-5. Keine Git-Remote-Aktionen oder Historienumschreibungen im Rahmen dieser Dokumentation.
-
-## Offene Punkte
-
-Live-Abnahme der School/Mobility-Integration, nachvollziehbarer Runtime-Nachweis für konfigurierbare lokale/Cloud-Dienste, WSL ROCm-Passthrough für GPU-Experimente, kanonische Entscheidung über verteilte/alte Dokuquellen und fehlende ADR-Belege. Das Mobile-Pairing sowie Privacy-/Permission-Enforcement bleiben offen.
+- Konfiguration ist kein Laufzeitbeweis.
+- Code vorhanden ist kein Hardware-/E2E-Nachweis.
+- Frontends dürfen keine Runtime-Zustände erfinden.
+- Private Runtime-Daten, Secrets und personenbezogene Inhalte gehören nicht in diese Doku.
+- Historische oder nicht erneut geprüfte Angaben werden ausdrücklich als solche markiert.

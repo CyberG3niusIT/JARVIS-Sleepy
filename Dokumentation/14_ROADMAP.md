@@ -1,19 +1,26 @@
 # Roadmap
 
-Dies ist eine Lücken-/Prioritätenliste aus dem geprüften Code- und Statusstand, keine verbindliche Produktplanung.
+Priorität: Korrektheit > bestehendes schützen > Privacy/Security > reproduzierbare Verifikation > Architektur > Performance.
 
-1. **School/Mobility live abnehmen**: Canary reproduzierbar beenden, Exitcode-1-Ursache klären, reale Feed-Antworten/Timeouts und Stale-/Partial-Fälle nachweisen, DORMANT-Soak erneut mit Version/Telemetrie dokumentieren.
-2. **Runtime-Inventar**: Prozess-, Modell-, GPU-, MCP- und externe Dienstzustände mit sicheren Health-Probes erfassen.
-3. **Voice Directions**: Parserverhalten, Cache-/Baseline-Isolation und Audiofreigabe getrennt abschließen.
-4. **Privacy/Security**: Capability-Gates über Tool-, Skill-, MCP- und Beobachtungspfade auditieren.
-5. **Doku-Governance**: ADRs für bestätigte Architekturentscheidungen; klare Besitzer und Aktualisierungsregeln.
-6. **Android**: Entscheidungen zu Pairing/Trust, Permissions, Privacy Policy und Runtime-Modell treffen und erst danach echte Bindungen implementieren.
-7. **Legacy-Dokumente**: inhaltliche Einzelprüfung und sichere, portable Referenzen auf diesen zentralen Index.
+## Jetzt
 
-## Nächste Schritte Modell-/Voice-Umbau (25.09.2026)
+1. Voice-Acceptance-Fehler schließen: Turn-Aggregation, Watchdog/TTS, speculative Cancel, orphaned Retry.
+2. Pfadlogging mit Turn-ID und explizitem Direct-Audio/Text-Routing ergänzen bzw. verifizieren.
+3. Cloud-Fallback-Policy zentralisieren: `llm.primary.text_fallback` muss für alle automatischen Primary-Text-Cloudpfade gelten.
+4. Danach Voice-Acceptance-Matrix erneut auf echter Hardware durchführen.
 
-8. **Hardware-Verifikation**: Gemma-Unit und mmproj-Dateinamen, Port 8082, Unit-Installation; Direct-Audio Ende-zu-Ende; echten Handover mit systemd messen.
-9. **Handover härten**: Eigentümer-Prüfungen (FragmentPath/ExecStart/Port-Besitzer) in den Python-Handover; Qwen-Ladezeit (ca. 90-100 s) verkürzen; `/api/gpu-status` von `gpu_swap` lösen.
-10. **Direct-Audio**: Memory-/Awareness-Kontext für spekulative Turns; Tool-Auswahl statt ALL_TOOLS; STT-Rauschfilter; Quality-Gate-Fallback mit Audio; Fragmente <= 1.6 s aggregieren.
-11. **NPU**: Live-Kamera auf NPU, NPU-Wake-Word (danach STT aus dem Wake-Normalpfad entfernen), Identitätsschwelle kalibrieren, MOTION-Event, CLOUD_LLM-Gate im Vision-Gate.
-12. VRAM-Messung Gemma 12B + Chatterbox parallel.
+## Danach
+
+5. Expert-Handover real auf Hardware testen und Recovery/Ownership verifizieren; erst dann `handover.enabled` erwägen.
+6. NPU-Presence live initialisieren und abnehmen; NPU-Wake separat entwickeln.
+7. School/Mobility fachlich end-to-end abnehmen, obwohl VVS-Dienst bereits READY ist.
+8. Web-API als klaren Supervisor-/Frontend-Vertrag einordnen oder im Runtime-Snapshot integrieren.
+9. Desktop-UI komplett neu auf Basis des aktuellen Backendvertrags und der neuen Designreferenzen aufbauen.
+10. Memory-&-Thinking-Visualisierung ausschließlich aus beobachtbaren Pipeline-/Memory-/Routingdaten speisen.
+
+## Später
+
+11. OpenRouter bewusst aktivieren, Modell und Credential setzen und Privacy-/Failure-Verhalten testen.
+12. optionale Anthropic-Unterstützung nur bei echtem Bedarf beibehalten.
+13. FLUX/NPU/weitere on-demand Komponenten in den Desktop-Control-Hub integrieren.
+14. alte Kommentare, Prompts und Legacy-Doku weiter konsolidieren.

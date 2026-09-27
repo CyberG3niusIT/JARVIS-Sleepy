@@ -1,39 +1,42 @@
 # Konfiguration
 
-## Quellen
+`config.yaml` ist die zentrale Runtime-Konfiguration; Secrets kommen über Environment. `.env` wird nicht dokumentiert oder weitergegeben.
 
-`config.yaml` ist die zentrale Beispiel-/Runtime-Konfiguration; Variablen werden über `${...}` und Prozessumgebung eingebunden. `.env.example` enthält Namen/Beispiele. Die lokale `.env` wurde nicht gelesen und darf nicht publiziert werden.
+## Aktuelle Kernschlüssel
 
-## Relevante Gruppen
-
-| Gruppe | Zweck | Statushinweis |
+| Gruppe | Bedeutung | aktueller Stand |
 |---|---|---|
-| `system`, `audio`, `vad`, `wake_word` | Spracheingabe/-ausgabe | Geräte/Berechtigungen müssen live verfügbar sein |
-| `llm.local`, `llm.small`, `llm.api` | lokale/Cloud-Modellzugriffe | Endpunkte/Modelle nicht live geprüft |
-| `stt`, `tts` | ASR/TTS-Auswahl | Engine-Wert sagt nichts über Servergesundheit |
-| `skills` | Discovery/Safe Mode | Plugin-Verfügbarkeit zusätzlich prüfen |
-| `conversational_memory`, `context_window` | Memory-Verhalten | persistente Daten extern; nicht gelesen |
-| `people`, `school`, `mobility`, `reminders` | Fachkomponenten | IDs/Daten/Secrets bleiben extern |
-| `metrics`, `logging` | Telemetrie und Logs | konkrete Datenpfade nicht veröffentlicht |
+| `llm.primary.*` | Gemma 4 12B, Port 8080, Audio/Vision | aktiv |
+| `llm.expert.*` | Qwen3.5-35B-A3B, Port 8082 | on-demand |
+| `llm.small.*` | historischer Small-LLM-Pfad | `enabled: false` |
+| `llm.api.*` | Cloud-Fallback | OpenRouter vorbereitet, `enabled: false`, `model: null` |
+| `stt.*` | Qwen3-ASR | aktiv |
+| `tts.*` | Chatterbox | aktiv |
+| `turn.*` | Turn-Aggregation | aktiv, reale Pause/Wake-Abnahme offen |
+| `handover.*` | Primary/Expert GPU-Handover | `enabled: false` |
+| `vision.presence.*` | Presence/NPU/Vision-Gate | NPU-Backend noch nicht runtimebereit |
+| `mobility.*` | lokale VVS-Integration | VVS Dienst READY |
+| `web.port` | JARVIS Web API | 8091 vorgesehen |
+| `self_evolution.auto_consult` | automatische externe Findings-Beratung | false |
 
-## Umgebungsvariablen
+## Direct-Audio
 
-Im Code/Beispiel finden sich Schlüssel für API-Provider, Wakeword, School-Zielzuordnungen sowie Mobility-URL/API-Key und Chatterbox-Parameter. Hier werden nur Variablennamen erwähnt, keine Werte. Die vollständige lokale Variablenliste kann aus `.env.example` sicher durch den Betreiber geprüft werden.
+`llm.primary.audio_direct: true` ist Teil des aktuellen Designs. `llm.primary.audio_tools: none` trennt Direct-Audio von Tool-Schemas. Tool-/Skill-Turns werden über paralleles STT/Text-Routing behandelt.
 
-Änderungen an `config.yaml` sind am dokumentierten HEAD uncommittet. Vor Deployment muss die lokale tatsächliche Konfiguration mit den Beispielen abgeglichen werden.
+## Cloud
 
-## Neue Schlüssel (Stand 2026-09-25)
+```yaml
+llm:
+  api:
+    enabled: false
+    provider: openrouter
+    model: null
+    endpoint: https://openrouter.ai/api/v1/chat/completions
+    api_key_env: OPENROUTER_API_KEY
+```
 
-Alle Schlüssel liegen in `Main/config.yaml`. Zielarchitektur: Gemma PRIMARY, Qwen EXPERT (siehe `03_RUNTIME_AND_MODELS.md`).
+Kein Provider darf aus fehlender Konfiguration stillschweigend zu Anthropic/Claude werden.
 
-| Schlüssel | Bedeutung |
-|---|---|
-| `llm.primary.*` | Gemma 4 12B: Endpoint (Port 8080), `model_path`, `mmproj_path`, `context_size`, `audio_direct`, `text_fallback` (Default aus), `health_ttl_s`, `ready_wait_s`. Modell-/mmproj-Dateinamen sind Platzhalter (NEEDS HW VERIFY). |
-| `llm.expert.*` | Qwen3.5-35B-A3B, Endpoint Port 8082, nur per Handover geladen. |
-| `llm.local.*` | Kompatibilitäts-Alias, zeigt auf den Primary-Endpoint. |
-| `turn.*` | Turn-Aggregation: `enabled`, `grace_ms` (1200), `max_turn_s` (20), `max_segments` (8), `min_segment_ms`, `fast_stop_max_s` (1.6). |
-| `stt.wake_compat` | STT als paralleler Wake-Helfer, bis NPU-Wake real ist. |
-| `handover.*` | GPU-Handover: `enabled` (Default `false`), Unit-Namen Primary/Expert, Timeouts, VRAM-Wartezeit, Queue-Wartezeit. |
-| `vision.presence.llm_gate.*` | NPU-Ereignis -> ein Frame an Primary: `enabled` (Default `false`), `cooldown_s` (120). |
+## Runtime Units
 
-Auflösung der Primary-Unit (identisch in `start.sh --llm-unit`-Aufruf, `scripts/check_runtime_dependencies.py` und `scripts/runtime_status.py`): `JARVIS_LLM_UNIT` > `llm.primary.unit` > `handover.units.primary` (auch bei `handover.enabled: false`) > nur als explizites Kompatibilitäts-Fallback die Legacy-Unit `llama-server.service`. Expert-Unit: `llm.expert.unit` > `handover.units.expert`. `start.sh` lässt eine bereits laufende Primary-Unit unangetastet und bricht ab, wenn die Expert-Unit aktiv ist (keine parallele Residency).
+Primary- und Expert-Units werden über aktuelle Config/Runtime-Auflösung ermittelt. Legacy-Unitnamen bleiben nur Kompatibilität. Der Runtime-Snapshot ist für die UI maßgeblich, nicht das Vorhandensein einer Unit-Datei allein.

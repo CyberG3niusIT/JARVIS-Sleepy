@@ -1,45 +1,56 @@
 # Voice, STT und TTS
 
-## Pipeline
+## Aktueller Stack
 
-Die Codebasis enthält Listener, VAD, Wakeword, STT-Backends, Pipeline, Chunking/Normalisierung, TTS-Engines und Audiowiedergabe-Adapter. Die relevante Implementierung liegt in `core/continuous_listener.py`, `core/vad.py`, `core/wake_word.py`, `core/stt.py`, `core/stt_qwen3.py`, `core/pipeline.py` und `core/tts.py`.
+- Wake: Aura
+- STT: Qwen3-ASR
+- PRIMARY: Gemma 4 12B Direct-Audio
+- Expert: Qwen3.5-35B-A3B on-demand
+- TTS: Chatterbox
+- Audio-Ausgabe: Windows-Audio-Brücke
 
-## Konfiguration
+Der offizielle Runtime-Snapshot meldete Voice-Daemon, STT, Chatterbox und Audio-Bridge nach einem vollständigen Windows-Neustart als READY.
 
-Die geprüfte YAML wählt Qwen3 als STT-Backend auf CPU und Chatterbox als TTS-Engine. Wake Word läuft über den separaten Porcupine-Adapter (`core/wake_word.py`). Chatterbox wird per HTTP von einem separaten Serverprozess bedient; Piper und Kokoro sind alternative TTS-Pfade. Ein gesetzter Endpunkt oder Engine-Name ist keine Verfügbarkeitsgarantie.
+## Zielpfad
 
-Die Pipeline führt Mikrofonaufnahme, VAD/Wakeword, STT, Router/Skills/Tools und Chunked TTS/Audiowiedergabe zusammen. Normalisierung und Caching liegen in separaten Komponenten. Gerätewahl, Windows-Ausgabe und WSL-Audiobrücke sind hostabhängig und wurden nicht live geprüft.
+```text
+Audio -> VAD -> Wake/Turn -> Gemma Direct-Audio -> Antwort -> Chatterbox
+                  \
+                   -> paralleles STT -> Skill/Tool/Text-Route, wenn nötig
+```
 
-## Vocal Directions
+Gemma erhält im Direct-Audio-Pfad aktuell keine Tool-Schemas (`llm.primary.audio_tools: none`). Damit wird ein real beobachtetes Qualitätsproblem vermieden, bei dem Direct-Audio mit vielen Tools unzuverlässig wurde.
 
-Im aktuellen Arbeitsbaum liegen neu `core/vocal_directions.py`, zugehörige Pipeline-/TTS-Änderungen und Probe-/Testdateien. Diese Arbeit ist experimentell. Historische Probe-Ergebnisse vom 22.09. sind keine aktuelle Live-Abnahme oder Nutzerfreigabe; die genaue Parser-/Cache-Grenze ist in den Quelländerungen zu prüfen.
+## Turn-Aggregation
 
-## Verteilte Voice-Dokumente
+`core/turn_assembler.py` soll natürliche kurze Pausen über mehrere VAD-Segmente hinweg zu einem Turn verbinden. Nur ein tatsächlich als Stop erkannter Fast-Path darf die normale Grace umgehen.
 
-Die früheren Dateien `VOICE_BASELINE.md`, `VOCAL_DIRECTIONS.md`, `TTS_VOICE_OPTIONS.md`, `VOICE_TRAINING_GUIDE.md` und `STT_WORKER_PROCESS.md` sind als Quellen im [Inventar](INVENTORY.md) erfasst. Ältere Modell-, Hardware- und Qualitätsangaben sind nicht automatisch aktuell.
+### Reale Acceptance 26.09.2026: NICHT BESTANDEN
 
-## Turn-Aggregation und Direct-Audio (Stand 25.09.2026)
+Bei natürlichem Sprechen wurde `Aura` nach kurzer Pause als vollständiger Wake-only-Turn behandelt. JARVIS begann bereits mit dem Minimal-Greeting, während der folgende Satz separat verarbeitet wurde. Damit war die gewünschte Segmentaggregation im realen Fall nicht korrekt.
 
-Evidenz: alle Punkte dieses Abschnitts sind **nur per Unit-Test mit Fakes** belegt; die JARVIS-Integration mit Gemma-Audio wurde **nicht auf Hardware getestet** (das llama.cpp-`input_audio`-Schema selbst hat der Nutzer früher manuell als funktionierend bestätigt).
+## Watchdog/TTS
 
-### Turn-Assembler (`core/turn_assembler.py`)
+Im selben Test setzte der Watchdog Speaking-Flags zurück und öffnete Listening, obwohl Chatterbox noch lief. Das ist ein echter TTS-/Listener-State-Race und keine reine Latenzfrage.
 
-Mehrere Sprachsegmente werden zu einem Turn zusammengefasst, bevor er an Primary geht. Config `turn.*`: `grace_ms` 1200, `max_turn_s` 20, `max_segments` 8, `min_segment_ms`, `fast_stop_max_s` 1.6.
+## Speculative Direct-Audio
 
-- Fast Path nur für kurze Segmente, die einen Turn eröffnen; kurze Fragmente <= 1.6 s, die einen Turn eröffnen, werden nicht aggregiert (bekannte Einschränkung).
-- Stop/Barge-in wirken sofort; Eingaben während TTS (`during_tts`) umgehen den Assembler.
+Ein speculative Turn wurde bei Wake-only verworfen, erzeugte aber `LLM streaming error: 'NoneType' object has no attribute 'read'`. Ein erwarteter Cancel darf nicht als ERROR enden. Außerdem lief nach Conversation-Timeout ein alter LLM-Retry weiter; Turn-Cleanup muss Retry/Fallback terminal unterbinden.
 
-### Direct-Audio (`core/direct_audio.py`)
+## Erfolgreiche Teilbeobachtung
 
-- Das Audio geht direkt an Gemma; STT blockiert den Turn nicht mehr. Ein paralleler Helfer läuft für Wake-Kompatibilität (`stt.wake_compat`), außerdem Stop-Fast-Path, Diagnose und optionales Transkript.
-- Das ASR-Transkript ist nur `asr_hint`, nicht die Wahrheitsquelle.
-- Text-Fallback ist standardmäßig aus (`llm.primary.text_fallback`).
-- Gespeicherter Nutzertext ist ein Platzhalter `[Sprachnachricht aN]`.
-- Direct-Audio-Turns bieten ALLE Tools an (Option `llm.primary.audio_tools: always`).
-- Kein STT-Rauschfilter für Direct-Audio im Konversationsfenster; der Quality-Gate-Fallback ruft `llm.chat` ohne Audio auf.
+Eine anschließend vollständig neu gesprochene Anfrage wurde transkribiert und von Gemma beantwortet; Chatterbox gab die Antwort aus. Das belegt einen funktionsfähigen Voice-Teilpfad, **nicht** die vollständige Direct-Audio-Abnahme, weil im vorhandenen Log kein eindeutiger `DIRECT_AUDIO_ACCEPTED`-Marker vorhanden war.
 
-### Spekulativer Turn (`core/speculative_turn.py`)
+## Logging-Anforderung
 
-Vor der Wake-Bestätigung startet eine spekulative Gemma-Anfrage. Sie ist nebenwirkungsfrei: keine Tools, kein Memory-Schreiben, keine State- und History-Änderung, kein TTS, keine UI; bei ausbleibendem Wake wird sie abgebrochen (`test_speculative_audio_side_effects.py`). Spekulative Wake-Turns haben keinen Memory-/Awareness-Kontext, nur History (Folgearbeit).
+Für jeden Voice-Turn sollen eindeutige Turn-IDs und explizite Pfadmarker existieren:
 
-Der Wake-Normalpfad enthält weiterhin STT; entfernen erst, wenn NPU-Wake real ist (derzeit NOT_IMPLEMENTED).
+- `DIRECT_AUDIO_STARTED`
+- `DIRECT_AUDIO_ACCEPTED`
+- `DIRECT_AUDIO_REJECTED(reason)`
+- `DIRECT_AUDIO_CANCELLED(reason)`
+- `TEXT_PATH_SELECTED(reason)`
+
+## NPU-Wake
+
+NPU-Wake ist weiterhin nicht implementiert. Qwen3-ASR bleibt daher Teil des parallelen Wake-/Routingpfads.
