@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://lovable.dev/projects/340145c6-1e8a-47c6-9732-b08d3720c610">
     <img src="https://screenshot2.lovable.dev/lovp_0sjae8zj2y922aacwh27r29pw4/43bfd9909740080019f6a8bf550cfc3e_1790536781747.png"
-         alt="J.A.R.V.I.S Desktop: aktueller Home-Screen aus dem Lovable-Projekt"
+         alt="J.A.R.V.I.S Desktop: aktueller Home-Screen aus dem Projekt"
          width="100%">
   </a>
 </p>
