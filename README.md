@@ -51,9 +51,9 @@
 
 ## 01 // SNAPSHOT
 
-Dieser Branch enthält den vollständigen technischen Stand aus dem lokalen J.A.R.V.I.S-Sleepy-Workspace zum **27.09.2026**.
+Dieser Branch enthält den in Git übernommenen technischen Snapshot des J.A.R.V.I.S-Sleepy-Workspace zum **27.09.2026**.
 
-Der Snapshot vereint Runtime und Backend aus `Main/`, den Desktop Control Hub aus `UI/`, die native Android-App aus `Mobile-App/` sowie die technische Dokumentation aus `Dokumentation/`. Lokale Git-Worktree-Verwaltung, Zugangsdaten, Runtime-Daten und Build-Ausgaben gehören nicht zum Repository-Inhalt.
+Runtime und Backend aus dem lokalen `Main`-Arbeitsstand wurden dabei in den Repository-Root übernommen. Der Snapshot enthält zusätzlich den Desktop Control Hub unter `UI/`, die native Android-App unter `Mobile-App/` sowie die technische Dokumentation unter `Dokumentation/`. Lokale Git-Worktree-Verwaltung, Zugangsdaten, Runtime-Daten und Build-Ausgaben gehören nicht zum Repository-Inhalt.
 
 `main` bleibt davon unabhängig.
 
@@ -205,8 +205,8 @@ Die Visualisierung erklärt Systemaktivität. Sie behauptet keine internen Gedan
 |---|---|
 | README / Snapshot Identity | **PREPARED** |
 | Technischer Stand aus den Projektquellen | **IMPORTED** |
-| Technische Dokumentation | **IMPORTED, geprüft am 24.09.2026** |
-| Zentrales `INHALTSVERZEICHNIS.md` | **IM WORKSPACE NICHT VORHANDEN** |
+| Technische Dokumentation | **IMPORTED, aktualisiert am 27.09.2026** |
+| Zentrales `INHALTSVERZEICHNIS.md` | **PRESENT / LINKED** |
 | Lovable Handoff | **FOLGT** |
 | UI-Expert-Umbau mit Lovable | **NOCH NICHT BEGONNEN** |
 
@@ -216,9 +216,9 @@ Diese Tabelle beschreibt den übernommenen Datei- und Planungsstand. Sie ist kei
 
 ## 08 // REPOSITORY INDEX
 
-Die technische Dokumentation und ihre Navigation liegen in [Dokumentation/README.md](Dokumentation/README.md). Das Quellen- und Dateiinventar steht in [Dokumentation/INVENTORY.md](Dokumentation/INVENTORY.md).
+Der zentrale Repository-Index liegt in [INHALTSVERZEICHNIS.md](INHALTSVERZEICHNIS.md).
 
-Ein separates `INHALTSVERZEICHNIS.md` ist in den übernommenen Projektdateien nicht vorhanden.
+Die technische Dokumentation und ihre interne Navigation liegen in [Dokumentation/README.md](Dokumentation/README.md). Das Quellen- und Dateiinventar steht in [Dokumentation/INVENTORY.md](Dokumentation/INVENTORY.md).
 
 ---
 
