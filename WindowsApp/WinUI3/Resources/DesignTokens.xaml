@@ -1,0 +1,128 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Werte aus Lovable-Final/Source/src/styles.css (oklch), im Browser in sRGB umgerechnet. -->
+    <Color x:Key="JarvisBackgroundColor">#01070F</Color>
+    <Color x:Key="JarvisTitlebarColor">#020E1A</Color>
+    <Color x:Key="JarvisPanelColor">#04101A</Color>
+    <Color x:Key="JarvisPanelRaisedColor">#051723</Color>
+    <Color x:Key="JarvisBorderColor">#12374B</Color>
+    <Color x:Key="JarvisLineColor">#175F7C</Color>
+    <Color x:Key="JarvisLineStrongColor">#1683A6</Color>
+    <Color x:Key="JarvisAccentColor">#00A2F5</Color>
+    <Color x:Key="JarvisSignalColor">#00C0EE</Color>
+    <Color x:Key="JarvisAccentSecondaryColor">#1683A6</Color>
+    <Color x:Key="JarvisSuccessColor">#52CC90</Color>
+    <Color x:Key="JarvisWarningColor">#DAA341</Color>
+    <Color x:Key="JarvisErrorColor">#F36164</Color>
+    <Color x:Key="JarvisOfflineColor">#F36164</Color>
+    <Color x:Key="JarvisSurfaceElevatedColor">#030E18</Color>
+    <Color x:Key="JarvisReadyColor">#52CC90</Color>
+    <Color x:Key="JarvisDegradedColor">#DAA341</Color>
+    <Color x:Key="JarvisInfoColor">#37B2E8</Color>
+    <Color x:Key="JarvisStoppedColor">#ACBDCA</Color>
+    <Color x:Key="JarvisUnavailableColor">#7C8C97</Color>
+    <Color x:Key="JarvisSecondaryTextColor">#ACBDCA</Color>
+    <SolidColorBrush x:Key="JarvisBackgroundBrush" Color="{StaticResource JarvisBackgroundColor}" />
+    <SolidColorBrush x:Key="JarvisTitlebarBrush" Color="{StaticResource JarvisTitlebarColor}" />
+    <SolidColorBrush x:Key="JarvisPanelBrush" Color="{StaticResource JarvisPanelColor}" />
+    <SolidColorBrush x:Key="JarvisPanelRaisedBrush" Color="{StaticResource JarvisPanelRaisedColor}" />
+    <SolidColorBrush x:Key="JarvisBorderBrush" Color="{StaticResource JarvisBorderColor}" />
+    <SolidColorBrush x:Key="JarvisLineBrush" Color="{StaticResource JarvisLineColor}" />
+    <SolidColorBrush x:Key="JarvisLineStrongBrush" Color="{StaticResource JarvisLineStrongColor}" />
+    <SolidColorBrush x:Key="JarvisDividerBrush" Color="#B313384C" />
+    <SolidColorBrush x:Key="JarvisHeadDividerBrush" Color="#B3175F7C" />
+    <SolidColorBrush x:Key="JarvisAccentBrush" Color="{StaticResource JarvisAccentColor}" />
+    <SolidColorBrush x:Key="JarvisSignalBrush" Color="{StaticResource JarvisSignalColor}" />
+    <SolidColorBrush x:Key="JarvisAccentSecondaryBrush" Color="{StaticResource JarvisAccentSecondaryColor}" />
+    <SolidColorBrush x:Key="JarvisSuccessBrush" Color="{StaticResource JarvisSuccessColor}" />
+    <SolidColorBrush x:Key="JarvisWarningBrush" Color="{StaticResource JarvisWarningColor}" />
+    <SolidColorBrush x:Key="JarvisErrorBrush" Color="{StaticResource JarvisErrorColor}" />
+    <SolidColorBrush x:Key="JarvisOfflineBrush" Color="{StaticResource JarvisOfflineColor}" />
+    <SolidColorBrush x:Key="JarvisSurfaceElevatedBrush" Color="{StaticResource JarvisSurfaceElevatedColor}" />
+    <SolidColorBrush x:Key="JarvisReadyBrush" Color="{StaticResource JarvisReadyColor}" />
+    <SolidColorBrush x:Key="JarvisDegradedBrush" Color="{StaticResource JarvisDegradedColor}" />
+    <SolidColorBrush x:Key="JarvisInfoBrush" Color="{StaticResource JarvisInfoColor}" />
+    <SolidColorBrush x:Key="JarvisStoppedBrush" Color="{StaticResource JarvisStoppedColor}" />
+    <SolidColorBrush x:Key="JarvisUnavailableBrush" Color="{StaticResource JarvisUnavailableColor}" />
+    <SolidColorBrush x:Key="JarvisTextBrush" Color="#E5ECF3" />
+    <SolidColorBrush x:Key="JarvisSecondaryTextBrush" Color="{StaticResource JarvisSecondaryTextColor}" />
+    <SolidColorBrush x:Key="JarvisMutedTextBrush" Color="#7C8F9D" />
+    <SolidColorBrush x:Key="JarvisQuietBrush" Color="#020A13" />
+    <SolidColorBrush x:Key="JarvisSlotIconBorderBrush" Color="#D912374B" />
+    <SolidColorBrush x:Key="JarvisOverlayBrush" Color="#D101070F" />
+    <!-- Status-Chip-Ränder (.jx-state-*): Rand je Zustand, dazu bei DEGRADED ein warmer Hintergrund. -->
+    <SolidColorBrush x:Key="JarvisChipBorderReadyBrush" Color="#328573" />
+    <SolidColorBrush x:Key="JarvisChipBorderStartingBrush" Color="#27779D" />
+    <SolidColorBrush x:Key="JarvisChipBorderDegradedBrush" Color="#927D51" />
+    <SolidColorBrush x:Key="JarvisChipBackgroundDegradedBrush" Color="#131413" />
+    <SolidColorBrush x:Key="JarvisChipBorderStoppedBrush" Color="#1D5977" />
+    <SolidColorBrush x:Key="JarvisChipBorderOfflineBrush" Color="#A6585E" />
+    <SolidColorBrush x:Key="JarvisChipBorderUnavailableBrush" Color="#4C6474" />
+    <SolidColorBrush x:Key="JarvisStageBrush" Color="#010408" />
+    <SolidColorBrush x:Key="JarvisHeaderBrush" Color="{StaticResource JarvisSignalColor}" />
+    <SolidColorBrush x:Key="JarvisInputBrush" Color="#01070F" />
+    <Thickness x:Key="JarvisPagePadding">28</Thickness>
+    <Thickness x:Key="JarvisPanelPadding">20</Thickness>
+    <CornerRadius x:Key="JarvisPanelCornerRadius">6</CornerRadius>
+    <FontFamily x:Key="JarvisFontFamily">Segoe UI Variable Text</FontFamily>
+    <FontFamily x:Key="JarvisMonoFontFamily">Cascadia Mono</FontFamily>
+
+    <!-- NavigationView (Top): Auswahl, Hover und Indikator folgen der Referenz, nicht der Windows-Akzentfarbe. -->
+    <SolidColorBrush x:Key="NavigationViewTopPaneBackground" Color="Transparent" />
+    <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="Transparent" />
+    <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="Transparent" />
+    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+    <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
+    <x:Double x:Key="NavigationViewTopPaneHeight">67.2</x:Double>
+    <SolidColorBrush x:Key="NavigationViewItemBackground" Color="Transparent" />
+    <SolidColorBrush x:Key="NavigationViewItemBackgroundPointerOver" Color="#12009CF1" />
+    <SolidColorBrush x:Key="NavigationViewItemBackgroundPressed" Color="#1A00A0F5" />
+    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="#1A00A0F5" />
+    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#24009CF1" />
+    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPressed" Color="#1A00A0F5" />
+    <SolidColorBrush x:Key="NavigationViewItemForeground" Color="{StaticResource JarvisSecondaryTextColor}" />
+    <SolidColorBrush x:Key="NavigationViewItemForegroundPointerOver" Color="#E5ECF3" />
+    <SolidColorBrush x:Key="NavigationViewItemForegroundPressed" Color="#E5ECF3" />
+    <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="#E5ECF3" />
+    <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPointerOver" Color="#E5ECF3" />
+    <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPressed" Color="#E5ECF3" />
+    <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="{StaticResource JarvisSignalColor}" />
+
+    <Style x:Key="JarvisPanelStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource JarvisPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource JarvisLineBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="16" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+    <Style x:Key="JarvisButtonStyle" TargetType="Button">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="12,5" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{StaticResource JarvisTextBrush}" />
+        <Setter Property="Background" Value="{StaticResource JarvisPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource JarvisLineBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+    </Style>
+    <Style x:Key="JarvisTextBoxStyle" TargetType="TextBox">
+        <Setter Property="MinHeight" Value="38" />
+        <Setter Property="Padding" Value="12,7" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{StaticResource JarvisTextBrush}" />
+        <Setter Property="Background" Value="{StaticResource JarvisInputBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource JarvisBorderBrush}" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+    </Style>
+    <Style x:Key="JarvisNavItemStyle" TargetType="NavigationViewItem">
+        <Setter Property="FontSize" Value="11.52" />
+        <Setter Property="MinWidth" Value="86.4" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+    </Style>
+</ResourceDictionary>

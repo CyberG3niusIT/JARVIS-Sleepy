@@ -1,0 +1,68 @@
+<Page
+    x:Class="Jarvis.ControlHub.WinUI.Views.ShellPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ic="using:Jarvis.ControlHub.WinUI.Icons"
+    Background="{StaticResource JarvisBackgroundBrush}"
+    FontFamily="{StaticResource JarvisFontFamily}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="68" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid x:Name="SystemBar" Padding="22.4,0,146,0" ColumnSpacing="20" BorderBrush="{StaticResource JarvisLineBrush}" BorderThickness="0,0,0,1" Background="{StaticResource JarvisTitlebarBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Image x:Name="Wordmark" Width="161.2" Height="18.4" Margin="-1.9,0,0,0" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center" AutomationProperties.Name="J.A.R.V.I.S" />
+            <NavigationView x:Name="Navigation" Grid.Column="1" PaneDisplayMode="Top" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" IsPaneToggleButtonVisible="False" SelectionChanged="OnSelectionChanged" Background="Transparent" OpenPaneLength="0" MenuItemContainerStyle="{StaticResource JarvisNavItemStyle}" VerticalAlignment="Stretch" HorizontalAlignment="Center">
+                <NavigationView.MenuItems>
+                    <NavigationViewItem Tag="Home" AutomationProperties.Name="Home"><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon Kind="Home" Size="18"/><TextBlock Text="Home"/></StackPanel></NavigationViewItem>
+                    <NavigationViewItem Tag="Chat" AutomationProperties.Name="Chat"><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon Kind="BotMessageSquare" Size="18"/><TextBlock Text="Chat"/></StackPanel></NavigationViewItem>
+                    <NavigationViewItem Tag="Memory" AutomationProperties.Name="Memory"><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon Kind="BrainCircuit" Size="18"/><TextBlock Text="Memory"/></StackPanel></NavigationViewItem>
+                    <NavigationViewItem Tag="ModelsRuntime" AutomationProperties.Name="Models &amp; Runtime"><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon Kind="Cpu" Size="18"/><TextBlock Text="Models &amp; Runtime"/></StackPanel></NavigationViewItem>
+                    <NavigationViewItem Tag="VoiceAudio" AutomationProperties.Name="Voice &amp; Audio"><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon Kind="AudioLines" Size="18"/><TextBlock Text="Voice &amp; Audio"/></StackPanel></NavigationViewItem>
+                    <NavigationViewItem Tag="Tools" AutomationProperties.Name="Tools &amp; Integrations"><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon Kind="SlidersHorizontal" Size="18"/><TextBlock Text="Tools"/></StackPanel></NavigationViewItem>
+                    <NavigationViewItem Tag="Settings" AutomationProperties.Name="Settings"><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon Kind="Settings" Size="18"/><TextBlock Text="Settings"/></StackPanel></NavigationViewItem>
+                    <NavigationViewItem x:Name="SystemNavItem" SelectsOnInvoked="False" AutomationProperties.Name="System">
+                        <NavigationViewItem.Content><StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4.8"><ic:LucideIcon x:Name="SystemNavIcon" Kind="LayoutGrid" Size="18"/><StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center"><TextBlock Text="System" VerticalAlignment="Center"/><ic:LucideIcon Kind="ChevronDown" Size="12"/></StackPanel></StackPanel></NavigationViewItem.Content>
+                        <NavigationViewItem.MenuItems>
+                            <NavigationViewItem Tag="Automations" AutomationProperties.Name="Automations"><StackPanel Orientation="Horizontal" Spacing="11.2"><ic:LucideIcon Kind="Workflow" Size="16"/><TextBlock Text="Automations" VerticalAlignment="Center"/></StackPanel></NavigationViewItem>
+                            <NavigationViewItem Tag="Vision" AutomationProperties.Name="Vision &amp; Presence"><StackPanel Orientation="Horizontal" Spacing="11.2"><ic:LucideIcon Kind="Eye" Size="16"/><TextBlock Text="Vision &amp; Presence" VerticalAlignment="Center"/></StackPanel></NavigationViewItem>
+                            <NavigationViewItem Tag="Mobility" AutomationProperties.Name="Mobility / VVS"><StackPanel Orientation="Horizontal" Spacing="11.2"><ic:LucideIcon Kind="Route" Size="16"/><TextBlock Text="Mobility / VVS" VerticalAlignment="Center"/></StackPanel></NavigationViewItem>
+                            <NavigationViewItem Tag="Mobile" AutomationProperties.Name="Mobile Connection"><StackPanel Orientation="Horizontal" Spacing="11.2"><ic:LucideIcon Kind="Smartphone" Size="16"/><TextBlock Text="Mobile Connection" VerticalAlignment="Center"/></StackPanel></NavigationViewItem>
+                            <NavigationViewItem Tag="Observability" AutomationProperties.Name="Observability"><StackPanel Orientation="Horizontal" Spacing="11.2"><ic:LucideIcon Kind="Activity" Size="16"/><TextBlock Text="Observability" VerticalAlignment="Center"/></StackPanel></NavigationViewItem>
+                        </NavigationViewItem.MenuItems>
+                    </NavigationViewItem>
+                </NavigationView.MenuItems>
+            </NavigationView>
+            <StackPanel x:Name="StatusBar" Grid.Column="2" Orientation="Horizontal" Spacing="14.4" VerticalAlignment="Center">
+                <StackPanel x:Name="SystemGroups" Orientation="Horizontal" Spacing="14.4" VerticalAlignment="Center" />
+                <TextBlock x:Name="RuntimeDetailLabel" Visibility="Collapsed" />
+                <Button x:Name="RefreshButton" Width="32" Height="32" Padding="0" Click="OnRefreshClick" Style="{StaticResource JarvisButtonStyle}" AutomationProperties.Name="Aktualisieren" ToolTipService.ToolTip="Aktualisieren"><ic:LucideIcon Kind="RefreshCw" Size="14"/></Button>
+            </StackPanel>
+        </Grid>
+        <ScrollViewer x:Name="PageScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Padding="13.6" Spacing="14">
+                <StackPanel x:Name="SectionHeader" Spacing="3" Visibility="Collapsed">
+                    <TextBlock x:Name="SectionTitle" Text="Home" FontSize="23" FontWeight="SemiBold" Foreground="{StaticResource JarvisTextBrush}" />
+                    <TextBlock x:Name="SectionDescription" FontSize="12" Foreground="{StaticResource JarvisMutedTextBrush}" />
+                </StackPanel>
+                <Grid x:Name="PageBody" />
+            </StackPanel>
+        </ScrollViewer>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup>
+                <VisualState x:Name="WideTitlebar">
+                    <VisualState.StateTriggers><AdaptiveTrigger MinWindowWidth="1000" /></VisualState.StateTriggers>
+                </VisualState>
+                <VisualState x:Name="CompactTitlebar">
+                    <VisualState.StateTriggers><AdaptiveTrigger MinWindowWidth="0" /></VisualState.StateTriggers>
+                    <VisualState.Setters><Setter Target="StatusBar.Visibility" Value="Collapsed" /></VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+    </Grid>
+</Page>
