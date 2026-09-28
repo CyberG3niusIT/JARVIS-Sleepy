@@ -289,7 +289,39 @@ public sealed partial class ShellPage
         AutomationProperties.SetName(image, "Räumliche Gehirnstruktur im Ruhezustand, statisches Asset ohne Live-Daten");
         stage.Children.Add(image);
 
-        // Randauslauf des Assets in die Stage-Farbe (mask-image radial-gradient 62% 64%, opak bis 58%).
+        // Bildrahmen: exakt deckungsgleich mit dem gerenderten Asset (Stretch=Uniform). Lässt die Bildkanten weich
+        // in die Stage-Farbe auslaufen, damit auch bei Letterboxing keine Rechteckkante sichtbar wird. Das Gehirn
+        // selbst (x 0.19..0.78, y 0.09..0.83 des Assets) liegt vollständig innerhalb der transparenten Zone.
+        var imageFrame = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Width = image.MaxWidth,
+            Height = image.MaxHeight,
+        };
+        imageFrame.Children.Add(EdgeBand(new(0, 0), new(0, 1), 0.075, 1));      // oben
+        imageFrame.Children.Add(EdgeBand(new(0, 0), new(1, 0), 0.13, 1));       // links
+        imageFrame.Children.Add(EdgeBand(new(1, 0), new(0, 0), 0.13, 1));       // rechts
+        // Unten: läuft ab dem Hirnstamm aus.
+        imageFrame.Children.Add(EdgeBand(new(0, 1), new(0, 0), 0.18, 0.85));
+        // Der eingebrannte Bodenreflex (konzentrische Ringe, y 0.77..0.95 des Assets) wird flächig in die Stage
+        // zurückgenommen, damit kein HUD-/Plattform-Eindruck entsteht. Asset-Bytes bleiben unverändert.
+        var floor = new RadialGradientBrush
+        {
+            Center = new Windows.Foundation.Point(0.5, 0.885),
+            GradientOrigin = new Windows.Foundation.Point(0.5, 0.885),
+            RadiusX = 0.46,
+            RadiusY = 0.125,
+        };
+        floor.GradientStops.Add(new GradientStop { Color = Color.FromArgb(238, 1, 4, 8), Offset = 0.0 });
+        floor.GradientStops.Add(new GradientStop { Color = Color.FromArgb(215, 1, 4, 8), Offset = 0.6 });
+        floor.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0, 1, 4, 8), Offset = 1.0 });
+        imageFrame.Children.Add(new Border { Background = floor, IsHitTestVisible = false });
+        stage.Children.Add(imageFrame);
+
+        // Randauslauf wie Lovable (mask-image radial-gradient 62% 64%, opak bis 58%), bezogen auf die Bildbox
+        // width min(100%, 60rem) x max-height 36rem, nicht auf die gesamte Stage.
         var fade = new RadialGradientBrush
         {
             Center = new Windows.Foundation.Point(0.5, 0.5),
@@ -299,7 +331,21 @@ public sealed partial class ShellPage
         };
         fade.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0, 1, 4, 8), Offset = 0.58 });
         fade.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 1, 4, 8), Offset = 1.0 });
-        stage.Children.Add(new Border { Background = fade, IsHitTestVisible = false });
+        stage.Children.Add(new Border { Background = fade, MaxWidth = StageMaxWidth, MaxHeight = StageMaxHeight, IsHitTestVisible = false });
+
+        // Stage-Tiefe wie Lovable (.jx-brain-stage: radial-gradient ellipse 60% 55% at 50% 48%, primary 10% ->
+        // transparent 70%). In Lovable scheint sie per mix-blend-mode: screen durch die dunklen Bildbereiche;
+        // nativ liegt sie darum als sehr schwacher Schleier über Asset und Auslauf.
+        var depth = new RadialGradientBrush
+        {
+            Center = new Windows.Foundation.Point(0.5, 0.48),
+            GradientOrigin = new Windows.Foundation.Point(0.5, 0.48),
+            RadiusX = 0.6,
+            RadiusY = 0.55,
+        };
+        depth.GradientStops.Add(new GradientStop { Color = Color.FromArgb(26, 0x00, 0xA2, 0xF5), Offset = 0.0 });
+        depth.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0, 0x00, 0xA2, 0xF5), Offset = 0.7 });
+        stage.Children.Add(new Border { Background = depth, IsHitTestVisible = false });
 
         // Layer 3+4: Neural Graph und Live Activity. Deckungsgleich mit dem Bild (gleiche Center-Ausrichtung,
         // Breite/Höhe folgen der tatsächlichen Bildgröße), damit die Koordinaten normalisiert (0..1) bleiben.
@@ -314,10 +360,37 @@ public sealed partial class ShellPage
         stage.Children.Add(activityHost);
         void SyncActivityHostSize(object? _, object? __)
         {
-            if (image.ActualWidth > 0) activityHost.Width = image.ActualWidth;
-            if (image.ActualHeight > 0) activityHost.Height = image.ActualHeight;
+            if (image.ActualWidth > 0) activityHost.Width = imageFrame.Width = image.ActualWidth;
+            if (image.ActualHeight > 0) activityHost.Height = imageFrame.Height = image.ActualHeight;
         }
         image.SizeChanged += (s, e) => SyncActivityHostSize(s, e);
+
+        var legend = new StackPanel { Spacing = 4 };
+        legend.Children.Add(OverlayTitle("AKTIVIERUNGSKANÄLE"));
+        var channelMarks = new Ellipse[ActivationChannels.Length];
+        for (var i = 0; i < ActivationChannels.Length; i++)
+        {
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var mark = new Grid { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
+            mark.Children.Add(new Ellipse { Stroke = Brush("JarvisUnavailableBrush"), StrokeThickness = 1 });
+            // Füllung erscheint nur kurz, wenn ein echtes (oder als TEST markiertes) Ereignis diesen Kanal anspricht.
+            channelMarks[i] = new Ellipse { Fill = new SolidColorBrush(Color.FromArgb(255, 0x00, 0xC0, 0xEE)), Opacity = 0 };
+            mark.Children.Add(channelMarks[i]);
+            line.Children.Add(mark);
+            line.Children.Add(new TextBlock { Text = ActivationChannels[i], FontSize = 11.52, Foreground = Brush("JarvisSecondaryTextBrush") });
+            legend.Children.Add(line);
+        }
+
+        legend.Children.Add(OverlayNote("Nur bei echten Backend-Ereignissen. Derzeit keine."));
+        stage.Children.Add(Overlay(legend, HorizontalAlignment.Left, 208));
+
+        var idle = new StackPanel();
+        var statusTitle = OverlayTitle("IDLE. UNAVAILABLE.");
+        var statusNote = OverlayNote("Statischer Entwurf ohne Runtime-Events. Keine Gedanken, Memories oder Aktivität werden simuliert.");
+        idle.Children.Add(statusTitle);
+        idle.Children.Add(statusNote);
+        stage.Children.Add(Overlay(idle, HorizontalAlignment.Right, 240));
+
         // Home (und damit die Brain Stage) wird beim Start mehrfach neu aufgebaut: einmal synchron, dann erneut,
         // sobald Web-Daten eintreffen (RenderSection läuft je Domain-Refresh neu). Jeder Aufbau bekommt frische
         // Elemente, darum wird der Renderer bei JEDEM Loaded dieses konkreten Hosts neu erzeugt (nicht über
@@ -333,6 +406,21 @@ public sealed partial class ShellPage
             var renderer = new BrainActivityRenderer(image, activityHost);
             _brainActivity = renderer;
 
+            // Status-Overlay folgt ausschließlich dem Renderer-Zustand. Ohne Ereignisse bleibt der Lovable-Text stehen.
+            renderer.ModeChanged += (active, isTest) =>
+            {
+                statusTitle.Text = !active ? "IDLE. UNAVAILABLE." : isTest ? "AKTIV. TESTSEQUENZ." : "AKTIV.";
+                statusNote.Text = !active
+                    ? "Statischer Entwurf ohne Runtime-Events. Keine Gedanken, Memories oder Aktivität werden simuliert."
+                    : isTest
+                        ? "Markierte Verifikationssequenz (TEST-ONLY). Keine Runtime-Ereignisse."
+                        : "Beobachtete Systemereignisse. Keine Gedanken oder Chain-of-Thought.";
+            };
+            renderer.Raised += activityEvent =>
+            {
+                if (Domain.BrainActivityMapper.Channel(activityEvent.Type) is { } channel) PulseChannel(channelMarks[(int)channel]);
+            };
+
             // TEST-ONLY Verifikationspfad: läuft ausschließlich, wenn diese Umgebungsvariable explizit gesetzt ist.
             // Beim normalen Produktionsstart ist sie nicht gesetzt, die Stage bleibt vollständig Idle.
             // "1" spielt die Sequenz einmal ab (Idle-vorher/-nachher-Nachweis), "loop" wiederholt sie für
@@ -342,23 +430,6 @@ public sealed partial class ShellPage
             else if (testMode == "loop") _ = RunBrainTestLoopAsync(renderer);
         };
 
-        var legend = new StackPanel { Spacing = 4 };
-        legend.Children.Add(OverlayTitle("AKTIVIERUNGSKANÄLE"));
-        foreach (var channel in ActivationChannels)
-        {
-            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            line.Children.Add(new Ellipse { Width = 8, Height = 8, Stroke = Brush("JarvisUnavailableBrush"), StrokeThickness = 1, VerticalAlignment = VerticalAlignment.Center });
-            line.Children.Add(new TextBlock { Text = channel, FontSize = 11.52, Foreground = Brush("JarvisSecondaryTextBrush") });
-            legend.Children.Add(line);
-        }
-
-        legend.Children.Add(OverlayNote("Nur bei echten Backend-Ereignissen. Derzeit keine."));
-        stage.Children.Add(Overlay(legend, HorizontalAlignment.Left, 208));
-
-        var idle = new StackPanel();
-        idle.Children.Add(OverlayTitle("IDLE. UNAVAILABLE."));
-        idle.Children.Add(OverlayNote("Statischer Entwurf ohne Runtime-Events. Keine Gedanken, Memories oder Aktivität werden simuliert."));
-        stage.Children.Add(Overlay(idle, HorizontalAlignment.Right, 240));
         return stage;
     }
 
@@ -375,6 +446,27 @@ public sealed partial class ShellPage
         CornerRadius = new CornerRadius(6),
         Child = content,
     };
+
+    /// <summary>Linearer Kantenauslauf in die Stage-Farbe: voll deckend an der Kante, transparent nach <paramref name="depth"/>.</summary>
+    private static Border EdgeBand(Windows.Foundation.Point from, Windows.Foundation.Point to, double depth, double strength)
+    {
+        var brush = new LinearGradientBrush { StartPoint = from, EndPoint = to };
+        brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb((byte)(255 * strength), 1, 4, 8), Offset = 0 });
+        brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0, 1, 4, 8), Offset = depth });
+        return new Border { Background = brush, IsHitTestVisible = false };
+    }
+
+    /// <summary>Kanalmarke leuchtet kurz auf und klingt aus (Compositor-Animation auf dem Element-Visual).</summary>
+    private static void PulseChannel(UIElement mark)
+    {
+        var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(mark);
+        var pulse = visual.Compositor.CreateScalarKeyFrameAnimation();
+        pulse.InsertKeyFrame(0f, 0f);
+        pulse.InsertKeyFrame(0.15f, 0.9f);
+        pulse.InsertKeyFrame(1f, 0f);
+        pulse.Duration = TimeSpan.FromMilliseconds(1400);
+        visual.StartAnimation("Opacity", pulse);
+    }
 
     private static TextBlock OverlayTitle(string text) => new()
     {

@@ -308,6 +308,50 @@ internal static class Program
         var burstAdmitted = BrainActivityScheduler.Admit(0, BrainActivityMapper.Steps(BrainActivityType.ResponseGeneration).Count);
         Check(burstAdmitted <= BrainActivityScheduler.MaxConcurrentPulses, "Ein einzelner Event-Burst darf die Obergrenze nicht überschreiten.", failures);
 
+        // Alle Knoten, jede gesampelte Bahnkurve und jeder Dendritenast liegen innerhalb der realen Gehirnkontur
+        // des Assets (keine Aktivität außerhalb der Hirnform, kein Pfad über Hirnstamm oder Bodenreflex).
+        foreach (var node in BrainNeuralGraph.Nodes)
+        {
+            Check(BrainSilhouette.Contains(node.X, node.Y), $"Knoten {node.Id} liegt außerhalb der Gehirnkontur.", failures);
+            foreach (var d in BrainNeuralGraph.Dendrites(node))
+            {
+                Check(BrainSilhouette.Contains(d.X1, d.Y1) && BrainSilhouette.Contains(d.X2, d.Y2), $"Dendrit an {node.Id} verlässt die Gehirnkontur.", failures);
+            }
+        }
+
+        foreach (var aspect in new[] { 1.5, 1.2, 1.9 })
+        {
+            foreach (var edge in BrainNeuralGraph.Edges)
+            {
+                Check(BrainNeuralGraph.Node(edge.FromId) is not null && BrainNeuralGraph.Node(edge.ToId) is not null, $"Bahn {edge.FromId}->{edge.ToId} referenziert unbekannte Knoten.", failures);
+                foreach (var (x, y) in BrainNeuralGraph.Sample(edge, aspect))
+                {
+                    Check(BrainSilhouette.Contains(x, y), $"Bahn {edge.FromId}->{edge.ToId} verlässt die Gehirnkontur bei Aspekt {aspect}.", failures);
+                }
+            }
+        }
+
+        // Eine Bahn beginnt und endet exakt auf ihren Knoten (Signal läuft von Synapse zu Synapse).
+        var sample = BrainNeuralGraph.Sample(BrainNeuralGraph.Edge("route", "inf1"));
+        Check(Math.Abs(sample[0].X - BrainNeuralGraph.Node("route").X) < 1e-9 && Math.Abs(sample[^1].Y - BrainNeuralGraph.Node("inf1").Y) < 1e-9,
+            "Bahnkurve muss exakt an Start- und Zielknoten anliegen.", failures);
+
+        // Mapper steuert nie Strukturknoten an; sie tragen nur das Netz.
+        foreach (BrainActivityType type in Enum.GetValues<BrainActivityType>())
+        {
+            foreach (var step in BrainActivityMapper.Steps(type))
+            {
+                Check(!BrainNeuralGraph.Node(step.FromNodeId).IsRelay && (step.ToNodeId is null || !BrainNeuralGraph.Node(step.ToNodeId).IsRelay),
+                    $"{type}: Strukturknoten dürfen nicht Ziel eines Ereignisses sein.", failures);
+            }
+        }
+
+        // Aktivierungskanäle: jede Kategorie mit Kanal trifft genau einen Legendeneintrag, Eingang/Fehler erfinden keinen.
+        Check(Enum.GetValues<BrainActivityChannel>().Length == 6, "Es muss genau sechs Aktivierungskanäle geben (Legende).", failures);
+        Check(BrainActivityMapper.Channel(BrainActivityType.ToolResult) == BrainActivityChannel.ToolSelection, "ToolResult gehört zur Werkzeugauswahl.", failures);
+        Check(BrainActivityMapper.Channel(BrainActivityType.InputReceived) is null && BrainActivityMapper.Channel(BrainActivityType.ErrorEvent) is null,
+            "Eingang und Fehler dürfen keinen Aktivierungskanal erfinden.", failures);
+
         // Testevents sind explizit als Test markiert und getrennt vom Produktionswert (Default false).
         Check(new BrainActivityEvent(BrainActivityType.InputReceived).IsTest == false, "BrainActivityEvent muss standardmäßig IsTest=false sein.", failures);
         Check(new BrainActivityEvent(BrainActivityType.InputReceived, IsTest: true).IsTest, "Test-Events müssen explizit markierbar sein.", failures);

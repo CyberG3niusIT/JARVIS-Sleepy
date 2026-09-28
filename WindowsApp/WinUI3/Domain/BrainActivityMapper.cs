@@ -10,6 +10,17 @@ public enum BrainPulseKind
     Degraded,
 }
 
+/// <summary>Aktivierungskanäle der Brain-Stage-Legende, in Anzeigereihenfolge.</summary>
+public enum BrainActivityChannel
+{
+    MemoryRetrieval,
+    ContextBuild,
+    Routing,
+    ToolSelection,
+    ModelActivity,
+    ResponseGeneration,
+}
+
 /// <summary>
 /// Ein einzelner Schritt eines Aktivitätsablaufs. Wenn <see cref="ToNodeId"/> null ist, blitzt nur der Startknoten
 /// auf (kein Signallauf entlang einer Kante). <see cref="DelayMs"/> ist relativ zum Beginn des auslösenden Events.
@@ -109,5 +120,20 @@ public static class BrainActivityMapper
         ],
 
         _ => [],
+    };
+
+    /// <summary>
+    /// Welcher Aktivierungskanal der Legende durch ein beobachtetes Ereignis angesprochen wird. Ereignisse ohne
+    /// eigenen Kanal (Eingang, Fehler, Degradation) ergeben null, statt einen Kanal zu erfinden.
+    /// </summary>
+    public static BrainActivityChannel? Channel(BrainActivityType type) => type switch
+    {
+        BrainActivityType.MemoryRetrieval or BrainActivityType.MemoryWriteConfirmed => BrainActivityChannel.MemoryRetrieval,
+        BrainActivityType.ContextBuild => BrainActivityChannel.ContextBuild,
+        BrainActivityType.ModelRouting => BrainActivityChannel.Routing,
+        BrainActivityType.ToolCall or BrainActivityType.ToolResult => BrainActivityChannel.ToolSelection,
+        BrainActivityType.ModelInference => BrainActivityChannel.ModelActivity,
+        BrainActivityType.ResponseGeneration => BrainActivityChannel.ResponseGeneration,
+        _ => null,
     };
 }
