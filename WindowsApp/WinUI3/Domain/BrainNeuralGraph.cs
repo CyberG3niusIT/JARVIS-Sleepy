@@ -15,167 +15,79 @@ public enum BrainRegion
     Relay,
 }
 
-/// <summary>Ein Synapsenknoten. X/Y sind normalisiert (0..1) relativ zum Brain-Asset (1536 x 1024), nicht zu Pixeln,
-/// damit der Graph beim Resize mit dem Bild mitskaliert statt zu driften.</summary>
-public sealed record BrainNode(string Id, double X, double Y, BrainRegion Region)
+/// <summary>Ein Synapsenknoten (Soma). X/Y sind normalisiert (0..1) relativ zum Brain-Asset (1536 x 1024), damit der
+/// Graph beim Resize mit dem Bild mitskaliert. <see cref="Depth"/> (0 = hinten, 1 = vorne) steuert nur Größe und
+/// Helligkeit für eine leichte räumliche Staffelung.</summary>
+public sealed record BrainNode(string Id, double X, double Y, BrainRegion Region, double Depth = 0.5)
 {
     public bool IsRelay => Region == BrainRegion.Relay;
 }
 
 /// <summary>
-/// Eine gerichtete neuronale Bahn zwischen zwei Knoten. <see cref="Bend"/> krümmt die Bahn als quadratische Kurve:
-/// der Kontrollpunkt liegt um Bend x Kantenlänge senkrecht zur Verbindungslinie versetzt (positiv = links der
-/// Laufrichtung). Keine Zufallsgeometrie; jede Bahn ist fest definiert.
+/// Eine neuronale Bahn als Polylinie (normalisiert). Funktionsbahnen sind gerichtet und werden vom Mapper
+/// angesteuert; Strukturbahnen sind ungerichtet, tragen das feine Netz und die Verzweigung eines Signals.
 /// </summary>
-public sealed record BrainEdge(string FromId, string ToId, double Bend = 0);
+public sealed record BrainEdge(string FromId, string ToId, bool Functional, IReadOnlyList<(double X, double Y)> Path)
+{
+    /// <summary>Bogenlänge der Bahn in normalisierten Bildeinheiten (x mit Seitenverhältnis 1.5 gewichtet).</summary>
+    public double Length { get; } = ArcLength(Path);
 
-/// <summary>Ein kurzer Dendritenast an einem Synapsenknoten (normalisierte Start-, Knick- und Endpunkte).</summary>
-public readonly record struct BrainDendrite(double X0, double Y0, double X1, double Y1, double X2, double Y2);
+    private static double ArcLength(IReadOnlyList<(double X, double Y)> path)
+    {
+        var length = 0.0;
+        for (var i = 1; i < path.Count; i++) length += Math.Sqrt(Math.Pow((path[i].X - path[i - 1].X) * 1.5, 2) + Math.Pow(path[i].Y - path[i - 1].Y, 2));
+        return length;
+    }
+}
 
 /// <summary>
-/// Deterministisches, festes Synapsennetz innerhalb der realen Gehirnkontur des Brain-Assets
-/// (<see cref="BrainSilhouette"/>). Frontallappen links, Okzipitallappen rechts, Temporallappen unten mittig,
-/// Kleinhirn rechts unten. Keine Laufzeit-Generierung.
+/// Deterministisches, festes Synapsennetz auf dem Brain-Asset. Somata liegen auf den im Asset sichtbaren
+/// Synapsenpunkten, Bahnen folgen den hellen Faserzügen des Assets (Offline erzeugt durch
+/// Tools/generate_brain_paths.py nach <see cref="BrainPathData"/>). Keine Laufzeit-Generierung, kein Zufall.
 /// </summary>
 public static class BrainNeuralGraph
 {
-    /// <summary>Stützpunkte je Bahn für Zeichnung und Signallauf. Fest, damit Rendering und Tests identisch samplen.</summary>
-    public const int CurveSegments = 12;
-
     public static readonly IReadOnlyList<BrainNode> Nodes =
-    [
-        // Funktionsknoten (vom Mapper angesteuert).
-        new("input", 0.285, 0.300, BrainRegion.Input),
-        new("ctx1", 0.335, 0.405, BrainRegion.Context),
-        new("mem1", 0.345, 0.520, BrainRegion.Memory),
-        new("mem2", 0.445, 0.595, BrainRegion.Memory),
-        new("ctx2", 0.430, 0.470, BrainRegion.Context),
-        new("core1", 0.500, 0.375, BrainRegion.Core),
-        new("core2", 0.545, 0.500, BrainRegion.Core),
-        new("route", 0.530, 0.215, BrainRegion.Routing),
-        new("inf1", 0.620, 0.300, BrainRegion.Inference),
-        new("inf2", 0.650, 0.440, BrainRegion.Inference),
-        new("inf3", 0.615, 0.545, BrainRegion.Inference),
-        new("tool", 0.705, 0.385, BrainRegion.Tool),
-        new("resp1", 0.600, 0.625, BrainRegion.Response),
-        new("resp2", 0.655, 0.685, BrainRegion.Response),
-
-        // Strukturknoten: tragen das feine Netz zwischen den Lappen, ohne Ereignisbedeutung.
-        new("r_front", 0.245, 0.400, BrainRegion.Relay),
-        new("r_top1", 0.395, 0.180, BrainRegion.Relay),
-        new("r_top2", 0.450, 0.285, BrainRegion.Relay),
-        new("r_par", 0.660, 0.230, BrainRegion.Relay),
-        new("r_occ", 0.715, 0.500, BrainRegion.Relay),
-        new("r_temp", 0.520, 0.600, BrainRegion.Relay),
-        new("r_front2", 0.285, 0.490, BrainRegion.Relay),
-        new("r_cb", 0.690, 0.640, BrainRegion.Relay),
-    ];
+        BrainPathData.Nodes.Select(n => new BrainNode(n.Id, n.X, n.Y, n.Region, n.Depth)).ToArray();
 
     public static readonly IReadOnlyList<BrainEdge> Edges =
-    [
-        // Funktionsbahnen.
-        new("input", "mem1", 0.22),
-        new("input", "ctx1", -0.12),
-        new("mem1", "mem2", 0.18),
-        new("mem1", "ctx1", -0.16),
-        new("mem2", "ctx2", 0.14),
-        new("ctx1", "core1", -0.14),
-        new("ctx2", "core1", 0.12),
-        new("ctx2", "core2", -0.10),
-        new("core1", "core2", 0.16),
-        new("core1", "route", 0.14),
-        new("route", "inf1", -0.16),
-        new("route", "inf2", 0.10),
-        new("inf1", "inf2", -0.14),
-        new("inf2", "inf3", 0.16),
-        new("inf1", "tool", -0.14),
-        new("tool", "inf2", -0.18),
-        new("inf3", "core2", 0.14),
-        new("core2", "resp1", 0.12),
-        new("core1", "resp1", -0.10),
-        new("resp1", "resp2", -0.18),
-
-        // Strukturbahnen (nur Netzzeichnung, keine Signalläufe).
-        new("r_front", "input", -0.16),
-        new("r_front", "ctx1", 0.12),
-        new("r_front", "r_front2", -0.18),
-        new("r_front2", "mem1", 0.14),
-        new("r_top1", "input", -0.14),
-        new("r_top1", "route", 0.10),
-        new("r_top2", "r_top1", 0.14),
-        new("r_top2", "core1", -0.12),
-        new("r_top2", "ctx1", 0.10),
-        new("route", "r_par", 0.14),
-        new("r_par", "inf1", -0.12),
-        new("r_par", "tool", 0.16),
-        new("tool", "r_occ", 0.16),
-        new("r_occ", "inf3", -0.12),
-        new("mem2", "r_temp", -0.14),
-        new("r_temp", "core2", 0.12),
-        new("r_temp", "resp1", -0.14),
-        new("resp2", "r_cb", 0.18),
-        new("r_cb", "r_occ", -0.14),
-    ];
+        BrainPathData.Edges.Select(e => new BrainEdge(e.From, e.To, e.Functional, ToPoints(e.Path))).ToArray();
 
     private static readonly Dictionary<string, BrainNode> ById = Nodes.ToDictionary(n => n.Id);
 
-    public static BrainNode Node(string id) => ById[id];
+    private static readonly Dictionary<string, BrainEdge[]> Structural = Nodes.ToDictionary(
+        n => n.Id,
+        n => Edges.Where(e => !e.Functional && (e.FromId == n.Id || e.ToId == n.Id)).ToArray());
 
-    public static bool HasEdge(string fromId, string toId) =>
-        Edges.Any(e => e.FromId == fromId && e.ToId == toId);
-
-    public static BrainEdge Edge(string fromId, string toId) =>
-        Edges.First(e => e.FromId == fromId && e.ToId == toId);
-
-    /// <summary>Punkt auf der gekrümmten Bahn bei Fortschritt <paramref name="t"/> (0 = Start, 1 = Ziel), normalisiert.
-    /// <paramref name="aspect"/> ist Breite/Höhe des Zielrechtecks, damit die Krümmung im Bild senkrecht wirkt.</summary>
-    public static (double X, double Y) PointOnEdge(BrainEdge edge, double t, double aspect = 1.5)
+    private static (double X, double Y)[] ToPoints(double[] flat)
     {
-        var a = Node(edge.FromId);
-        var b = Node(edge.ToId);
-        // In ein isotropes Maß umrechnen (x in Höhe-Einheiten), damit "senkrecht" auch im Bild senkrecht ist.
-        var ax = a.X * aspect; var bx = b.X * aspect;
-        var dx = bx - ax; var dy = b.Y - a.Y;
-        var cx = (ax + bx) / 2 - dy * edge.Bend;
-        var cy = (a.Y + b.Y) / 2 + dx * edge.Bend;
-        var u = 1 - t;
-        var x = u * u * ax + 2 * u * t * cx + t * t * bx;
-        var y = u * u * a.Y + 2 * u * t * cy + t * t * b.Y;
-        return (x / aspect, y);
-    }
-
-    /// <summary>Alle <see cref="CurveSegments"/>+1 Stützpunkte einer Bahn.</summary>
-    public static IReadOnlyList<(double X, double Y)> Sample(BrainEdge edge, double aspect = 1.5)
-    {
-        var points = new (double X, double Y)[CurveSegments + 1];
-        for (var i = 0; i <= CurveSegments; i++) points[i] = PointOnEdge(edge, (double)i / CurveSegments, aspect);
+        var points = new (double X, double Y)[flat.Length / 2];
+        for (var i = 0; i < points.Length; i++) points[i] = (flat[i * 2], flat[i * 2 + 1]);
         return points;
     }
 
-    /// <summary>
-    /// Drei kurze, leicht geknickte Dendritenäste je Funktionsknoten. Richtungen sind aus der Knoten-ID fest
-    /// abgeleitet (stabiler Hash), nicht zufällig; Länge etwa 2-3 % der Bildhöhe.
-    /// </summary>
-    public static IReadOnlyList<BrainDendrite> Dendrites(BrainNode node, double aspect = 1.5)
-    {
-        if (node.IsRelay) return [];
-        var seed = 0;
-        foreach (var c in node.Id) seed = (seed * 31 + c) & 0x7FFF;
-        var result = new BrainDendrite[3];
-        for (var i = 0; i < 3; i++)
-        {
-            var angle = (seed % 360 + i * 120 + (i == 1 ? 17 : 0)) * Math.PI / 180;
-            var length = 0.022 + ((seed >> (i + 2)) % 5) * 0.002;
-            var kink = (i % 2 == 0 ? 1 : -1) * 0.45;
-            var mx = node.X + Math.Cos(angle) * length * 0.55 / aspect;
-            var my = node.Y + Math.Sin(angle) * length * 0.55;
-            var ex = node.X + Math.Cos(angle + kink) * length / aspect;
-            var ey = node.Y + Math.Sin(angle + kink) * length;
-            result[i] = new BrainDendrite(node.X, node.Y, mx, my, ex, ey);
-        }
+    public static BrainNode Node(string id) => ById[id];
 
-        return result;
-    }
+    /// <summary>Gerichtete Funktionsbahn From -> To (Mapper-Kante).</summary>
+    public static bool HasEdge(string fromId, string toId) =>
+        Edges.Any(e => e.Functional && e.FromId == fromId && e.ToId == toId);
+
+    public static BrainEdge Edge(string fromId, string toId) =>
+        Edges.First(e => e.Functional && e.FromId == fromId && e.ToId == toId);
+
+    /// <summary>Strukturbahnen, die an einem Knoten ansetzen (für Verzweigung und Dendritenwirkung).</summary>
+    public static IReadOnlyList<BrainEdge> Branches(string nodeId) =>
+        Structural.TryGetValue(nodeId, out var edges) ? edges : [];
+
+    /// <summary>Stützpunkte der Bahn in Laufrichtung ab <paramref name="fromNodeId"/> (dreht Strukturbahnen bei Bedarf um).</summary>
+    public static IReadOnlyList<(double X, double Y)> PathFrom(BrainEdge edge, string fromNodeId) =>
+        edge.FromId == fromNodeId ? edge.Path : edge.Path.Reverse().ToArray();
+
+    /// <summary>Anderes Ende einer Bahn aus Sicht von <paramref name="nodeId"/>.</summary>
+    public static string OtherEnd(BrainEdge edge, string nodeId) => edge.FromId == nodeId ? edge.ToId : edge.FromId;
+
+    /// <summary>Alle Stützpunkte einer Bahn.</summary>
+    public static IReadOnlyList<(double X, double Y)> Sample(BrainEdge edge) => edge.Path;
 }
 
 /// <summary>

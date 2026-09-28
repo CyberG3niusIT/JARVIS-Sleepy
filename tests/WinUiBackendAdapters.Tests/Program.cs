@@ -308,33 +308,42 @@ internal static class Program
         var burstAdmitted = BrainActivityScheduler.Admit(0, BrainActivityMapper.Steps(BrainActivityType.ResponseGeneration).Count);
         Check(burstAdmitted <= BrainActivityScheduler.MaxConcurrentPulses, "Ein einzelner Event-Burst darf die Obergrenze nicht überschreiten.", failures);
 
-        // Alle Knoten, jede gesampelte Bahnkurve und jeder Dendritenast liegen innerhalb der realen Gehirnkontur
-        // des Assets (keine Aktivität außerhalb der Hirnform, kein Pfad über Hirnstamm oder Bodenreflex).
+        // Alle Knoten und jeder Stützpunkt jeder Bahn liegen innerhalb der realen Gehirnkontur des Assets
+        // (keine Aktivität außerhalb der Hirnform, kein Pfad über Hirnstamm oder Bodenreflex).
         foreach (var node in BrainNeuralGraph.Nodes)
         {
             Check(BrainSilhouette.Contains(node.X, node.Y), $"Knoten {node.Id} liegt außerhalb der Gehirnkontur.", failures);
-            foreach (var d in BrainNeuralGraph.Dendrites(node))
-            {
-                Check(BrainSilhouette.Contains(d.X1, d.Y1) && BrainSilhouette.Contains(d.X2, d.Y2), $"Dendrit an {node.Id} verlässt die Gehirnkontur.", failures);
-            }
+            Check(node.Depth is >= 0 and <= 1, $"Knoten {node.Id} hat eine Tiefe außerhalb 0..1.", failures);
         }
 
-        foreach (var aspect in new[] { 1.5, 1.2, 1.9 })
+        var ids = BrainNeuralGraph.Nodes.Select(n => n.Id).ToHashSet();
+        foreach (var edge in BrainNeuralGraph.Edges)
         {
-            foreach (var edge in BrainNeuralGraph.Edges)
+            Check(ids.Contains(edge.FromId) && ids.Contains(edge.ToId), $"Bahn {edge.FromId}->{edge.ToId} referenziert unbekannte Knoten.", failures);
+            Check(edge.Path.Count >= 4, $"Bahn {edge.FromId}->{edge.ToId} hat zu wenige Stützpunkte.", failures);
+            foreach (var (x, y) in edge.Path)
             {
-                Check(BrainNeuralGraph.Node(edge.FromId) is not null && BrainNeuralGraph.Node(edge.ToId) is not null, $"Bahn {edge.FromId}->{edge.ToId} referenziert unbekannte Knoten.", failures);
-                foreach (var (x, y) in BrainNeuralGraph.Sample(edge, aspect))
-                {
-                    Check(BrainSilhouette.Contains(x, y), $"Bahn {edge.FromId}->{edge.ToId} verlässt die Gehirnkontur bei Aspekt {aspect}.", failures);
-                }
+                Check(BrainSilhouette.Contains(x, y), $"Bahn {edge.FromId}->{edge.ToId} verlässt die Gehirnkontur.", failures);
             }
+
+            // Eine Bahn beginnt und endet auf ihren Somata (Signal läuft von Synapse zu Synapse).
+            var from = BrainNeuralGraph.Node(edge.FromId);
+            var to = BrainNeuralGraph.Node(edge.ToId);
+            Check(Math.Abs(edge.Path[0].X - from.X) < 0.004 && Math.Abs(edge.Path[0].Y - from.Y) < 0.006
+                  && Math.Abs(edge.Path[^1].X - to.X) < 0.004 && Math.Abs(edge.Path[^1].Y - to.Y) < 0.006,
+                $"Bahn {edge.FromId}->{edge.ToId} liegt nicht an ihren Knoten an.", failures);
         }
 
-        // Eine Bahn beginnt und endet exakt auf ihren Knoten (Signal läuft von Synapse zu Synapse).
-        var sample = BrainNeuralGraph.Sample(BrainNeuralGraph.Edge("route", "inf1"));
-        Check(Math.Abs(sample[0].X - BrainNeuralGraph.Node("route").X) < 1e-9 && Math.Abs(sample[^1].Y - BrainNeuralGraph.Node("inf1").Y) < 1e-9,
-            "Bahnkurve muss exakt an Start- und Zielknoten anliegen.", failures);
+        // Jeder Funktionsknoten hat Strukturbahnen, über die sich ein Signal verzweigen kann.
+        foreach (var node in BrainNeuralGraph.Nodes.Where(n => !n.IsRelay))
+        {
+            Check(BrainNeuralGraph.Branches(node.Id).Count > 0, $"Funktionsknoten {node.Id} hat keine Verzweigungsbahn.", failures);
+        }
+
+        // Umkehrung einer Strukturbahn startet am angefragten Knoten.
+        var branch = BrainNeuralGraph.Branches("core1")[0];
+        var reversed = BrainNeuralGraph.PathFrom(branch, BrainNeuralGraph.OtherEnd(branch, "core1"));
+        Check(reversed[^1] == BrainNeuralGraph.PathFrom(branch, "core1")[0], "PathFrom muss die Laufrichtung korrekt umkehren.", failures);
 
         // Mapper steuert nie Strukturknoten an; sie tragen nur das Netz.
         foreach (BrainActivityType type in Enum.GetValues<BrainActivityType>())

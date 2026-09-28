@@ -121,6 +121,16 @@ public sealed partial class ShellPage
         }
     }
 
+    /// <summary>TEST-ONLY: wiederholt ein einzelnes Ereignis mit Pause, bis die Stage wieder Idle ist.</summary>
+    private static async Task RunBrainSingleLoopAsync(BrainActivityRenderer renderer)
+    {
+        while (true)
+        {
+            renderer.RaiseTestSingle();
+            await Task.Delay(BrainActivityRenderer.ActiveHoldMs + 2500);
+        }
+    }
+
     private static string DetailOr(ComponentReading reading, string described, string withoutSource) =>
         !reading.Reported ? withoutSource : reading.Detail.Length > 0 ? reading.Detail : described;
 
@@ -424,10 +434,11 @@ public sealed partial class ShellPage
             // TEST-ONLY Verifikationspfad: läuft ausschließlich, wenn diese Umgebungsvariable explizit gesetzt ist.
             // Beim normalen Produktionsstart ist sie nicht gesetzt, die Stage bleibt vollständig Idle.
             // "1" spielt die Sequenz einmal ab (Idle-vorher/-nachher-Nachweis), "loop" wiederholt sie für
-            // Screenshot-Capture, damit ein Screenshot zu einem beliebigen Zeitpunkt Aktivität zeigen kann.
+            // Screenshot-Capture, "single" löst wiederholt genau ein einzelnes Ereignis aus.
             var testMode = Environment.GetEnvironmentVariable("JARVIS_BRAIN_TEST_SEQUENCE");
             if (testMode == "1") _ = renderer.RunTestSequenceAsync();
             else if (testMode == "loop") _ = RunBrainTestLoopAsync(renderer);
+            else if (testMode == "single") _ = RunBrainSingleLoopAsync(renderer);
         };
 
         return stage;
