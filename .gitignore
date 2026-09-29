@@ -114,3 +114,9 @@ config.yaml.bak
 *.before-*
 *.orig
 *.rej
+
+# .NET build output (WindowsApp, tests/*.Tests)
+WindowsApp/**/bin/
+WindowsApp/**/obj/
+tests/*.Tests/bin/
+tests/*.Tests/obj/
