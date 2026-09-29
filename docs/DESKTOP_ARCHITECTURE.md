@@ -27,8 +27,10 @@ WPF-only view-model records (`JarvisListItem`, `MetricBreakdown`, `MetricBucket`
 
 ## Enforcement
 
-`tests/unit/test_no_wpf_desktop.py` runs in CI (`.github/workflows/ci-python.yml`, step "WPF-Gate") and fails when any of these appear in `WindowsApp/**`, in .NET test files under `tests/`, or in any `.csproj`/`.sln`/`.props`/`.targets` in the repository:
+`tests/unit/test_no_wpf_desktop.py` is a static repository test (plain Python, no Windows SDK) and runs in CI (`.github/workflows/ci-python.yml`, step "WPF-Gate"). It fails when:
 
-`UseWPF`, `System.Windows`, `PresentationFramework`, `PresentationCore`, `WindowsBase`, `Microsoft.WindowsDesktop.App.WPF`, `Microsoft.NET.Sdk.WindowsDesktop`, a reference to the former WPF project file.
+- any of these appear, case-insensitively, in any file under `WindowsApp/` (code, XAML, project files and its Markdown), in .NET test files under `tests/`, or in any `.csproj`/`.sln`/`.props`/`.targets` in the repository: `UseWPF`, `System.Windows`, `PresentationFramework`, `PresentationCore`, `WindowsBase`, `Microsoft.WindowsDesktop.App.WPF`, `Microsoft.NET.Sdk.WindowsDesktop`, a reference to the former WPF project file;
+- `WindowsApp/` contains any project other than the WinUI 3 project (which must declare `UseWinUI` and the Windows App SDK);
+- any `ProjectReference` in any project file points to a file that does not exist.
 
-It also requires that `WindowsApp/` contains exactly one project, the WinUI 3 project with `UseWinUI` and the Windows App SDK. The only exception is Markdown that carries the marker `historical-document: retired WPF` in an HTML comment; build, runtime and test files have no exception.
+There are no exemptions inside that scope. This record lives in `docs/`, outside the scanned paths; it is the only place that names the retired technology in detail.
