@@ -538,6 +538,9 @@ def probe_desktop_api(props: dict[str, str]) -> Finding:
         return finding(READY, f"Schreibgeschützt, 127.0.0.1:{port}.")
     if status == 503 or status is None:
         return finding(STARTING, f"{WEB_HEALTH_PATH} noch nicht bereit ({'HTTP ' + str(status) if status else reason}).")
+    if status in (401, 403):
+        return finding(ERROR, f"{WEB_HEALTH_PATH} lehnt die Anmeldung ab (HTTP {status}); JARVIS_WEB_AUTH_TOKEN von Dienst "
+                              "und Prüfung stimmt nicht überein.")
     return finding(ERROR, f"{WEB_HEALTH_PATH} meldet {'HTTP ' + str(status) if not reason else reason}.")
 
 
@@ -662,9 +665,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.desktop_api_ready:
         try:
+            # Same configuration load as collect(): core.config.Config reads the repository .env, which
+            # jarvis-desktop-api.service also loads (EnvironmentFile). Without it a configured
+            # JARVIS_WEB_AUTH_TOKEN reaches the service but not this probe, and readiness sees 401.
+            dependencies.Config()
             desktop = probe_desktop_api(unit_props(DESKTOP_API_UNIT))
-        except RuntimeError as exc:
-            print(f"{ERROR}: {exc}")
+        except Exception as exc:
+            print(f"{ERROR}: Readiness-Prüfung nicht möglich ({type(exc).__name__}).")
             return 1
         print(f"{desktop.state}: {desktop.detail}".rstrip(": "))
         return 0 if desktop.state == READY else 1

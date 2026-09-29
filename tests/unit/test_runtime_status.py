@@ -1127,3 +1127,108 @@ def test_desktop_api_port_is_the_desktop_mode_port_not_the_web_port():
     assert rs.DESKTOP_API_PORT == jarvis_web.DESKTOP_MODE_PORT
     assert rs.DESKTOP_API_PORT != ConfigStub().get("web.port")
 
+
+
+# --- desktop API readiness uses the same auth configuration as the service --------------------------
+
+class _AuthServer:
+    """Loopback HTTP server answering /api/stats; requires the bearer token when one is set."""
+
+    def __init__(self, token):
+        import http.server
+        import threading
+        required = token
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            seen = []
+
+            def do_GET(self):
+                Handler.seen.append((self.path, self.headers.get("Authorization")))
+                ok = not required or self.headers.get("Authorization") == f"Bearer {required}"
+                self.send_response(200 if ok else 401)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true}' if ok else b'{"error": "auth"}')
+
+            def log_message(self, *args):
+                pass
+
+        self.handler = Handler
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def desktop_service(monkeypatch):
+    """An active desktop unit whose process owns the port; the HTTP answer comes from a real server."""
+    servers = []
+
+    def start(token):
+        server = _AuthServer(token)
+        servers.append(server)
+        monkeypatch.setattr(rs, "DESKTOP_API_PORT", server.port)
+        monkeypatch.setattr(rs, "unit_props", lambda unit: dict(UNIT_ACTIVE, MainPID="5150"))
+        monkeypatch.setattr(rs, "_web_listening_sockets", lambda: [("127.0.0.1", server.port, 5150)])
+        monkeypatch.setattr(rs, "_web_process_identity", lambda pid: (True, True))
+        return server
+
+    monkeypatch.delenv("JARVIS_WEB_AUTH_TOKEN", raising=False)
+    yield start
+    for server in servers:
+        server.close()
+
+
+def _config_loading_env(monkeypatch, token):
+    """Stands in for core.config.Config loading the repository .env (load_dotenv, override=True)."""
+    loaded = []
+
+    def config():
+        loaded.append(True)
+        if token is not None:
+            os.environ["JARVIS_WEB_AUTH_TOKEN"] = token
+
+    monkeypatch.setattr(rs.dependencies, "Config", config)
+    return loaded
+
+
+def test_desktop_ready_without_any_token(desktop_service, monkeypatch, capsys):
+    server = desktop_service(None)
+    loaded = _config_loading_env(monkeypatch, None)
+    assert rs.main(["--desktop-api-ready"]) == 0
+    assert capsys.readouterr().out.startswith("READY")
+    assert loaded and server.handler.seen == [("/api/stats", None)]
+
+
+def test_desktop_ready_uses_the_token_from_the_repository_env(desktop_service, monkeypatch, capsys):
+    server = desktop_service("env-token-value")
+    loaded = _config_loading_env(monkeypatch, "env-token-value")
+    assert rs.main(["--desktop-api-ready"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("READY") and "env-token-value" not in out
+    assert loaded
+    # Header only, never a query parameter.
+    assert server.handler.seen == [("/api/stats", "Bearer env-token-value")]
+
+
+@pytest.mark.parametrize("configured", [None, "wrong-token"])
+def test_desktop_missing_or_wrong_token_is_never_ready(desktop_service, monkeypatch, capsys, configured):
+    server = desktop_service("service-token")
+    _config_loading_env(monkeypatch, configured)
+    assert rs.main(["--desktop-api-ready"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("ERROR") and "HTTP 401" in out
+    assert "service-token" not in out and "wrong-token" not in out
+    assert all("?" not in path for path, _ in server.handler.seen)
+
+
+def test_desktop_ready_reports_a_failing_config_load_without_details(desktop_service, monkeypatch, capsys):
+    desktop_service(None)
+    monkeypatch.setattr(rs.dependencies, "Config", lambda: (_ for _ in ()).throw(ValueError("secret=abc")))
+    assert rs.main(["--desktop-api-ready"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("ERROR") and "ValueError" in out and "secret=abc" not in out
