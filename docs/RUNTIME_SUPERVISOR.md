@@ -7,6 +7,12 @@ Native Control Plane für die Desktop/Tauri-Anbindung. Stand: uncommitted auf
 Tauri -> JARVIS-Runtime.ps1 -> JARVIS.Runtime.psm1 -> wsl.exe -> scripts/runtime_status.py -> Dienste
 ```
 
+> Aktueller Client (Integrationsstand 2026-09-29): die native WinUI-3-App `WindowsApp/WinUI3`. Sie bettet
+> `JARVIS-Runtime.ps1` aus dem Repository-Root ein und ruft es mit `JARVIS_REPOSITORY_ROOT` auf; das Modul kommt aus
+> dem Checkout. Lifecycle-Aktionen führt sie nur aus, wenn `getRuntime` direkt vor und erneut nach dem
+> Bestätigungsdialog die Aktion für denselben Checkout erlaubt. Tauri- und `UI/src/...`-Bezüge unten sind historisch.
+> Siehe `docs/DESKTOP_ARCHITECTURE.md` und `WindowsApp/WinUI3/README.md`.
+
 ## Bedienung
 
 | Aktion | Aufruf | Ausgabe |
@@ -140,7 +146,8 @@ Die Probe ist die weitergehende Prüfung; `start.sh` würde den heutigen Ausfall
 
 ## Port-Audit
 
-`jarvis_web` nutzt **8091** (HTTPS 8443 unverändert). 8088 gehört der VVS API
+`jarvis_web` nutzt **8091** (HTTPS 8443 unverändert). Die schreibgeschützte Desktop-API (`jarvis_web.py --desktop-mode`,
+`jarvis-desktop-api.service`, Komponente `desktop-api`) nutzt fest **8092** (Integrationsstand 2026-09-29). 8088 gehört der VVS API
 (`wimaedv-vvs-api.service`), 8089 dem Webcam-Frame-Server (`core/webcam_server.py`).
 
 Verbleibende 8088 im Repo sind ausschließlich VVS: `.env`, `docs/SCHOOL_MOBILITY.md`, `docs/ARCHITECTURE.md` (Hinweis),

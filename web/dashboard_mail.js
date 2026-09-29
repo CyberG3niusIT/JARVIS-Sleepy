@@ -4,6 +4,7 @@
   let currentDraft = null;
   let currentPreview = null;
   let currentReply = null;
+  let writableAccounts = [];
   const status = text => { $('result').textContent = text; };
   let approvalResolve = null;
   function finishApproval(approved) {
@@ -55,6 +56,12 @@
     $('valUnread').textContent = String(statusData.accounts.reduce((sum, account) => sum + account.unread_inbox, 0));
     $('valNotices').textContent = String(statusData.accounts.reduce((sum, account) => sum + account.new_24h, 0));
     $('valSuggestions').textContent = String(suggestions.length);
+    writableAccounts = Array.isArray(statusData.writable_accounts) ? statusData.writable_accounts : [];
+    for (const select of document.querySelectorAll('select.writable-account')) {
+      const previous = select.value;
+      select.replaceChildren(...writableAccounts.map(account => new Option(account, account)));
+      if (writableAccounts.includes(previous)) select.value = previous;
+    }
     $('accounts').replaceChildren();
     for (const account of statusData.accounts)
       item($('accounts'), [account.account,
@@ -131,8 +138,7 @@
     const params = new URLSearchParams({ account: $('readAccount').value,
       folder: $('readFolder').value, uid: $('readUid').value });
     const message = await api('message?' + params);
-    currentReply = message.account === 'alex@wiesenmaier.org' || message.account === 'info@wima-edv.de'
-      ? message : null;
+    currentReply = writableAccounts.includes(message.account) ? message : null;
     $('replyMessage').hidden = !currentReply;
     $('messageText').textContent = 'Von: ' + message.sender + '\nBetreff: ' +
       message.subject + '\n\n' + message.body;

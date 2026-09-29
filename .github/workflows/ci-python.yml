@@ -28,6 +28,8 @@ jobs:
       - name: Ruff (permissiv, siehe pyproject.toml)
         run: ruff check .
         continue-on-error: true   # ENTWURF: bestehender Code wurde nie gelintet
+      - name: WPF-Gate (WPF ist retired, WinUI 3 ist der einzige Desktop-Client)
+        run: python -m pytest tests/unit/test_no_wpf_desktop.py -q -p no:cacheprovider
       - name: Unit-Tests (ohne Hardware/WSL)
         run: >
           python -m pytest tests/unit -q -p no:cacheprovider

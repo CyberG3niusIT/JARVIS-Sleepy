@@ -48,6 +48,28 @@ wait_for_handover || exit 1   # before the EXIT trap: a refusal leaves the lifec
 trap finish_lifecycle EXIT
 if [[ "$lifecycle_action" == stop ]]; then record_lifecycle running; fi
 
+# The read-only desktop API goes first (it only reads what the voice daemon writes). Only this checkout's
+# unit is stopped; a foreign one is reported and left alone, and never blocks stopping the voice backend.
+desktop_unit=jarvis-desktop-api.service
+desktop_state="$(systemctl --user show $desktop_unit --property=LoadState --value 2>/dev/null || true)"
+if [[ "$desktop_state" == loaded ]]; then
+    desktop_fragment_real="$(readlink -f "$(systemctl --user show $desktop_unit --property=FragmentPath --value 2>/dev/null || true)" 2>/dev/null || true)"
+    desktop_unit_real="$(readlink -f "$JARVIS_ROOT/systemd/$desktop_unit" 2>/dev/null || true)"
+    desktop_exec="$(systemctl --user show $desktop_unit --property=ExecStart --value 2>/dev/null || true)"
+    if [[ -n "$desktop_unit_real" && "$desktop_fragment_real" == "$desktop_unit_real" \
+          && "$desktop_exec" == *"$JARVIS_ROOT/jarvis_web.py"* && "$desktop_exec" == *"--desktop-mode"* ]]; then
+        if systemctl --user is-active --quiet $desktop_unit; then
+            systemctl --user stop $desktop_unit
+        fi
+        if systemctl --user is-active --quiet $desktop_unit; then
+            echo "ERROR: $desktop_unit ist nach Stop weiterhin aktiv."
+            exit 1
+        fi
+    else
+        echo "WARN: $desktop_unit gehört nicht zu diesem Checkout; unverändert gelassen."
+    fi
+fi
+
 state="$(systemctl --user show jarvis.service --property=LoadState --value 2>/dev/null || true)"
 if [[ "$state" == not-found || -z "$state" ]]; then
     echo "STOPPED: jarvis.service ist nicht installiert."

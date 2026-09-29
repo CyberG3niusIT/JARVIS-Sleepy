@@ -69,8 +69,8 @@
     <div class="mail-grid">
       <section class="mail-panel">
         <div class="panel-head"><h3>Absenderregel freigeben</h3></div>
-        <p class="panel-description">Für alex@wiesenmaier.org und info@wima-edv.de. Der Zielordner muss existieren.</p>
-        <label>Postfach <select id="ruleAccount"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <p class="panel-description">Nur für die vom Backend freigegebenen Postfächer. Der Zielordner muss existieren.</p>
+        <label>Postfach <select id="ruleAccount" class="writable-account"><option value="" disabled selected>Nach Anmeldung verfügbar</option></select></label>
         <label>Genaue Absenderadresse <input id="ruleSender" type="email" placeholder="kontakt@beispiel.de"></label>
         <label>Zielordner <input id="ruleFolder" type="text" placeholder="Rechtsanwalt"></label>
         <button id="saveRule" class="mail-button">Regel freigeben</button>
@@ -78,7 +78,7 @@
       <section class="mail-panel">
         <div class="panel-head"><h3>Zielordner anlegen</h3></div>
         <p class="panel-description">Jeder neue Ordner braucht eine eigene Freigabe.</p>
-        <label>Postfach <select id="folderAccount"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <label>Postfach <select id="folderAccount" class="writable-account"><option value="" disabled selected>Nach Anmeldung verfügbar</option></select></label>
         <label>Ordnername <input id="folderName" type="text" placeholder="Jugendamt"></label>
         <button id="createFolder" class="mail-button">Ordner anlegen</button>
       </section>
@@ -87,7 +87,7 @@
       <div class="panel-head"><div><span class="eyebrow">EINMALIGE AKTION</span><h3>Vorhandene Nachrichten</h3></div></div>
       <p class="panel-description">Zuerst konkrete Treffer prüfen. Nur ausgewählte Nachrichten werden verschoben.</p>
       <div class="field-grid preview-controls">
-        <label>Postfach <select id="previewAccount"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <label>Postfach <select id="previewAccount" class="writable-account"><option value="" disabled selected>Nach Anmeldung verfügbar</option></select></label>
         <label>Zielordner <input id="previewTarget" type="text" placeholder="Rechtsanwalt"></label>
       </div>
       <button id="preview" class="mail-button">Vorschau berechnen</button>
@@ -99,10 +99,10 @@
       <div class="panel-head"><div><span class="eyebrow">VERLAUF</span><h3>Verschiebungen &amp; Rücknahme</h3></div></div>
       <div id="moveHistory" class="mail-list"><p class="empty-state">Nach Anmeldung verfügbar</p></div>
     </section>
-    <div class="section-heading"><span class="eyebrow">VERSAND</span><h2>Vorbereiten. Prüfen. Freigeben.</h2><p>Antworten und neue Nachrichten nur von den zwei erlaubten Postfächern.</p></div>
+    <div class="section-heading"><span class="eyebrow">VERSAND</span><h2>Vorbereiten. Prüfen. Freigeben.</h2><p>Antworten und neue Nachrichten nur von den vom Backend freigegebenen Postfächern.</p></div>
     <section class="mail-panel full-panel compose-panel">
       <div class="field-grid">
-        <label>Absender <select id="from"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <label>Absender <select id="from" class="writable-account"><option value="" disabled selected>Nach Anmeldung verfügbar</option></select></label>
         <label>Empfänger <input id="to" type="text" placeholder="name@domain.de, …"></label>
         <label>Cc <input id="cc" type="text" placeholder="Optional"></label>
         <label>Bcc <input id="bcc" type="text" placeholder="Optional"></label>

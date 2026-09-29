@@ -100,7 +100,7 @@ def test_school_mobility_intent_overlap(skill_manager, question, expected):
 @pytest.mark.parametrize("question", [
     "Erinnere mich daran, TestkindAlpha heute abzuholen",
     "Wie ist das Wetter heute?",
-    "Wann fÃ¤hrt der Bus?",
+    "Wann fährt der Bus?",
 ])
 def test_other_intents_do_not_execute_school_or_mobility(skill_manager, question):
     root = Path(__file__).resolve().parents[2]

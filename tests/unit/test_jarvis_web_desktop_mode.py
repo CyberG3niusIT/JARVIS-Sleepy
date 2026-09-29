@@ -140,12 +140,13 @@ def test_desktop_mode_websocket_accepts_only_client_info(tmp_path, monkeypatch, 
 
 @pytest.mark.parametrize("kwargs,expected", [
     ({}, None),
-    ({"host": "127.0.0.1", "port": 8091}, None),
+    ({"host": "127.0.0.1", "port": 8092}, None),
     ({"voice": True}, "--voice"),
     ({"host": "0.0.0.0"}, "127.0.0.1"),
     ({"host": "192.168.0.5"}, "127.0.0.1"),
-    ({"port": 8443}, "8091"),
-    ({"port": 9000}, "8091"),
+    ({"port": 8091}, "8092"),
+    ({"port": 8443}, "8092"),
+    ({"port": 9000}, "8092"),
 ])
 def test_desktop_mode_arguments_cannot_widen_the_binding(kwargs, expected):
     import jarvis_web
@@ -154,9 +155,10 @@ def test_desktop_mode_arguments_cannot_widen_the_binding(kwargs, expected):
     assert (problem is None) if expected is None else (expected in problem)
 
 
-def test_desktop_mode_is_loopback_8091_only():
+def test_desktop_mode_is_loopback_8092_only():
+    # Own port beside the standard web process (web.port 8091); see test_desktop_api_lifecycle.py.
     import jarvis_web
-    assert (jarvis_web.DESKTOP_MODE_HOST, jarvis_web.DESKTOP_MODE_PORT) == ("127.0.0.1", 8091)
+    assert (jarvis_web.DESKTOP_MODE_HOST, jarvis_web.DESKTOP_MODE_PORT) == ("127.0.0.1", 8092)
 
 
 @pytest.mark.parametrize("configured,expected", [

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>Jarvis.ControlHub.WinUI</RootNamespace>
+    <AssemblyName>Jarvis.ControlHub.WinUI</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260804001" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\JarvisApiClient.cs" Link="Shared\JarvisApiClient.cs" />
+    <Compile Include="..\RuntimeSupervisorClient.cs" Link="Shared\RuntimeSupervisorClient.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\JARVIS-Runtime.ps1" LogicalName="Jarvis.ControlHub.Runtime.JARVIS-Runtime.ps1" />
+    <Content Include="Resources\jarvis-wordmark.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Resources\jarvis-brain-idle.jpg" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,29 @@
+# Sleepy production USER unit for the native desktop app's read-only API.
+# start.sh links it from this checkout and starts it after jarvis.service; stop.sh stops it.
+# jarvis_web.py --desktop-mode binds only 127.0.0.1:8092 (jarvis_web.DESKTOP_MODE_PORT), serves only
+# the GET allowlist, opens memory/context read-only and starts none of the voice daemon's workers.
+
+[Unit]
+Description=JARVIS read-only desktop API (jarvis_web.py --desktop-mode, 127.0.0.1:8092)
+After=network.target jarvis.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/.env
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main
+
+ExecStartPre=/usr/bin/test -x /home/alex/jarvis-venv/bin/python3
+ExecStartPre=/usr/bin/test -f /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/jarvis_web.py
+ExecStart=/home/alex/jarvis-venv/bin/python3 /mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/jarvis_web.py --desktop-mode
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis-desktop-api
+
+[Install]
+WantedBy=default.target
