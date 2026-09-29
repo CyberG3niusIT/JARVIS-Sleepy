@@ -1,6 +1,6 @@
 # J.A.R.V.I.S Mobile
 
-> Workspaceweite technische Einordnung: [JARVIS Sleepy Dokumentation](../Dokumentation/README.md). Diese App bleibt ein separates Repository; ihr eigener Runtime- und Portierungsstand steht in den folgenden Abschnitten.
+> Workspaceweite technische Einordnung: JARVIS-Sleepy-Dokumentation (lokaler Arbeitsbereich `Dokumentation/`, nicht Teil dieses Repositorys). Diese App bleibt ein separates Repository; ihr eigener Runtime- und Portierungsstand steht in den folgenden Abschnitten.
 
 **Local AI Assistant**
 
