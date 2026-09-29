@@ -6,6 +6,7 @@ using System.Text.Json;
 using Jarvis.ControlHub;
 using Jarvis.ControlHub.WinUI.Adapters;
 using Jarvis.ControlHub.WinUI.Domain;
+using Jarvis.ControlHub.WinUI.Views;
 
 internal static class Program
 {
@@ -44,6 +45,11 @@ internal static class Program
         VerifyMobileAdapter(failures);
         VerifyBrainActivity(failures);
         VerifyIconRegistry(failures);
+        VerifyBrainEventMapping(failures);
+        VerifyBrainEventCursor(failures);
+        await VerifyBrainEventBridgeAsync(failures);
+        VerifyBrainPrivacyAndReadOnly(failures);
+        VerifyHeaderLayout(failures);
         await VerifyHubAsync(failures, skipped);
 
         foreach (var item in skipped) Console.WriteLine("SKIPPED: " + item);
@@ -360,6 +366,263 @@ internal static class Program
         }
 
         return null;
+    }
+
+    private static readonly DateTimeOffset EventBase = DateTimeOffset.FromUnixTimeSeconds(1_790_000_000);
+
+    private static EventItem Ev(int second, string eventName, string category, string severity = "info") =>
+        new(EventBase.AddSeconds(second), category, eventName, severity);
+
+    /// <summary>Mapping nur mit Backend-Vokabular (core/event_logger.py CATEGORIES/SEVERITIES, Emit-Stellen).</summary>
+    private static void VerifyBrainEventMapping(ICollection<string> failures)
+    {
+        (string Category, string Event, string Severity, BrainActivityType? Expected)[] cases =
+        [
+            ("inference", "stt_transcription", "info", BrainActivityType.InputReceived),
+            ("inference", "stt_transcription", "debug", null),
+            ("inference", "stt_transcription", "error", BrainActivityType.ErrorEvent),
+            ("decision", "route_completed", "info", BrainActivityType.ModelRouting),
+            ("inference", "llm_call", "info", BrainActivityType.ModelInference),
+            ("inference", "llm_call", "error", BrainActivityType.ErrorEvent),
+            ("tool_execution", "tool_completed", "info", BrainActivityType.ToolResult),
+            ("tool_execution", "tool_completed", "error", BrainActivityType.ErrorEvent),
+            ("error_recovery", "watchdog_listener_stuck", "warn", BrainActivityType.DegradedEvent),
+            ("error_recovery", "watchdog_stt_backlog", "warn", BrainActivityType.DegradedEvent),
+            // Unbekannt, projiziert oder ohne belegte Semantik: keine Aktivität.
+            ("unknown", "unknown", "unknown", null),
+            ("inference", "unknown", "info", null),
+            ("user_interaction", "conversation_opened", "info", null),
+            ("inference", "tts_synthesis", "info", null),
+            ("tool_execution", "skill_intent_completed", "info", null),
+            ("performance", "turn_latency", "info", null),
+            ("self_assessment", "cloud_consultation", "info", null),
+            // Falsche Kategorie oder Schwere für ein bekanntes Ereignis: nicht raten.
+            ("decision", "llm_call", "info", null),
+            ("inference", "route_completed", "info", null),
+            ("error_recovery", "watchdog_listener_stuck", "info", null),
+            ("error_recovery", "tool_completed", "error", null),
+        ];
+        foreach (var (category, name, severity, expected) in cases)
+        {
+            var actual = BrainEventMapping.Map(category, name, severity);
+            Check(actual == expected, $"BrainEventMapping {category}/{name}/{severity}: erwartet {expected?.ToString() ?? "keine"}, erhalten {actual?.ToString() ?? "keine"}.", failures);
+        }
+
+        // Ohne belegte Quelle darf keine Zeile diese Typen erzeugen.
+        var produced = cases.Select(c => BrainEventMapping.Map(c.Category, c.Event, c.Severity)).OfType<BrainActivityType>().ToHashSet();
+        foreach (var forbidden in new[] { BrainActivityType.ToolCall, BrainActivityType.MemoryRetrieval, BrainActivityType.ContextBuild, BrainActivityType.ResponseGeneration, BrainActivityType.MemoryWriteConfirmed })
+        {
+            Check(!produced.Contains(forbidden), $"BrainEventMapping erzeugt {forbidden} ohne reale Quelle.", failures);
+        }
+    }
+
+    private static void VerifyBrainEventCursor(ICollection<string> failures)
+    {
+        var cursor = new BrainEventCursor();
+        // Backend: ORDER BY timestamp DESC.
+        IReadOnlyList<EventItem> first = [Ev(30, "llm_call", "inference"), Ev(20, "route_completed", "decision"), Ev(10, "stt_transcription", "inference")];
+        Check(cursor.Advance(first).Count == 0, "Cursor: erster Snapshot darf nicht abgespielt werden (Baseline).", failures);
+        Check(cursor.HasBaseline, "Cursor: Baseline nach erstem Snapshot nicht gesetzt.", failures);
+
+        IReadOnlyList<EventItem> second = [Ev(42, "tool_completed", "tool_execution"), Ev(41, "llm_call", "inference"), .. first];
+        var fresh = cursor.Advance(second);
+        Check(fresh.Count == 2, $"Cursor: nur neue Ereignisse erwartet (2), erhalten {fresh.Count}.", failures);
+        Check(fresh.Count == 2 && fresh[0].Time < fresh[1].Time && fresh[0].Event == "llm_call", "Cursor: neue Ereignisse nicht chronologisch (ältestes zuerst).", failures);
+
+        Check(cursor.Advance(second).Count == 0, "Cursor: identischer Snapshot erzeugt erneut Ereignisse (Deduplizierung).", failures);
+
+        // Gleicher Zeitstempel: newest-first bedeutet, der spätere Index ist der ältere Eintrag.
+        IReadOnlyList<EventItem> sameTime = [Ev(50, "tool_completed", "tool_execution"), Ev(50, "llm_call", "inference"), .. second];
+        var tie = cursor.Advance(sameTime);
+        Check(tie.Count == 2 && tie[0].Event == "llm_call" && tie[1].Event == "tool_completed", "Cursor: Reihenfolge bei gleichem Zeitstempel folgt nicht der Backend-Reihenfolge.", failures);
+
+        // Weit ältere, bisher unbekannte Einträge sind Historie, keine Live-Ereignisse.
+        IReadOnlyList<EventItem> historic = [.. sameTime, Ev(1, "llm_call", "inference")];
+        Check(cursor.Advance(historic).Count == 0, "Cursor: historischer Eintrag wurde als neu abgespielt.", failures);
+
+        // Nachzügler innerhalb der Toleranz zählt.
+        IReadOnlyList<EventItem> late = [Ev(48, "route_completed", "decision"), .. sameTime];
+        Check(cursor.Advance(late).Count == 1, "Cursor: Nachzügler innerhalb der Toleranz verloren.", failures);
+
+        cursor.Reset();
+        Check(cursor.Advance(late).Count == 0 && cursor.HasBaseline, "Cursor: nach Reset muss der nächste Snapshot wieder Baseline sein.", failures);
+
+        var empty = new BrainEventCursor();
+        Check(empty.Advance([]).Count == 0 && empty.HasBaseline, "Cursor: leerer erster Snapshot muss Baseline setzen.", failures);
+        Check(empty.Advance([Ev(5, "llm_call", "inference")]).Count == 1, "Cursor: nach leerer Baseline muss ein neues Ereignis zählen.", failures);
+    }
+
+    private static WebReading EventsReading(params EventItem[] items) =>
+        new(RuntimeState.Ready, string.Empty, new EventsInfo(items), DateTimeOffset.Now);
+
+    private static async Task VerifyBrainEventBridgeAsync(ICollection<string> failures)
+    {
+        static Task NoDelay(TimeSpan _, CancellationToken token) { token.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        // Baseline, danach nur neue, gemappte Ereignisse in chronologischer Reihenfolge.
+        var bridge = new BrainEventBridge(_ => Task.FromResult(WebReading.NotQueried), NoDelay);
+        var raised = new List<BrainActivityType>();
+        var sources = new List<RuntimeState>();
+        bridge.Activity += raised.Add;
+        bridge.SourceChanged += sources.Add;
+        await bridge.ProcessAsync(EventsReading(Ev(10, "llm_call", "inference")), CancellationToken.None);
+        Check(raised.Count == 0, "Bridge: Baseline-Snapshot hat Aktivität ausgelöst.", failures);
+        await bridge.ProcessAsync(EventsReading(Ev(13, "tool_completed", "tool_execution"), Ev(12, "conversation_opened", "user_interaction"), Ev(11, "route_completed", "decision"), Ev(10, "llm_call", "inference")), CancellationToken.None);
+        Check(raised.SequenceEqual([BrainActivityType.ModelRouting, BrainActivityType.ToolResult]), $"Bridge: erwartet ModelRouting, ToolResult; erhalten {string.Join(",", raised)}.", failures);
+        Check(sources.SequenceEqual([RuntimeState.Ready]), "Bridge: Quellzustand READY nicht gemeldet.", failures);
+
+        // OFFLINE, UNAVAILABLE, ERROR: keine Aktivität, Quelle gemeldet, Cursor zurückgesetzt (kein Nachholen).
+        raised.Clear();
+        foreach (var state in new[] { RuntimeState.Offline, RuntimeState.Unavailable, RuntimeState.Error })
+        {
+            await bridge.ProcessAsync(new WebReading(state, "x", null, DateTimeOffset.Now), CancellationToken.None);
+        }
+
+        Check(raised.Count == 0, "Bridge: OFFLINE/UNAVAILABLE/ERROR hat Aktivität ausgelöst.", failures);
+        Check(bridge.SourceState == RuntimeState.Error && sources.Contains(RuntimeState.Offline) && sources.Contains(RuntimeState.Unavailable), "Bridge: Quellzustände nicht weitergegeben.", failures);
+        await bridge.ProcessAsync(EventsReading(Ev(99, "llm_call", "inference"), Ev(98, "stt_transcription", "inference")), CancellationToken.None);
+        Check(raised.Count == 0, "Bridge: nach Wiederverbindung wurden verpasste Ereignisse abgespielt (Recovery muss Baseline sein).", failures);
+
+        // Burst: höchstens MaxEventsPerBatch, und zwar die jüngsten, chronologisch.
+        raised.Clear();
+        var burst = Enumerable.Range(0, 30).Select(i => Ev(200 + i, i % 2 == 0 ? "llm_call" : "route_completed", i % 2 == 0 ? "inference" : "decision")).Reverse().ToArray();
+        await bridge.ProcessAsync(EventsReading([.. burst, Ev(99, "llm_call", "inference"), Ev(98, "stt_transcription", "inference")]), CancellationToken.None);
+        Check(raised.Count == BrainEventBridge.MaxEventsPerBatch, $"Bridge: Burst nicht begrenzt ({raised.Count}).", failures);
+        Check(BrainEventBridge.MaxEventsPerBatch <= BrainActivityScheduler.MaxConcurrentPulses, "Bridge: Batch-Grenze über MaxConcurrentPulses.", failures);
+        Check(raised.Count > 0 && raised[^1] == BrainActivityType.ModelRouting, "Bridge: Burst endet nicht mit dem jüngsten Ereignis.", failures);
+
+        // Transportfehler: Ausnahme beim Lesen ergibt UNAVAILABLE und keinen erfundenen Fehlerpuls.
+        var throwing = new BrainEventBridge(_ => throw new HttpRequestException("kaputt"), (_, token) => Task.Delay(Timeout.Infinite, token));
+        var throwingRaised = 0;
+        throwing.Activity += _ => throwingRaised++;
+        using (var cts = new CancellationTokenSource())
+        {
+            var run = throwing.RunAsync(cts.Token);
+            await Task.Delay(50);
+            Check(throwing.SourceState == RuntimeState.Unavailable, "Bridge: Lesefehler nicht als UNAVAILABLE gemeldet.", failures);
+            Check(throwingRaised == 0, "Bridge: Transportfehler hat Brain-Aktivität erzeugt.", failures);
+            cts.Cancel();
+            Check(await Task.WhenAny(run, Task.Delay(2000)) == run && run.IsCompletedSuccessfully, "Bridge: Schleife endet nicht nach Cancellation.", failures);
+        }
+
+        // Cancellation / Unload: danach keine Abfragen und keine Aktivität mehr.
+        var reads = 0;
+        var second = 300;
+        var live = new BrainEventBridge(_ =>
+        {
+            Interlocked.Increment(ref reads);
+            second++;
+            return Task.FromResult(EventsReading(Ev(second, "llm_call", "inference")));
+        }, (_, token) => Task.Delay(5, token));
+        var liveRaised = 0;
+        live.Activity += _ => Interlocked.Increment(ref liveRaised);
+        using (var cts = new CancellationTokenSource())
+        {
+            var run = live.RunAsync(cts.Token);
+            await Task.Delay(120);
+            cts.Cancel();
+            var finished = await Task.WhenAny(run, Task.Delay(2000)) == run;
+            Check(finished && run.IsCompletedSuccessfully, "Bridge: RunAsync endet nicht sauber nach Cancellation.", failures);
+            Check(liveRaised > 0, "Bridge: laufende Schleife hat keine neuen Ereignisse verarbeitet.", failures);
+            var readsAfter = Volatile.Read(ref reads);
+            var raisedAfter = Volatile.Read(ref liveRaised);
+            await Task.Delay(80);
+            Check(Volatile.Read(ref reads) == readsAfter && Volatile.Read(ref liveRaised) == raisedAfter, "Bridge: nach Cancellation laufen noch Abfragen oder Aktivität.", failures);
+        }
+
+        // Cancellation während eines gestaffelten Bursts bricht die restliche Ausgabe ab.
+        var staggered = new BrainEventBridge(_ => Task.FromResult(WebReading.NotQueried), (_, token) => Task.Delay(Timeout.Infinite, token));
+        var staggeredRaised = 0;
+        staggered.Activity += _ => staggeredRaised++;
+        await staggered.ProcessAsync(EventsReading(Ev(1, "llm_call", "inference")), CancellationToken.None);
+        using (var cts = new CancellationTokenSource())
+        {
+            var process = staggered.ProcessAsync(EventsReading(Ev(4, "llm_call", "inference"), Ev(3, "llm_call", "inference"), Ev(2, "llm_call", "inference"), Ev(1, "llm_call", "inference")), cts.Token);
+            cts.Cancel();
+            try { await process; } catch (OperationCanceledException) { }
+            Check(staggeredRaised == 1, $"Bridge: nach Cancellation wurden weitere gestaffelte Ereignisse ausgegeben ({staggeredRaised}).", failures);
+        }
+
+        // Statustexte: AKTIV nur mit Aktivität; ohne Ereignisse der ehrliche Quellzustand.
+        Check(BrainStageStatus.Describe(false, false, RuntimeState.Ready).Title == "IDLE. READY.", "BrainStageStatus: READY ohne Ereignisse muss IDLE sein.", failures);
+        Check(BrainStageStatus.Describe(false, false, RuntimeState.Offline).Title == "IDLE. OFFLINE.", "BrainStageStatus: OFFLINE falsch.", failures);
+        Check(BrainStageStatus.Describe(false, false, null).Title == "IDLE. UNAVAILABLE.", "BrainStageStatus: ohne Quelle falsch.", failures);
+        Check(BrainStageStatus.Describe(true, false, RuntimeState.Ready).Title == "AKTIV.", "BrainStageStatus: aktiv falsch.", failures);
+        Check(BrainStageStatus.Describe(true, true, null).Title == "AKTIV. TESTSEQUENZ.", "BrainStageStatus: Testsequenz falsch.", failures);
+    }
+
+    private static void VerifyBrainPrivacyAndReadOnly(ICollection<string> failures)
+    {
+        // Brain-Eventmodell trägt nur Zeit, Kategorie, Ereignisname und Schwere.
+        var fields = typeof(EventItem).GetProperties().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray();
+        Check(fields.SequenceEqual(["Category", "Event", "Severity", "Time"]), $"EventItem enthält unerwartete Felder: {string.Join(",", fields)}.", failures);
+        var activityFields = typeof(BrainActivityEvent).GetProperties().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray();
+        Check(activityFields.SequenceEqual(["IsTest", "Type"]), $"BrainActivityEvent enthält unerwartete Felder: {string.Join(",", activityFields)}.", failures);
+        var parsed = BackendParsers.ParseEventsRecent(Json("""{"events":[{"timestamp":1790000000,"category":"inference","event":"llm_call","severity":"info","message":"GEHEIM-PROMPT","metadata":{"arguments":"GEHEIM-ARG"}}]}"""));
+        var rendered = string.Join("|", parsed.Items.Select(item => item.ToString()));
+        Check(parsed.Items.Count == 1 && !rendered.Contains("GEHEIM", StringComparison.Ordinal), "ParseEventsRecent übernimmt Inhaltsfelder.", failures);
+
+        // Kein Schreibpfad: Adapter und API-Client senden nur GET.
+        var root = FindRepoFile(Path.Combine("WindowsApp", "WinUI3", "Adapters"));
+        var client = FindRepoFile(Path.Combine("WindowsApp", "JarvisApiClient.cs"));
+        if (root is null || client is null)
+        {
+            failures.Add("Read-only-Prüfung: Quellen nicht gefunden.");
+            return;
+        }
+
+        var source = string.Concat(Directory.GetFiles(root, "*.cs").Append(client).Select(File.ReadAllText));
+        foreach (var write in new[] { "HttpMethod.Post", "HttpMethod.Put", "HttpMethod.Delete", "HttpMethod.Patch", "PostAsync", "PutAsync", "DeleteAsync", "PatchAsync", "ClientWebSocket" })
+        {
+            Check(!source.Contains(write, StringComparison.Ordinal), $"Read-only verletzt: {write} in Adapter oder API-Client.", failures);
+        }
+
+        Check(source.Contains("http://127.0.0.1:", StringComparison.Ordinal) && !System.Text.RegularExpressions.Regex.IsMatch(source, @"https?://(?!127\.0\.0\.1)[a-z0-9.-]+[:/]"), "Loopback-only verletzt: Nicht-Loopback-Adresse im Adapter oder API-Client.", failures);
+    }
+
+    private static void VerifyHeaderLayout(ICollection<string> failures)
+    {
+        // Geschätzte natürliche Inhaltsbreiten der acht Tabs (Segoe UI Variable 11.52; Icon 18 über Label).
+        double[] tabs = [30, 25, 42, 92, 74, 28, 40, 52];
+        const double statusWith = 526, statusWithout = 396;
+        // Verfügbare Navigationsbreite = Fenster - 22.4 - 146 - 2 * 20 - 159.3 - 8.
+        static double Available(double window) => window - 22.4 - 146 - 40 - 159.3 - 8;
+
+        var wide = HeaderLayout.Choose(Available(1920), tabs, statusWith, statusWithout);
+        Check(wide == new HeaderFit(TabDensity.Wide, true), $"HeaderLayout 1920: erwartet Wide mit Labels, erhalten {wide}.", failures);
+        var laptop = HeaderLayout.Choose(Available(1536), tabs, statusWith, statusWithout);
+        Check(!laptop.SystemLabels, "HeaderLayout 1536: Statuslabels dürfen die Tabs nicht ins Overflow drängen.", failures);
+        Check(HeaderLayout.TabsWidth(tabs, laptop.Tabs) + statusWithout + HeaderLayout.FitReserve <= Available(1536), "HeaderLayout 1536: gewählte Dichte passt nicht (Overflow).", failures);
+        var narrow = HeaderLayout.Choose(Available(1300), tabs, statusWith, statusWithout);
+        Check(narrow == new HeaderFit(TabDensity.Compact, false), $"HeaderLayout 1300: erwartet Compact ohne Labels, erhalten {narrow}.", failures);
+        Check(HeaderLayout.TabsWidth(tabs, TabDensity.Compact) < HeaderLayout.TabsWidth(tabs, TabDensity.Wide), "HeaderLayout: Compact ist nicht schmaler als Wide.", failures);
+        Check(tabs.All(t => HeaderLayout.MinWidth(TabDensity.Compact) >= 70.4 && t + 2 * HeaderLayout.Padding(TabDensity.Compact) > t), "HeaderLayout: Compact-Maße unter Referenz.", failures);
+
+        // Statische Layoutursachen: Overflow-Abstand, Tab-Rhythmus, Spaltenaufbau der Titelleiste.
+        var tokens = FindRepoFile(Path.Combine("WindowsApp", "WinUI3", "Resources", "DesignTokens.xaml"));
+        var shell = FindRepoFile(Path.Combine("WindowsApp", "WinUI3", "Views", "ShellPage.xaml"));
+        if (tokens is null || shell is null)
+        {
+            failures.Add("Header: XAML-Quellen nicht gefunden.");
+            return;
+        }
+
+        var tokenText = File.ReadAllText(tokens);
+        var overflow = System.Text.RegularExpressions.Regex.Match(tokenText, @"x:Key=""TopNavigationViewOverflowButtonMargin"">([^<]+)<");
+        Check(overflow.Success && overflow.Groups[1].Value.Split(',').Select(double.Parse).First() >= 8, "Header: Overflow-Button ohne Abstand zur Primärnavigation.", failures);
+        Check(tokenText.Contains(@"x:Key=""TopNavigationViewItemMargin""", StringComparison.Ordinal), "Header: Tab-Abstand (.jx-tabs gap) fehlt.", failures);
+        Check(tokenText.Contains(@"x:Key=""TopNavigationViewItemContentPresenterMargin"">0,-1,0,-1<", StringComparison.Ordinal), "Header: asymmetrischer Standard-Innenabstand der Tabs aktiv.", failures);
+
+        var xaml = System.Xml.Linq.XDocument.Load(shell);
+        System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        System.Xml.Linq.XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var bar = xaml.Descendants(ns + "Grid").FirstOrDefault(e => (string?)e.Attribute(x + "Name") == "SystemBar");
+        var widths = bar?.Element(ns + "Grid.ColumnDefinitions")?.Elements(ns + "ColumnDefinition").Select(c => (string?)c.Attribute("Width")).ToArray();
+        Check(widths is ["Auto", "*", "Auto"], "Header: Titelleiste muss Auto | * | Auto sein (Navigation in der Restspalte).", failures);
+        var nav = xaml.Descendants(ns + "NavigationView").FirstOrDefault();
+        Check(nav is not null && (string?)nav.Attribute("Grid.Column") == "1" && (string?)nav.Attribute("PaneDisplayMode") == "Top", "Header: NavigationView nicht als Top-Navigation in der Restspalte.", failures);
+        Check(nav?.Element(ns + "NavigationView.MenuItems")?.Elements(ns + "NavigationViewItem").Count() == 8, "Header: erwartet 7 Primär-Tabs plus System.", failures);
+        Check(nav?.Attribute("MinWidth") is null && nav?.Attribute("Width") is null, "Header: feste Breite an der NavigationView verhindert Anpassung.", failures);
     }
 
     private static void VerifyBrainActivity(ICollection<string> failures)

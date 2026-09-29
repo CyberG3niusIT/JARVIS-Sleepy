@@ -46,7 +46,8 @@ public sealed partial class ShellPage
             JxSlot("Mic", "STT", DetailOr(stt, "Spracherkennung", "Spracherkennung. Keine Quelle."), stt.Text),
             JxSlot("Volume2", "TTS", DetailOr(tts, "Sprachausgabe", "Sprachausgabe. Keine Quelle."), tts.Text, last: true))));
 
-        var brain = JxModule("BrainCircuit", "MEMORY & THINKING", JxTag("NO LIVE DATA"), BuildBrainStage(), strong: true);
+        _brainSourceTag = new Border { VerticalAlignment = VerticalAlignment.Center, Child = BrainSourceBadge() };
+        var brain = JxModule("BrainCircuit", "MEMORY & THINKING", _brainSourceTag, BuildBrainStage(), strong: true);
         brain.MinHeight = 480;
 
         var right = new StackPanel { Spacing = 12 };
@@ -68,7 +69,8 @@ public sealed partial class ShellPage
         var mid = new Grid { RowSpacing = 12 };
         mid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         mid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var activity = BuildActivity();
+        // Host, damit neue Live-Ereignisse nur dieses Modul auffrischen und die Brain Stage nicht neu aufgebaut wird.
+        var activity = _activityHost = new Border { Child = BuildActivity() };
         Grid.SetRow(activity, 1);
         mid.Children.Add(brain);
         mid.Children.Add(activity);
@@ -286,6 +288,54 @@ public sealed partial class ShellPage
         ["Memory-Abruf", "Kontextaufbau", "Routing", "Werkzeugauswahl", "Modellaktivität", "Antworterzeugung"];
 
     private BrainActivityRenderer? _brainActivity;
+    private (bool Active, bool IsTest) _brainMode;
+    private TextBlock? _brainStatusTitle;
+    private TextBlock? _brainStatusNote;
+    private Border? _brainSourceTag;
+    private Border? _activityHost;
+
+    private static bool BrainTestMode => Environment.GetEnvironmentVariable("JARVIS_BRAIN_TEST_SEQUENCE") is "1" or "loop" or "single";
+
+    /// <summary>
+    /// Live-Wiring: /api/events/recent -> BrainEventMapping -> Renderer. Läuft nur im normalen Betrieb; der TEST-ONLY-Pfad
+    /// (JARVIS_BRAIN_TEST_SEQUENCE) und das Live-Wiring schließen sich aus. Ende über das Lifetime-Token (Unloaded).
+    /// </summary>
+    private void StartBrainBridge(CancellationToken token)
+    {
+        if (BrainTestMode) return;
+        var bridge = new BrainEventBridge(ct => _backend.ReadAsync(WebEndpoint.EventsRecent, ct));
+        bridge.SourceChanged += _ =>
+        {
+            if (ReferenceEquals(bridge, _brainBridge)) ApplyBrainSource();
+        };
+        bridge.EventsArrived += _ =>
+        {
+            if (ReferenceEquals(bridge, _brainBridge) && CurrentSection == "Home" && _activityHost is not null) _activityHost.Child = BuildActivity();
+        };
+        bridge.Activity += type =>
+        {
+            if (ReferenceEquals(bridge, _brainBridge) && CurrentSection == "Home") _brainActivity?.Raise(new Domain.BrainActivityEvent(type));
+        };
+        _brainBridge = bridge;
+        _ = bridge.RunAsync(token);
+    }
+
+    private void ApplyBrainSource()
+    {
+        ApplyBrainStatus();
+        if (_brainSourceTag is not null) _brainSourceTag.Child = BrainSourceBadge();
+    }
+
+    private UIElement BrainSourceBadge() =>
+        _brainBridge?.SourceState == Domain.RuntimeState.Ready ? StatusChipView.Create("READY").Root : JxTag("NO LIVE DATA");
+
+    private void ApplyBrainStatus()
+    {
+        if (_brainStatusTitle is null || _brainStatusNote is null) return;
+        var (title, note) = BrainStageStatus.Describe(_brainMode.Active, _brainMode.IsTest, _brainBridge?.SourceState);
+        _brainStatusTitle.Text = title;
+        _brainStatusNote.Text = note;
+    }
 
     private UIElement BuildBrainStage()
     {
@@ -397,12 +447,14 @@ public sealed partial class ShellPage
             legend.Children.Add(line);
         }
 
-        legend.Children.Add(OverlayNote("Nur bei echten Backend-Ereignissen. Derzeit keine."));
+        legend.Children.Add(OverlayNote("Nur bei echten Backend-Ereignissen."));
         stage.Children.Add(Overlay(legend, HorizontalAlignment.Left, 208));
 
         var idle = new StackPanel();
-        var statusTitle = OverlayTitle("IDLE. UNAVAILABLE.");
-        var statusNote = OverlayNote("Statischer Entwurf ohne Runtime-Events. Keine Gedanken, Memories oder Aktivität werden simuliert.");
+        var statusTitle = _brainStatusTitle = OverlayTitle(string.Empty);
+        var statusNote = _brainStatusNote = OverlayNote(string.Empty);
+        _brainMode = (false, false);
+        ApplyBrainStatus();
         idle.Children.Add(statusTitle);
         idle.Children.Add(statusNote);
         stage.Children.Add(Overlay(idle, HorizontalAlignment.Right, 240));
@@ -422,15 +474,12 @@ public sealed partial class ShellPage
             var renderer = new BrainActivityRenderer(image, activityHost);
             _brainActivity = renderer;
 
-            // Status-Overlay folgt ausschließlich dem Renderer-Zustand. Ohne Ereignisse bleibt der Lovable-Text stehen.
+            // Status-Overlay folgt dem Renderer-Zustand und, ohne laufende Ereignisse, dem Zustand der Eventquelle.
             renderer.ModeChanged += (active, isTest) =>
             {
-                statusTitle.Text = !active ? "IDLE. UNAVAILABLE." : isTest ? "AKTIV. TESTSEQUENZ." : "AKTIV.";
-                statusNote.Text = !active
-                    ? "Statischer Entwurf ohne Runtime-Events. Keine Gedanken, Memories oder Aktivität werden simuliert."
-                    : isTest
-                        ? "Markierte Verifikationssequenz (TEST-ONLY). Keine Runtime-Ereignisse."
-                        : "Beobachtete Systemereignisse. Keine Gedanken oder Chain-of-Thought.";
+                if (!ReferenceEquals(renderer, _brainActivity)) return;
+                _brainMode = (active, isTest);
+                ApplyBrainStatus();
             };
             renderer.Raised += activityEvent =>
             {

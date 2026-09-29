@@ -10,8 +10,11 @@ namespace Jarvis.ControlHub.WinUI.Views;
 /// <summary>Shell-Rahmen: Runtime/Privacy/Cloud in der Titelleiste, Status-Chips und Viewport-Höhe (Lovable desktop-shell).</summary>
 public sealed partial class ShellPage
 {
-    // .jx-sys Beschriftungen entfallen unter 90rem, die Chips bleiben (styles.css, @media width < 90rem).
-    private const double SystemLabelMinWidth = 1440;
+    // Innenrand des TopNavGrid im Standard-Template der NavigationView (TopNavigationViewTopNavGridMargin 4,0).
+    private const double TopNavGridMargin = 8;
+
+    // .jx-sys: Abstand zwischen Icon, Label und Chip (gap 0.4rem).
+    private const double SystemGroupSpacing = 6.4;
 
     // Innenabstand des Canvas: oben und unten je 0.85rem (.jx-canvas).
     private const double CanvasVerticalPadding = 27.2;
@@ -20,6 +23,7 @@ public sealed partial class ShellPage
     private StackPanel? _runtimeGroup;
     private readonly List<TextBlock> _systemLabels = [];
     private Grid? _homeGrid;
+    private HeaderFit? _headerFit;
 
     private void BuildSystemGroups()
     {
@@ -32,7 +36,7 @@ public sealed partial class ShellPage
 
     private StackPanel SystemGroup(string label, string icon, StatusChipView chip, string tooltip)
     {
-        var group = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6.4, VerticalAlignment = VerticalAlignment.Center };
+        var group = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SystemGroupSpacing, VerticalAlignment = VerticalAlignment.Center };
         group.Children.Add(Lucide(icon, 14, "JarvisMutedTextBrush"));
         var text = new TextBlock { Text = label, FontSize = 11.52, Foreground = Brush("JarvisMutedTextBrush"), VerticalAlignment = VerticalAlignment.Center };
         _systemLabels.Add(text);
@@ -43,10 +47,91 @@ public sealed partial class ShellPage
         return group;
     }
 
-    private void UpdateSystemLabels(double width)
+    private IEnumerable<NavigationViewItem> TopTabs() => Navigation.MenuItems.OfType<NavigationViewItem>();
+
+    private void AttachHeaderLayout()
     {
-        var visibility = width >= SystemLabelMinWidth ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var label in _systemLabels) label.Visibility = visibility;
+        foreach (var item in TopTabs()) item.Loaded += (sender, _) => ApplyTabPresentation((NavigationViewItem)sender);
+        SystemBar.SizeChanged += (_, _) => ApplyHeaderFit();
+        StatusBar.SizeChanged += (_, _) => ApplyHeaderFit();
+    }
+
+    /// <summary>
+    /// Entscheidet nach der real verfügbaren Breite der Navigationsspalte: erst Statuslabels ausblenden, dann Tabs
+    /// verdichten (HeaderLayout). Beide Statusbreiten werden berechnet, deshalb schwingt die Entscheidung nicht.
+    /// </summary>
+    private void ApplyHeaderFit()
+    {
+        if (SystemBar.ActualWidth <= 0) return;
+        var available = SystemBar.ActualWidth - SystemBar.Padding.Left - SystemBar.Padding.Right - 2 * SystemBar.ColumnSpacing
+            - (Wordmark.Width + Wordmark.Margin.Left + Wordmark.Margin.Right) - TopNavGridMargin;
+        var contents = TopTabs().Select(TabContentWidth).ToList();
+        double withLabels = 0, withoutLabels = 0;
+        if (StatusBar.Visibility == Visibility.Visible)
+        {
+            // Die Auto-Spalte misst die Statusleiste unbegrenzt; DesiredSize ist damit ihre natürliche Breite.
+            var labels = _systemLabels.Sum(label => TextWidth(label.Text, label.FontSize) + SystemGroupSpacing);
+            var shown = _systemLabels.Any(label => label.Visibility == Visibility.Visible);
+            withLabels = shown ? StatusBar.DesiredSize.Width : StatusBar.DesiredSize.Width + labels;
+            withoutLabels = withLabels - labels;
+        }
+
+        var fit = HeaderLayout.Choose(available, contents, withLabels, withoutLabels);
+        if (_headerFit == fit) return;
+        _headerFit = fit;
+        foreach (var label in _systemLabels) label.Visibility = fit.SystemLabels ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var item in TopTabs()) ApplyTabPresentation(item);
+    }
+
+    /// <summary>
+    /// In der Leiste: Icon über Label, Innenabstand und Mindestbreite je Dichte (.jx-tab). Im Overflow-Menü hat jede
+    /// Zeile im Template feste 36 Höhe; dort Icon neben Label wie .jx-menu-item (Icon 16, Abstand 0.7rem).
+    /// </summary>
+    private void ApplyTabPresentation(NavigationViewItem item)
+    {
+        if (item.Content is not StackPanel panel) return;
+        var inOverflow = IsInOverflowMenu(item);
+        var density = _headerFit?.Tabs ?? TabDensity.Wide;
+        var padding = inOverflow ? 0 : HeaderLayout.Padding(density);
+        panel.Orientation = inOverflow ? Orientation.Horizontal : Orientation.Vertical;
+        panel.Spacing = inOverflow ? 11.2 : 4.8;
+        panel.HorizontalAlignment = inOverflow ? HorizontalAlignment.Left : HorizontalAlignment.Center;
+        panel.Margin = new Thickness(padding, 0, padding, 0);
+        foreach (var child in panel.Children.OfType<FrameworkElement>()) child.VerticalAlignment = VerticalAlignment.Center;
+        if (panel.Children is [LucideIcon icon, ..]) icon.Size = inOverflow ? 16 : 18;
+        item.MinWidth = inOverflow ? 0 : HeaderLayout.MinWidth(density);
+    }
+
+    private static bool IsInOverflowMenu(DependencyObject element)
+    {
+        for (var node = VisualTreeHelper.GetParent(element); node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is FrameworkElement { Name: "TopNavMenuItemsOverflowHost" }) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Natürliche Breite des Tab-Inhalts in der Leistenform (Icon über Label): die breiteste Zeile.</summary>
+    private static double TabContentWidth(NavigationViewItem item)
+    {
+        if (item.Content is not StackPanel panel) return 0;
+        double RowWidth(UIElement element) => element switch
+        {
+            LucideIcon icon => icon.Size,
+            TextBlock text => TextWidth(text.Text, item.FontSize),
+            StackPanel row => row.Children.Sum(RowWidth) + row.Spacing * Math.Max(0, row.Children.Count - 1),
+            _ => 0,
+        };
+
+        return panel.Children.Select(RowWidth).DefaultIfEmpty(0).Max();
+    }
+
+    private static double TextWidth(string text, double fontSize)
+    {
+        var probe = new TextBlock { Text = text, FontSize = fontSize, FontFamily = (FontFamily)Application.Current.Resources["JarvisFontFamily"] };
+        probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        return Math.Ceiling(probe.DesiredSize.Width);
     }
 
     /// <summary>Home füllt die reale Client Area (kein fester Höhenwert) und scrollt erst, wenn der Inhalt höher ist.</summary>

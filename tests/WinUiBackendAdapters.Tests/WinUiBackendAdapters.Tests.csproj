@@ -10,6 +10,7 @@
     <Compile Include="..\..\WindowsApp\WinUI3\Adapters\*.cs" Link="Adapters\%(Filename)%(Extension)" />
     <Compile Include="..\..\WindowsApp\WinUI3\Domain\*.cs" Link="Domain\%(Filename)%(Extension)" />
     <Compile Include="..\..\WindowsApp\WinUI3\Icons\LucideIcons.cs" Link="Icons\LucideIcons.cs" />
+    <Compile Include="..\..\WindowsApp\WinUI3\Views\HeaderLayout.cs" Link="Views\HeaderLayout.cs" />
     <Compile Include="..\..\WindowsApp\JarvisApiClient.cs" Link="Shared\JarvisApiClient.cs" />
     <Compile Include="..\..\WindowsApp\RuntimeSupervisorClient.cs" Link="Shared\RuntimeSupervisorClient.cs" />
   </ItemGroup>

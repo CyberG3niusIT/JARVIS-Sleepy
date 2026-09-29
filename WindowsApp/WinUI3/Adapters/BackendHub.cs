@@ -79,6 +79,15 @@ public sealed class BackendHub : IJarvisApiAdapter, IDisposable
         for (var index = 0; index < results.Length; index++) Store(endpoints[index + 1], results[index]);
     }
 
+    /// <summary>Einzelne lesende Abfrage mit derselben Offline-Vorprobe und Fehlerklassifikation wie RefreshAsync.</summary>
+    public async Task<WebReading> ReadAsync(WebEndpoint endpoint, CancellationToken cancellationToken)
+    {
+        var reading = await ProbeRefusedAsync(cancellationToken).ConfigureAwait(false)
+            ?? await QueryAsync(endpoint, cancellationToken).ConfigureAwait(false);
+        Store(endpoint, reading);
+        return reading;
+    }
+
     public async Task<RuntimeStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
         var reading = await ProbeRefusedAsync(cancellationToken).ConfigureAwait(false)

@@ -89,6 +89,14 @@
     <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPointerOver" Color="#E5ECF3" />
     <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPressed" Color="#E5ECF3" />
     <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="{StaticResource JarvisSignalColor}" />
+    <!-- Tab-Rhythmus der Referenz (.jx-tabs gap 0.15rem): je Tab 1.2 links und rechts. Der Innenabstand ist symmetrisch und
+         liegt am Tab-Inhalt (HeaderLayout, .jx-tab padding-inline), deshalb ist der asymmetrische Standard 8/12 hier 0. -->
+    <Thickness x:Key="TopNavigationViewItemMargin">1.2,0,1.2,0</Thickness>
+    <Thickness x:Key="TopNavigationViewItemContentPresenterMargin">0,-1,0,-1</Thickness>
+    <!-- "…" (Overflow) mit deutlichem Abstand zur Primärnavigation statt direkt am letzten Tab (Standard 0). -->
+    <Thickness x:Key="TopNavigationViewOverflowButtonMargin">9.6,0,2.4,0</Thickness>
+    <!-- Overflow-Menü wie .jx-menu: 0.4rem Innenabstand. -->
+    <Thickness x:Key="TopNavigationViewOverflowMenuPadding">6.4</Thickness>
 
     <Style x:Key="JarvisPanelStyle" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource JarvisPanelBrush}" />

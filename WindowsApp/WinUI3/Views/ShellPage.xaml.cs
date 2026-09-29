@@ -45,6 +45,7 @@ public sealed partial class ShellPage : Page
     private Border? _settingsDetailHost;
     private readonly List<Button> _settingsNavButtons = [];
     private int _selectedSettingsGroup;
+    private BrainEventBridge? _brainBridge;
 
     public FrameworkElement TitleBarDragRegion => Wordmark;
 
@@ -55,7 +56,7 @@ public sealed partial class ShellPage : Page
         BuildSystemGroups();
         SystemNavItem.Loaded += (_, _) => HideBuiltInChevron(SystemNavItem);
         PageScroll.SizeChanged += (_, _) => ApplyHomeMinHeight();
-        SizeChanged += (_, args) => UpdateSystemLabels(args.NewSize.Width);
+        AttachHeaderLayout();
         Navigation.SelectedItem = Navigation.MenuItems[0];
         RenderSection("Home");
         Loaded += OnLoaded;
@@ -91,12 +92,14 @@ public sealed partial class ShellPage : Page
         }
 
         _pollTimer.Start();
+        StartBrainBridge(_lifetime.Token);
         await RefreshRuntimeAsync();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs args)
     {
         _pollTimer?.Stop();
+        _brainBridge = null;
         _lifetime?.Cancel();
         _lifetime?.Dispose();
         _lifetime = null;
@@ -788,7 +791,7 @@ public sealed partial class ShellPage : Page
             "Cloud" => [("Cloud-Freigabe", "Gate liegt im Backend", "UNAVAILABLE"), ("Anbieter", backendValue, "UNAVAILABLE")],
             "Tools" => [("Remote Tools", "Gate liegt im Backend", "UNAVAILABLE"), ("Bestätigungsrichtlinie", "Backend-Richtlinie", "BACKEND OWNED")],
             "Mobile" => [("Pairing", "Kein Gerätevertrag", "NOT_IMPLEMENTED"), ("Geräteliste", "Kein Gerätevertrag", "UNAVAILABLE")],
-            _ => [("Log-Level", "Backend-Richtlinie", "BACKEND OWNED"), ("Diagnosepaket", "Kein lokaler Vertrag", "NOT_IMPLEMENTED"), ("Live-Ereignisse", "Keine Live-Quelle", "NO LIVE DATA")],
+            _ => [("Log-Level", "Backend-Richtlinie", "BACKEND OWNED"), ("Diagnosepaket", "Kein lokaler Vertrag", "NOT_IMPLEMENTED"), ("Live-Ereignisse", "Nur Metadaten aus /api/events/recent", _brainBridge?.SourceState is { } live ? RuntimeStateText.ToDisplayText(live) : "NO LIVE DATA")],
         };
 
         var root = new Grid();
