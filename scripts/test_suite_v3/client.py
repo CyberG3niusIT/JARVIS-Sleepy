@@ -111,7 +111,7 @@ def load_config() -> dict:
 
     token = web.get('auth_token', '')
     tls_enabled = tls.get('enabled', False)
-    port = tls.get('port', 8443) if tls_enabled else web.get('port', 8088)
+    port = tls.get('port', 8443) if tls_enabled else web.get('port', 8091)
     scheme = 'wss' if tls_enabled else 'ws'
 
     return {

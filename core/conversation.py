@@ -147,7 +147,9 @@ class ConversationManager:
                     speaker_confidence: Optional[float] = None,
                     image_url: Optional[str] = None,
                     client_id: Optional[str] = None,
-                    target_history: Optional[list] = None):
+                    target_history: Optional[list] = None,
+                    asr_hint: Optional[str] = None,
+                    audio_turn_id: Optional[str] = None):
         """
         Add message to conversation history
 
@@ -159,6 +161,10 @@ class ConversationManager:
             image_url: Optional image URL for tool-generated images (e.g. screenshots)
             client_id: Optional per-device client identifier for session isolation
             target_history: Optional list to append to instead of self.session_history
+            asr_hint: Direct-audio turns only: parallel ASR transcript. Kept in
+                the in-memory history (LLM context) and given to the memory hook,
+                never written to disk; dropped when content logging is blocked.
+            audio_turn_id: Direct-audio turn id (in-memory metadata).
         """
         message = {
             "timestamp": time.time(),
@@ -172,6 +178,13 @@ class ConversationManager:
             message["image_url"] = image_url
         if client_id is not None:
             message["client_id"] = client_id
+        if audio_turn_id is not None:
+            message["audio_turn_id"] = audio_turn_id
+        hint = None
+        if asr_hint and role == "user" and self._privacy_gate.allow(Capability.CONTENT_LOGGING):
+            hint = str(asr_hint).strip() or None
+        if hint:
+            message["asr_hint"] = hint
 
         # Track session participants (user messages only)
         if role == "user" and message["user_id"]:
@@ -183,20 +196,28 @@ class ConversationManager:
         else:
             self.session_history.append(message)
 
-        # Persist to disk
-        self._append_to_history_file(message)
+        # Persist to disk (asr_hint is in-memory only)
+        self._append_to_history_file(
+            {k: v for k, v in message.items() if k != "asr_hint"})
 
-        # Memory system hook (non-blocking)
+        # Memory system hook (non-blocking); direct-audio turns hand over the
+        # ASR text (only present when content logging is allowed).
         if self._memory_manager and message["user_id"] != "__guest__":
             try:
-                self._memory_manager.on_message(message)
+                hook_message = message
+                if hint:
+                    hook_message = dict(message)
+                    hook_message["content"] = hint
+                    hook_message.pop("asr_hint", None)
+                self._memory_manager.on_message(hook_message)
             except Exception as e:
                 self.logger.warning(f"Memory hook failed (non-fatal): {e}")
 
         # Context window hook (non-blocking)
         if self._context_window and message["user_id"] != "__guest__":
             try:
-                self._context_window.on_message(message)
+                self._context_window.on_message(
+                    {k: v for k, v in message.items() if k != "asr_hint"})
             except Exception as e:
                 self.logger.warning(f"Context window hook failed (non-fatal): {e}")
 
@@ -417,6 +438,9 @@ class ConversationManager:
             content = msg["content"]
             ts = msg.get("timestamp")
             time_prefix = f"[{self._format_timestamp_for_llm(ts)}] " if ts else ""
+
+            if msg.get("asr_hint") and msg["role"] == "user":
+                content = f'{content} (erkannt: "{msg["asr_hint"]}")'
 
             if role == "USER" and multi_speaker:
                 label = self._get_speaker_label(msg.get("user_id"))

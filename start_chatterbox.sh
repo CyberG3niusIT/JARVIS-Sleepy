@@ -42,8 +42,9 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
     exit 1
 fi
 
+export HSA_ENABLE_DXG_DETECTION="${HSA_ENABLE_DXG_DETECTION:-1}"
 export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-11.0.0}"
-export ROCM_PATH="${ROCM_PATH:-/opt/rocm-7.2.0}"
+export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 export LD_LIBRARY_PATH="$ROCM_PATH/lib:${LD_LIBRARY_PATH:-}"
 
 exec "$CHATTERBOX_PYTHON" "$JARVIS_ROOT/tools/chatterbox_server.py"

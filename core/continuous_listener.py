@@ -19,6 +19,8 @@ from core.logger import get_logger
 from core.vad import VoiceActivityDetector
 from core.stt import SpeechToText
 from core.privacy_gate import get_privacy_gate, Capability
+from core.wake_word_utils import find_wake_word, strip_wake_word
+from core.turn_assembler import TurnAssembler
 
 # Try to import RNNoise for noise suppression
 try:
@@ -114,7 +116,26 @@ class ContinuousListener:
         self._privacy_gate = get_privacy_gate(config)
         self._privacy_gate.register_flush_callback(self._privacy_flush_speech_buffer)
         self._last_vad_activity_ts = 0.0  # monotonic timestamp of last VAD speech detection
-        
+
+        # Natural utterance aggregation (turn.* config). When disabled the
+        # assembler is None and _process_speech keeps the exact legacy path.
+        self._turn_assembler = None
+        self._turn_thread = None
+        self._turn_thread_stop = threading.Event()
+        self._collection_start_ts = 0.0
+        self._last_segment_end_ts = 0.0
+        self._turn_lock = threading.Lock()
+        if config.get("turn.enabled", True):
+            self._turn_assembler = TurnAssembler(
+                grace_s=float(config.get("turn.grace_ms", 1200)) / 1000.0,
+                max_turn_s=float(config.get("turn.max_turn_s", 20)),
+                max_segments=int(config.get("turn.max_segments", 8)),
+                sample_rate=self.sample_rate,
+                fast_stop_max_s=float(config.get("turn.fast_stop_max_s", 1.6)),
+                min_segment_s=float(config.get("turn.min_segment_ms", 0)) / 1000.0,
+                gap_s=float(config.get("turn.gap_s", 0.15)),
+            )
+
         # Conversation window - allow responses without wake word during conversation
         self.conversation_window_active = False
         self._conversation_lock = threading.Lock()
@@ -195,8 +216,86 @@ class ContinuousListener:
             self.speech_buffer = []
         self.collecting_speech = False
         self._pre_speech_audio = np.array([], dtype=np.float32)
+        # Already queued / in-flight audio must become stale for the STT worker
+        # and coordinator generation checks, on enter AND exit.
+        self._capture_generation += 1
+        self._clear_turn_assembler()
+        self._discard_queued_audio()
         self.vad.clear_buffer()
         self.vad.reset()
+
+    def _clear_turn_assembler(self):
+        """Drop any held (not yet released) aggregated speech."""
+        asm = getattr(self, "_turn_assembler", None)  # tolerate __new__-built test doubles
+        if asm is not None:
+            asm.clear()
+
+    def discard_held_turn(self):
+        """Stop fast path: drop held (not yet released) aggregated speech; creates no turn."""
+        asm = getattr(self, "_turn_assembler", None)
+        if asm is None:
+            return
+        with self._turn_lock:
+            asm.discard()
+
+    def _submit_segment(self, full_audio, generation, during_tts,
+                        speech_duration_s=None):
+        """Route a finished segment to the audio_queue (via the assembler)."""
+        asm = self._turn_assembler
+        if asm is None:
+            self.audio_queue.put({
+                "audio": full_audio,
+                "capture_generation": generation,
+                "during_tts": during_tts,
+            })
+            return
+        with self._turn_lock:
+            turns = asm.add(full_audio, generation, during_tts,
+                            speech_duration_s=speech_duration_s,
+                            privacy_epoch=self._privacy_gate.epoch())
+        for turn in turns:
+            # Immediate turns (during_tts / fast stop / cap): legacy semantics.
+            self._put_turn(turn, recheck_generation=False)
+        if asm.pending:
+            self._ensure_turn_thread()
+
+    def _put_turn(self, turn, recheck_generation=True):
+        """Put a released turn on the queue after re-checking the gates."""
+        if not (self._privacy_gate.allow(Capability.MIC_INGEST)
+                and self._privacy_gate.allow(Capability.STT)):
+            return False
+        epoch = turn.get("privacy_epoch")
+        if epoch is not None and not self._privacy_gate.is_current_epoch(epoch):
+            return False
+        if recheck_generation:
+            if turn["capture_generation"] != self._capture_generation:
+                return False
+        self.audio_queue.put(turn)
+        return True
+
+    def _ensure_turn_thread(self):
+        if self._turn_thread is not None and self._turn_thread.is_alive():
+            return
+        self._turn_thread_stop.clear()
+        self._turn_thread = threading.Thread(
+            target=self._turn_poll_loop, name="turn-assembler", daemon=True)
+        self._turn_thread.start()
+
+    def _turn_poll_loop(self):
+        while not self._turn_thread_stop.wait(0.05):
+            self._release_due_turn()
+
+    def _release_due_turn(self):
+        """Release the held turn once grace elapsed. The conversation timer is
+        untouched here (it is cancelled at speech start and only re-armed by
+        the pipeline after the response), so it cannot expire mid-turn."""
+        asm = self._turn_assembler
+        if asm is None:
+            return
+        with self._turn_lock:
+            turn = asm.poll()
+        if turn is not None:
+            self._put_turn(turn)
 
     def _on_speech_start(self):
         """Callback when VAD detects speech start"""
@@ -233,6 +332,7 @@ class ContinuousListener:
         self.collecting_speech = True
         self._collection_generation = self._capture_generation
         self._collection_during_tts = speaking
+        self._collection_start_ts = now
         with self._buffer_lock:
             self.speech_buffer = []
         # Snapshot the pre-speech ring buffer NOW, before more speech frames
@@ -432,17 +532,36 @@ class ContinuousListener:
                     f"capacity ({self.vad.buffer_duration}s) — possible sample rate mismatch"
                 )
 
+        # Pure speech length: exclude the pre-roll and the trailing silence
+        # frames (VAD ends speech only after silence_frames_threshold frames),
+        # but count the detection-lag frames that live in the pre-roll.
+        frame_s = float(getattr(self, "frame_duration_ms", 32)) / 1000.0
+        speech_only_s = len(speech_audio) / float(self.sample_rate)
+        trailing_s = float(getattr(self.vad, "silence_frames", 0) or 0) * frame_s
+        lag_s = min(len(pre_buffer) / float(self.sample_rate),
+                    float(getattr(self.vad, "speech_frames_threshold", 0) or 0) * frame_s)
+        pure_speech_s = max(0.0, speech_only_s - trailing_s + lag_s)
+
+        # 2nd+ segment of a held turn: the pre-roll would overlap the previous
+        # segment's tail. Keep only the silence since it ended (this includes
+        # the detection lag, so no onset is lost).
+        asm = self._turn_assembler
+        if (asm is not None and self.audio_queue is not None and len(pre_buffer) > 0
+                and self._last_segment_end_ts > 0 and asm.pending > 0):
+            since_prev = max(0.0, self._collection_start_ts - self._last_segment_end_ts)
+            keep = int(since_prev * self.sample_rate)
+            pre_buffer = pre_buffer[-keep:] if keep > 0 else pre_buffer[:0]
+        self._last_segment_end_ts = time.monotonic()
+
         full_audio = np.concatenate([pre_buffer, speech_audio])
 
         self.logger.info(f"Audio length: {len(full_audio)} samples ({len(full_audio)/self.sample_rate:.2f}s)")
 
         # Event pipeline mode: put audio on queue for STT worker
         if self.audio_queue is not None:
-            self.audio_queue.put({
-                "audio": full_audio,
-                "capture_generation": self._collection_generation,
-                "during_tts": self._collection_during_tts,
-            })
+            self._submit_segment(full_audio, self._collection_generation,
+                                 self._collection_during_tts,
+                                 speech_duration_s=pure_speech_s)
             return
 
         # Legacy mode: transcribe in background thread
@@ -522,59 +641,26 @@ class ContinuousListener:
                     self.logger.info("Applied conversation correction (%d chars)", len(text))
                     text = corrected_text
 
+                if find_wake_word(text, self.wake_word):
+                    text = strip_wake_word(text, self.wake_word) or "jarvis_only"
+
                 self.logger.info("Accepting conversation response (%d chars)", len(text))
                 self.on_command(text)
                 return
             
             # Otherwise, check for wake word using fuzzy matching
-            from difflib import SequenceMatcher
-
-            # Split text into words and check each
-            words = text.split()
-            wake_word_found = False
-
-            for word in words:
-                # Remove punctuation
-                word_clean = word.strip('.,!?;:')
-
-                # Check similarity to "jarvis"
-                # JARVIS_DE_WAKE_ALIASES
-                # Typische deutsche Whisper-Varianten von 'Jarvis'.
-                # Die strenge 0.80-Schwelle bleibt erhalten.
-                wake_aliases = {
-                    "jarvis",
-                    "jarwis",
-                    "jarwiss",
-                    "charvis",
-                    "charwis",
-                    "chauvis",
-                    "chauwis",
-                    "scharvis",
-                    "djarvis",
-                    "dscharvis",
-                    "tscharvis",
-                    self.wake_word,
-                }
-                similarity = max(
-                    SequenceMatcher(None, alias, word_clean).ratio()
-                    for alias in wake_aliases
-                )
-                if similarity >= 0.80:  # Raised from 0.7 to eliminate "paris" (0.73) etc.
-                    self.logger.info("Wake word detected (similarity: %.2f)", similarity)
-                    wake_word_found = True
-                    matched_word = word_clean
-                    break
-
-            if wake_word_found:
+            wake_match = find_wake_word(text, self.wake_word)
+            if wake_match:
+                _, _, matched_word, similarity = wake_match
+                self.logger.info("Wake word detected (similarity: %.2f)", similarity)
                 # Check if this is ambient conversation rather than a command
                 if self._is_ambient_wake_word(text, matched_word):
                     print("🔇 Ambient mention (ignored)")
                     return
 
-                # Correct the wake word before passing to command handler
-                corrected_text = text.replace(matched_word, self.wake_word)
+                command = strip_wake_word(text, self.wake_word)
                 self.logger.info("Normalized wake-word transcript (%d chars)", len(text))
-                self.on_command(corrected_text)
+                self.on_command(command or "jarvis_only")
             else:
                 self.logger.info("No wake word detected (%d chars)", len(text))
                 print(f"❌ No wake word (ignored)")
@@ -924,6 +1010,7 @@ class ContinuousListener:
         with self._buffer_lock:
             self.speech_buffer = []
         self._collection_during_tts = False
+        self._clear_turn_assembler()
         self._discard_queued_audio()
 
         self.logger.info("🔇 Listening paused (TTS playback)")
@@ -932,6 +1019,7 @@ class ContinuousListener:
         """Make queued and in-flight audio from the interrupted turn stale."""
         with self._buffer_lock:
             self._capture_generation += 1
+        self._clear_turn_assembler()
         self._discard_queued_audio()
 
     def _discard_queued_audio(self):
@@ -961,6 +1049,7 @@ class ContinuousListener:
         self._barge_in_enabled = False
         self._capture_generation += 1
         self.active_tts_text = ""
+        self._clear_turn_assembler()
         self._discard_queued_audio()
 
         # Reset Silero VAD's internal hidden state after TTS playback.
@@ -1048,6 +1137,10 @@ class ContinuousListener:
                 word_idx = i
                 break
         if word_idx is None:
+            return False
+
+        if ((word_idx > 0 and words[word_idx - 1].endswith(","))
+                or words[word_idx].endswith(",")):
             return False
 
         # Signal 1: Position — wake word should be in first 2 words OR trailing
@@ -1254,6 +1347,12 @@ class ContinuousListener:
         """Stop continuous listening"""
         self.logger.info("Stopping continuous listener...")
         self.running = False
+        self._turn_thread_stop.set()
+        thread = self._turn_thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
+        self._turn_thread = None
+        self._clear_turn_assembler()
 
         self.stop_device_monitor()
 

@@ -31,6 +31,11 @@ else
     echo "   Run manually: sudo systemctl disable --now llama-server.service chatterbox.service"
 fi
 
+# Stop the Primary/Expert user units first: they have Restart=on-failure, so a bare pkill of
+# llama-server would just bring them back.
+echo "Stopping llama-server user units (primary, expert)..."
+systemctl --user stop llama-server-primary.service llama-server-expert.service 2>/dev/null || true
+
 # Kill any running Python processes running jarvis
 echo "Killing any remaining Jarvis processes..."
 pkill -9 -f "jarvis_continuous.py"

@@ -1,13 +1,15 @@
-"""Claude Consultation Module — Self-Evolution Phase 2.
+"""Optional Anthropic Consultation Module — Self-Evolution Phase 2.
 
-Sends observation collector findings to Claude for analysis and
-receives structured proposals that flow through the governance
-approval system. Claude never sees raw user data — only aggregated
-findings and system metrics.
+Sends observation collector findings to an explicitly configured
+Anthropic provider for analysis and receives structured proposals that
+flow through the governance approval system. Findings can contain snippets
+derived from user requests. Automatic consultation is disabled in the shipped
+configuration; any enabled consultation requires cloud configuration and the
+PrivacyGate.
 
 Architecture:
-  ObservationCollector → findings → this module → Claude API
-  Claude API → analysis + proposals → Governance.propose()
+  ObservationCollector → findings → this optional module → Anthropic API
+  Anthropic API → analysis + proposals → Governance.propose()
   Owner reviews proposals in dashboard → approves via console
 
 The consultation prompt is a fixed template. The LLM that generates
@@ -45,7 +47,7 @@ def get_claude_consultation(config=None):
 CONSULTATION_SYSTEM_PROMPT = """You are the analytical layer for JARVIS, a self-governing AI voice assistant. You receive operational findings from JARVIS's observation collector and produce structured analysis with actionable proposals.
 
 ## Who JARVIS Is
-JARVIS is a GPU-accelerated personal voice assistant: Whisper STT + Qwen 35B local LLM + Claude API fallback + Kokoro TTS. He serves a household with voice interaction, web search, news briefings, reminders, and more. He is charismatic, respectful, and genuinely helpful.
+JARVIS is a GPU-accelerated personal voice assistant: Whisper STT + local Qwen models + optional configured cloud fallback + Kokoro TTS. He serves a household with voice interaction, web search, news briefings, reminders, and more. He is charismatic, respectful, and genuinely helpful.
 
 ## Your Role
 You are a consultant, not a decision-maker. You analyze findings, identify root causes, and propose specific fixes. Every proposal goes through a governance approval system where the owner reviews and decides. You never execute changes directly.
@@ -113,32 +115,29 @@ Return a JSON object with this exact structure:
 # -----------------------------------------------------------------------
 
 class ClaudeConsultation:
-    """Sends findings to Claude API and receives structured proposals."""
+    """Sends findings through optional Anthropic and receives structured proposals."""
 
     def __init__(self, config):
         self.config = config
         self.api_key_env = config.get("llm.api.api_key_env")
-        self.model = config.get(
-            "consultation.model",
-            "claude-opus-4-20250514",
-        )
+        self.model = config.get("consultation.model") or config.get("llm.api.model")
         self.max_tokens = config.get("consultation.max_tokens", 4096)
         self._privacy_gate = get_privacy_gate(config)
         self._history: list[dict] = []
-        logger.info(
-            "ClaudeConsultation initialized: model=%s, max_tokens=%d",
-            self.model, self.max_tokens,
-        )
+        if (str(config.get("llm.api.provider") or "").strip().lower() == "anthropic"
+                and config.get("llm.api.enabled", False)):
+            logger.info("Optional Anthropic consultation configured: model=%s, max_tokens=%d",
+                        self.model, self.max_tokens)
 
     def consult(self, findings: list, context: dict = None) -> dict:
-        """Send findings to Claude and return structured analysis.
+        """Send findings to the explicitly configured consultation provider.
 
         Args:
             findings: list of Finding objects from observation collector
             context: optional dict with system state (health metrics, etc.)
 
         Returns:
-            Parsed JSON response from Claude, or error dict
+            Parsed JSON response, or error dict
         """
         if not findings:
             return {"summary": "No findings to analyze", "proposals": []}
@@ -146,13 +145,13 @@ class ClaudeConsultation:
         # Build the consultation message
         message = self._build_message(findings, context)
 
-        # Call Claude API
+        # Call the optional Anthropic API path, which verifies explicit config.
         t0 = time.time()
         try:
             response = self._call_claude(message)
             latency_ms = (time.time() - t0) * 1000
         except Exception as e:
-            logger.error("Claude consultation failed: %s", e)
+            logger.error("Optional cloud consultation failed: %s", e)
             return {
                 "summary": f"Consultation failed: {e}",
                 "proposals": [],
@@ -189,7 +188,7 @@ class ClaudeConsultation:
             el = get_event_logger()
             if el:
                 el.emit(
-                    event="claude_consultation",
+                    event="cloud_consultation",
                     category="self_assessment",
                     status="success" if "error" not in result else "error",
                     message=f"Consultation: {len(findings)} findings → "
@@ -238,14 +237,19 @@ class ClaudeConsultation:
         return "\n".join(parts)
 
     def _call_claude(self, message: str) -> str:
-        """Call the Claude API and return the response text."""
+        """Call Anthropic only when explicitly selected and return response text."""
+        if (str(self.config.get("llm.api.provider") or "").strip().lower() != "anthropic"
+                or not self.config.get("llm.api.enabled", False)
+                or not self.model
+                or str(self.api_key_env or "").strip().casefold() != "anthropic_api_key"):
+            raise PermissionError("Optional consultation is not configured")
         if not self._privacy_gate.allow(Capability.CLOUD_LLM):
             raise PermissionError("Claude consultation denied by privacy gate")
 
         import anthropic
 
         api_key = self.config.get_env(self.api_key_env)
-        if not api_key or api_key == "your_key_here":
+        if not api_key or str(api_key).lower().startswith("your_"):
             raise ValueError("Claude API key not configured")
 
         client = anthropic.Anthropic(api_key=api_key)
@@ -267,13 +271,13 @@ class ClaudeConsultation:
                 el.emit(
                     event="llm_call",
                     category="inference",
-                    stage="claude_consultation",
+                    stage="cloud_consultation",
                     status="success",
-                    message=f"Claude consultation: {response.usage.input_tokens}in/{response.usage.output_tokens}out",
+                    message=f"Cloud consultation: {response.usage.input_tokens}in/{response.usage.output_tokens}out",
                     latency_ms=None,  # captured by caller
                     model=self.model,
                     metadata={
-                        "provider": "claude",
+                        "provider": "anthropic",
                         "method": "consultation",
                         "input_tokens": response.usage.input_tokens,
                         "output_tokens": response.usage.output_tokens,

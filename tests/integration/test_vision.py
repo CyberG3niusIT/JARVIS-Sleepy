@@ -954,6 +954,22 @@ def test_part5():
 # PART 6: Presence detection + face enrollment tests
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _in_pool(text: str, pool_name: str) -> bool:
+    """True if ``text`` is one of the persona pool templates with {h} filled in.
+
+    The greeting is a random choice from the pool, so a keyword check on the
+    text is flaky (two of the five reminder greetings contain none of the old
+    keywords). Matching against the pool itself is deterministic and exact.
+    """
+    import re
+    from core.persona import _POOLS
+    for template in _POOLS[pool_name]:
+        pattern = re.escape(template).replace(re.escape("{h}"), ".+")
+        if re.fullmatch(pattern, text.strip()):
+            return True
+    return False
+
+
 def test_part6():
     log("\n═══ Part 6: Presence detection + face enrollment ═══")
 
@@ -1110,15 +1126,16 @@ def test_part6():
     assert_true("cooldown_skip: no greeting fired",
                 not detector._fire_greeting.called)
 
-    # --- Test 6.11: Haar cascade face detection ---
-    log("\n── 6.11: Haar cascade detection ──")
-    detector._ensure_cascade()
-    assert_true("cascade: loaded", detector._cascade is not None)
-
-    # Create a synthetic image with no faces — should detect 0
+    # --- Test 6.11: Face detection on a blank frame ---
+    # Haar cascade detection (_ensure_cascade/_detect_faces) was replaced by
+    # InsightFace in commit 4108191. The current entry point that detects and
+    # identifies faces in a frame is _detect_and_identify (CPU backend here:
+    # this config sets no vision.presence.backend, default "cpu").
+    log("\n── 6.11: Face detection on a blank frame ──")
     blank = np.zeros((480, 640, 3), dtype=np.uint8)
-    faces = detector._detect_faces(blank)
-    assert_eq("cascade: blank image = 0 faces", len(faces), 0)
+    face_results = detector._detect_and_identify(blank)
+    assert_eq("detect: blank image = 0 faces", len(face_results), 0)
+    assert_eq("detect: CPU backend active", detector._backend_info["active"], "cpu")
 
     # --- Test 6.12: Face enrollment ---
     log("\n── 6.12: Face enrollment ──")
@@ -1167,12 +1184,9 @@ def test_part6():
         detector._fire_greeting("person_x", is_return=True)
 
     greeting_text = mock_tts.speak.call_args[0][0]
-    # Should contain reminder-related language
+    # Must be one of the persona's return-with-reminders greetings
     assert_true("return_reminder: mentions reminders",
-                "reminder" in greeting_text.lower() or
-                "while you were" in greeting_text.lower() or
-                "came up" in greeting_text.lower() or
-                "held" in greeting_text.lower())
+                _in_pool(greeting_text, "presence_return_reminders"))
 
     # --- Test 6.15: get_status ---
     log("\n── 6.15: get_status ──")
@@ -1216,10 +1230,7 @@ def test_part6():
                                       has_pending_reminders=True)
         assert_true("helper: reminder greeting has text", len(greeting) > 5)
         assert_true("helper: reminder greeting mentions reminders",
-                    "reminder" in greeting.lower() or
-                    "while you were" in greeting.lower() or
-                    "came up" in greeting.lower() or
-                    "held" in greeting.lower())
+                    _in_pool(greeting, "presence_return_reminders"))
 
     # --- Test 6.18: PRESENCE_DETECTED event type exists ---
     log("\n── 6.18: PRESENCE_DETECTED event type ──")

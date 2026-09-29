@@ -341,6 +341,23 @@ class JarvisContinuous:
             self.weather_poller.start()
             self.logger.info("Weather poller started")
 
+        self.mail_poller = None
+        try:
+            from core.mail_integration import CONFIG_PATH, MailPoller, get_mail_service
+            if CONFIG_PATH.is_file():
+                def _announce_mail(counts):
+                    summary = ", ".join(f"{count} bei {account}" for account, count in sorted(counts.items()))
+                    if self.desktop_manager:
+                        self.desktop_manager.send_notification("Neue E-Mails", summary)
+                    speaker = self.bg_tts if self.event_mode else self.tts
+                    speaker.speak(f"Neue E-Mails: {summary}.")
+
+                self.mail_poller = MailPoller(get_mail_service(), _announce_mail)
+                self.mail_poller.start()
+                self.logger.info("Mail monitor started")
+        except Exception:
+            self.logger.warning("Mail monitor unavailable")
+
         # --- Presence detection (face recognition greetings) ---
         # Always initialize the detector (needed for enrollment even when
         # presence monitoring is disabled). Only start the polling loop
@@ -361,11 +378,20 @@ class JarvisContinuous:
                 daemon=True, name="async-loop",
             )
             self._async_thread.start()
-            # Initialize webcam on its loop so get_frame() works from any thread
-            _asyncio.run_coroutine_threadsafe(
-                webcam_mgr.start(), self._async_loop
-            ).result(timeout=10)
-            self.logger.info("Async event loop started for webcam manager")
+            # Initialize webcam on its loop so get_frame() works from any thread.
+            # A missing camera device must not take the detector down with it:
+            # the detector stays constructed (backend selection, NPU init and
+            # enrollment from files remain testable) and reports
+            # camera=UNAVAILABLE; its poll loop skips while no device exists.
+            try:
+                _asyncio.run_coroutine_threadsafe(
+                    webcam_mgr.start(), self._async_loop
+                ).result(timeout=10)
+                self.logger.info("Async event loop started for webcam manager")
+            except FileNotFoundError as cam_err:
+                self.logger.warning(
+                    f"Webcam unavailable ({cam_err}) — presence stays idle until a camera exists"
+                )
 
             # Start internal frame server so the web service can proxy frames
             # instead of opening its own ffmpeg (avoids /dev/video0 contention)
@@ -443,6 +469,26 @@ class JarvisContinuous:
                 metrics=self.metrics,
             )
             self.stt_worker.on_barge_in = self.coordinator.handle_barge_in
+            # Direct audio: model request starts before/parallel to STT
+            self.stt_worker.on_audio_turn = self.coordinator.start_direct_audio_turn
+            self.stt_worker.on_audio_turn_reject = self.coordinator.reject_audio_turn
+            self.stt_worker.on_audio_turn_verdict = self.coordinator.resolve_ungated_audio_turn
+            self.stt_worker.on_audio_turn_cancel = self.coordinator.cancel_audio_turn
+            # Stop fast path outside TTS: cancels speculative/running turn + held audio
+            self.stt_worker.on_stop_only = self.coordinator.handle_stop_only
+            # Primary <-> Expert handover (opt-in; nothing swaps unless handover.enabled)
+            if config.get("handover.enabled", False):
+                from core.model_handover import ModelHandover
+                # Fallback only when a text provider is REALLY configured (key present);
+                # otherwise a not-READY primary means honest STARTING + queue.
+                # reconcile=True: after a crash mid-swap stop a stray expert and bring the primary back.
+                self.handover = ModelHandover(
+                    config, fallback_available=(
+                        self.coordinator._text_fallback_available
+                        if self.coordinator._text_fallback_available() else None),
+                    reconcile=True)
+                self.coordinator.attach_handover(self.handover)
+                self.logger.info("Model handover enabled")
             # Wire presence detector to Coordinator's conv_state + accumulator + LLM (CAL integration)
             if hasattr(self, 'presence_detector') and self.presence_detector:
                 self.presence_detector.set_conv_state(self.coordinator.conv_state)
@@ -675,7 +721,7 @@ class JarvisContinuous:
             history = self.conversation.format_history_for_llm(include_system_prompt=False)
             response = self._stream_llm_response(command, history)
             if not response:
-                response = "I'm sorry, I'm having trouble processing that right now."
+                response = "Entschuldigung, ich kann das gerade nicht verarbeiten."
 
         # Record and speak
         self.conversation.add_message("assistant", response)
@@ -1117,6 +1163,8 @@ class JarvisContinuous:
                     self.news_manager.stop()
                 if self.weather_poller:
                     self.weather_poller.stop()
+                if self.mail_poller:
+                    self.mail_poller.stop()
                 if self.calendar_manager:
                     self.calendar_manager.stop()
                 if hasattr(self, 'caldav_manager') and self.caldav_manager:
@@ -1163,6 +1211,8 @@ class JarvisContinuous:
                     self.news_manager.stop()
                 if self.weather_poller:
                     self.weather_poller.stop()
+                if self.mail_poller:
+                    self.mail_poller.stop()
                 if self.calendar_manager:
                     self.calendar_manager.stop()
                 if hasattr(self, 'caldav_manager') and self.caldav_manager:

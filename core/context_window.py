@@ -140,11 +140,12 @@ class ContextWindow:
     for each LLM call, replacing the flat FIFO history.
     """
 
-    def __init__(self, config, embedding_model, llm=None):
+    def __init__(self, config, embedding_model, llm=None, read_only=False):
         self.config = config
         self.logger = get_logger("context_window", config)
         self.embedding_model = embedding_model
         self.llm = llm  # for Phase 3 summarization
+        self.read_only = bool(read_only)
         self._privacy_gate = get_privacy_gate(config)
 
         # Configuration
@@ -185,7 +186,8 @@ class ContextWindow:
         self._current_user_id: str = "primary_user"  # set via set_user()
 
         if self.enabled:
-            self._init_db()
+            if not self.read_only:
+                self._init_db()
             self.logger.info(
                 f"Context window initialized (threshold={self.topic_shift_threshold}, "
                 f"budget={self.token_budget} tokens, verbatim={self.verbatim_recent}, "
@@ -203,6 +205,8 @@ class ContextWindow:
 
     def on_message(self, message: Dict):
         """Hook called from conversation.add_message() on every new message."""
+        if self.read_only:
+            return
         if not self._privacy_gate.allow(Capability.AGENT_CONTEXT_INGEST):
             # PRIV-003-adjacent: no topic-segment/embedding ingestion of
             # this message while privacy is active. Nothing else to
@@ -404,7 +408,7 @@ class ContextWindow:
                 f"Loaded {loaded} prior segment(s) from SQLite "
                 f"({sum(len(s.messages) for s in self.segments)} messages)"
             )
-        elif fallback_messages:
+        elif fallback_messages and not self.read_only:
             self.logger.info(
                 "No segments in SQLite — falling back to JSONL replay"
             )
@@ -423,6 +427,8 @@ class ContextWindow:
 
     def flush(self):
         """Persist the current open segment on shutdown (no summarization)."""
+        if self.read_only:
+            return
         if self._current_segment and self._current_segment.messages:
             self._current_segment.is_open = False
             self._current_segment.label = self._label_topic(self._current_segment)
@@ -515,7 +521,7 @@ class ContextWindow:
         otherwise let a stale write through (same reasoning as
         memory_manager's _run_batch_extraction; see core/privacy_gate.py).
         """
-        if not self._privacy_gate.allow(Capability.SESSION_SUMMARY):
+        if self.read_only or not self._privacy_gate.allow(Capability.SESSION_SUMMARY):
             return
         if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
             return
@@ -559,6 +565,8 @@ class ContextWindow:
 
     def _update_segment_summary(self, segment_id: str, summary: str):
         """Update the summary column for a persisted segment."""
+        if self.read_only:
+            return
         try:
             with self._db_lock:
                 conn = sqlite3.connect(str(self._db_path))
@@ -582,7 +590,8 @@ class ContextWindow:
         """
         try:
             with self._db_lock:
-                conn = sqlite3.connect(str(self._db_path))
+                conn = (sqlite3.connect(f"{self._db_path.resolve().as_uri()}?mode=ro", uri=True)
+                        if self.read_only else sqlite3.connect(str(self._db_path)))
                 conn.row_factory = sqlite3.Row
                 try:
                     rows = conn.execute(
@@ -626,6 +635,8 @@ class ContextWindow:
 
     def _cleanup_old_segments(self):
         """Remove segments older than retention_days from SQLite."""
+        if self.read_only:
+            return
         cutoff = time.time() - (self._retention_days * 86400)
         try:
             with self._db_lock:
@@ -780,8 +791,9 @@ class ContextWindow:
                 lines.append(f"{role_tag}: {msg.get('content', '')}")
             transcript = "\n".join(lines)
 
+            from core.runtime_state import primary_endpoint
             response = requests.post(
-                "http://127.0.0.1:8080/v1/chat/completions",
+                primary_endpoint(self.config),  # llm.primary.endpoint (was hardcoded :8080)
                 json={
                     "messages": [
                         {
@@ -913,6 +925,6 @@ class ContextWindow:
         return formatted
 
 
-def get_context_window(config, embedding_model, llm=None) -> ContextWindow:
+def get_context_window(config, embedding_model, llm=None, read_only=False) -> ContextWindow:
     """Factory function to create a ContextWindow instance."""
-    return ContextWindow(config, embedding_model, llm)
+    return ContextWindow(config, embedding_model, llm, read_only=read_only)

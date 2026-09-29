@@ -1,0 +1,37 @@
+# ENTWURF - UNVERIFIZIERT: nie in GitHub gelaufen, nichts gepusht.
+# Annahmen: Tests in tests/unit sind fake-basiert und brauchen nur requirements-ci.txt.
+# Bekannt nicht CI-tauglich: test_intent_overlap (sentence_transformers), tests/routing (torch),
+# test_presence_npu_backend / test_vision_gate (cv2). Diese werden hier ausgeschlossen (--ignore).
+# Der Workflow liegt in Main/.github; GitHub liest ihn nur, wenn dieser Ordner im Repo-Root .github/ landet.
+name: ci-python
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Abhaengigkeiten (minimal)
+        run: python -m pip install -r requirements-ci.txt
+      - name: Ruff (permissiv, siehe pyproject.toml)
+        run: ruff check .
+        continue-on-error: true   # ENTWURF: bestehender Code wurde nie gelintet
+      - name: Unit-Tests (ohne Hardware/WSL)
+        run: >
+          python -m pytest tests/unit -q -p no:cacheprovider
+          -m "not hardware and not wsl"
+          --ignore=tests/unit/test_intent_overlap.py
+          --ignore=tests/unit/test_presence_npu_backend.py
+          --ignore=tests/unit/test_vision_gate.py

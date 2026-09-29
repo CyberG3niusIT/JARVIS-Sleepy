@@ -68,13 +68,17 @@ def main():
         print("\nAbbruch — ohne Konfiguration sind keine weiteren Prüfungen möglich.")
         return 1
 
-    # --- LLM server (llama-server, main 35B model) ---
-    # core/llm_router.py hardcodes this endpoint (not read from
-    # config.yaml) — kept in sync with that, not with llm.small.endpoint
-    # (a different, smaller model on port 8081, checked separately below).
-    @check("LLM-Hauptmodell (llama-server, Port 8080)")
+    # --- LLM server (llama-server, Primary) ---
+    # Endpoint from config (llm.primary.endpoint, legacy llm.local.endpoint), never a hardcoded port.
+    # A running Primary<->Expert handover is a controlled swap: WARN "swapping", not "down".
+    @check("LLM-Hauptmodell (llama-server, Primary)")
     def _():
-        base = "http://127.0.0.1:8080"
+        from core import runtime_state
+        base = runtime_state.primary_base_url(config)
+        swapping = runtime_state.handover_in_progress()
+        if swapping:
+            return "warn", (f"Modellwechsel läuft (Expert-Handover, Zustand {swapping.get('state', '?')}) — "
+                            f"{base} kommt automatisch zurück")
         try:
             if _http_health(f"{base}/health"):
                 return "ok", base

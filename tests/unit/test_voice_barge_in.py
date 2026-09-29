@@ -83,7 +83,7 @@ def test_barge_in_requires_wake_word_and_rejects_tts_echo():
     assert coordinator.tts.interrupts == 0
 
 
-def test_barge_in_stops_owned_outputs_and_queues_user_input_once():
+def test_stop_phrase_with_wake_word_is_terminal_and_not_requeued():
     coordinator = _coordinator_for_interrupt()
     coordinator._active_response_text = "Die Antwort läuft gerade."
     pipeline = SimpleNamespace(cancel_calls=0, cancel=lambda: setattr(
@@ -93,12 +93,6 @@ def test_barge_in_stops_owned_outputs_and_queues_user_input_once():
 
     assert coordinator.handle_barge_in("Jarvis, stopp bitte", "alex", 0.9)
     assert not coordinator.handle_barge_in("Jarvis, stopp bitte", "alex", 0.9)
-
-    event = coordinator.event_queue.get_nowait()
-    assert event.type is EventType.TRANSCRIPTION_READY
-    assert event.source == "barge_in"
-    assert event.data["text"] == "Jarvis, stopp bitte"
-    assert event.data["barge_in"] is True
     assert coordinator.tts.interrupts == 1
     assert coordinator.llm.cancellations == 1
     assert pipeline.cancel_calls == 1

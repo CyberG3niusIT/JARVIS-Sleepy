@@ -275,7 +275,7 @@ These test cases (2A-05..08) describe **mid-rundown interruption** — a feature
 |----|-----------|----------|--------|-------|
 | 4A-01 | Ask factual question Qwen knows | Direct answer, no retry | [ ] | Happy path |
 | 4A-02 | Ask obscure question Qwen deflects on | Auto web research fallback | [ ] | Deflection safety net |
-| 4A-03 | Ask question that produces gibberish first sentence | Retry with nudge → Claude fallback | [ ] | Quality gate rejection |
+| 4A-03 | Ask question that produces gibberish first sentence | Retry with nudge → configured cloud fallback, if enabled and permitted | [ ] | Quality gate rejection |
 | 4A-04 | Very long question (>500 tokens) | Context overflow handling | [ ] | Trim to system + last 6 messages |
 | 4A-05 | Question in a language other than English | Qwen may answer in that language | [ ] | Behavior undefined — document it |
 
@@ -571,7 +571,7 @@ These test cases (2A-05..08) describe **mid-rundown interruption** — a feature
 
 | ID | Scenario | Expected | Status | Notes |
 |----|----------|----------|--------|-------|
-| 9B-01 | llama-server process killed | Graceful error, Claude fallback | [ ] | |
+| 9B-01 | llama-server process killed | Graceful error, configured cloud fallback only if enabled and permitted | [ ] | |
 | 9B-02 | Network disconnected (no internet) | Web research fails gracefully, local skills work | [ ] | |
 | 9B-03 | OpenWeather API key expired | Weather skill error message | [ ] | |
 | 9B-04 | Google Calendar OAuth token expired | Token refresh or graceful error | [ ] | |

@@ -34,7 +34,7 @@ def load_auth_token() -> str:
 async def send_and_collect(message: str, timeout: float = 30,
                            verbose: bool = False,
                            host: str = "127.0.0.1",
-                           port: int = 8088) -> dict:
+                           port: int = 8091) -> dict:
     """Send a message via WebSocket and collect the full response.
 
     Returns a dict with:
@@ -155,7 +155,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Show streaming details")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8088)
+    parser.add_argument("--port", type=int, default=8091)
     parser.add_argument("--json", action="store_true",
                         help="Output full result as JSON")
     args = parser.parse_args()

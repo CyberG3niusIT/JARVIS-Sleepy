@@ -357,7 +357,7 @@ header {
     background: rgba(56, 189, 248, 0.04);
 }
 
-#interactions-table td.provider-claude {
+#interactions-table td.provider-cloud {
     color: var(--warning);
 }
 

@@ -93,9 +93,16 @@ class RouteResult:
     synthesis_temperature: float | None = None  # Override temp for post-tool synthesis
     synthesis_category: str | None = None        # Domain category for prompt selection
     force_web_search: bool = False               # Force web_search (skip LLM tool decision)
+    force_tool_call: str | None = None            # Deterministic existing tool path
 
     # Vision (multimodal image input)
     image_data: str | None = None           # Base64-encoded image for LLM
+
+    # Model role (Primary/Expert handover, core/expert_policy.py). The default is
+    # always the Primary; the router only sets these for an explicit user wish
+    # ("frag den Experten"). No domain/complexity heuristics here.
+    model_role: str = "primary"             # "primary" | "expert"
+    expert_requested: bool = False          # Explicit expert request detected
 
 
 # Conversation window duration defaults (match ContinuousListener config)
@@ -265,6 +272,7 @@ class ConversationRouter:
                                        in_conversation=in_conversation,
                                        doc_buffer=doc_buffer,
                                        image_data=image_data)
+            self._apply_expert_policy(result, command)
             # Structured event: routing decision
             try:
                 from core.event_logger import get_event_logger
@@ -309,6 +317,20 @@ class ConversationRouter:
         finally:
             _router_thread_ctx.ctx = None
             clear_thread_user()
+
+    @staticmethod
+    def _apply_expert_policy(result: RouteResult, command: str) -> None:
+        """Policy hook: only an explicit user wish for the expert changes the model role."""
+        if result.handled:
+            return
+        try:
+            from core.expert_policy import should_escalate
+            decision = should_escalate(user_text=command)
+            if decision.escalate:
+                result.model_role = "expert"
+                result.expert_requested = True
+        except Exception as exc:  # the policy must never break routing
+            logger.debug("expert policy failed: %s", exc)
 
     def _route_inner(self, command: str, *,
                      in_conversation: bool = False,
@@ -2950,14 +2972,32 @@ class ConversationRouter:
         """
         logger.debug("_handle_tool_calling: command_length=%d guest=%s mobile=%s",
                      len(command), self._is_guest, self._is_mobile)
-        tools = self._select_tools_for_command(command) or []
+        screenshot_request = bool(re.search(
+            r"\b(?:mach(?:e|en)?|erstelle|nimm|capture|take|create)\b"
+            r".{0,50}\b(?:screenshot|bildschirmfoto)\b|"
+            r"\b(?:screenshot|bildschirmfoto)\b.{0,40}"
+            r"\b(?:mach|erstell|aufnehm|capture|take)\w*\b",
+            command, re.IGNORECASE,
+        )) and not re.search(
+            r"\b(?:kein(?:e|en|em|er)?|nicht|ohne|no|don't|do not)\b"
+            r".{0,40}\b(?:screenshot|bildschirmfoto)\b|"
+            r"\b(?:screenshot|bildschirmfoto)\b.{0,30}"
+            r"\b(?:nicht|no|don't|do not)\b",
+            command, re.IGNORECASE,
+        )
+        if screenshot_request and not self._is_guest and not self._is_mobile:
+            from core.tool_registry import TAKE_SCREENSHOT_TOOL
+            tools = [TAKE_SCREENSHOT_TOOL]
+        else:
+            tools = self._select_tools_for_command(command) or []
 
         # Inject prior-turn tool families for anaphoric follow-ups.
         # This runs BEFORE the empty-tools bail-out so that vague
         # follow-ups like "list them" / "which is biggest" still get
         # the tools from the prior turn even when semantic matching
         # finds nothing.
-        tools = self._apply_anaphoric_carryover(tools)
+        if not screenshot_request:
+            tools = self._apply_anaphoric_carryover(tools)
 
         if not tools:
             logger.debug("P4-LLM: no tools selected (command length=%d)", len(command))
@@ -2966,9 +3006,10 @@ class ConversationRouter:
         # Capability gates run after all tool injection.
         from core.tool_registry import ALWAYS_INCLUDED_TOOLS
         tool_names_set = {t["function"]["name"] for t in tools}
-        for name, schema in ALWAYS_INCLUDED_TOOLS.items():
-            if name not in tool_names_set:
-                tools.append(schema)
+        if not screenshot_request:
+            for name, schema in ALWAYS_INCLUDED_TOOLS.items():
+                if name not in tool_names_set:
+                    tools.append(schema)
 
         # Guest allowlist
         if self._is_guest:
@@ -3007,6 +3048,9 @@ class ConversationRouter:
             "skill_name": ", ".join(tool_names),
         }
         result.use_tools = tools
+        if screenshot_request and any(
+                tool["function"]["name"] == "take_screenshot" for tool in tools):
+            result.force_tool_call = "take_screenshot"
         result.tool_temperature = 0.0    # Deterministic — sweep showed 0.0 is fastest, same accuracy
         result.tool_presence_penalty = 0.0  # Sweep: pp=1.5 doubled latency with zero accuracy gain
         category = self._classify_query_domain(command)
@@ -3781,6 +3825,60 @@ class ConversationRouter:
         )
 
     # -------------------------------------------------------------------
+    # Pure text-path predicate (direct-audio verdict; NO side effects)
+    # -------------------------------------------------------------------
+
+    def text_path_reason(self, command: str, in_conversation: bool = False) -> Optional[str]:
+        """Read-only: does this command need the text pipeline (skill/tool/canned)?
+
+        Returns a short reason or None (= Gemma answers directly from audio).
+        Never calls route(), never executes skills/tools and never touches
+        _last_tool_best_score / _deferred_domain_tools / conv_state.
+        """
+        from core.audio_turn_routing import keyword_text_path_reason
+        reason = keyword_text_path_reason(command)
+        if reason:
+            return reason
+        sm = getattr(self, "skill_manager", None)
+        model = getattr(sm, "_embedding_model", None) if sm is not None else None
+        if not model:
+            return None
+        try:
+            from sentence_transformers import util as st_util
+            from core.tool_gate import should_include_tools
+            emb = model.encode(command, convert_to_tensor=True, show_progress_bar=False)
+            cache = getattr(sm, "_semantic_embedding_cache", {}) or {}
+            skills = getattr(sm, "skills", {}) or {}
+            conv = skills.get("conversation")
+            if conv is not None and hasattr(conv, "semantic_intents") \
+                    and len(command.split()) <= 6:
+                best = 0.0
+                for intent_id in conv.semantic_intents:
+                    embs = cache.get(("conversation", intent_id))
+                    if embs is not None:
+                        best = max(best, float(st_util.cos_sim(emb, embs).max()))
+                if best >= 0.78:
+                    return "cal_l0"
+            if not should_include_tools(command, embedding=emb):
+                return None
+            best_name, best_score = "", 0.0
+            for name, skill in skills.items():
+                if name == "conversation" or not hasattr(skill, "semantic_intents"):
+                    continue
+                for intent_id in skill.semantic_intents:
+                    embs = cache.get((name, intent_id))
+                    if embs is None:
+                        continue
+                    score = float(st_util.cos_sim(emb, embs).max())
+                    if score > best_score:
+                        best_name, best_score = name, score
+            if best_score >= self._TOOL_PRUNE_THRESHOLD:
+                return f"skill:{best_name}"
+        except Exception:
+            logger.debug("text_path_reason failed", exc_info=True)
+        return None
+
+    # -------------------------------------------------------------------
     # Detection helpers
     # -------------------------------------------------------------------
 
@@ -3799,3 +3897,30 @@ class ConversationRouter:
             if not rest or rest in self._DISMISSAL_PHRASES:
                 return True
         return False
+
+
+def classify_text_path(text: str, *, router=None, in_conversation: bool = False,
+                       wake_word: str = "aura"):
+    """Pure verdict for a direct-audio turn from its STT transcript.
+
+    Returns ``(path, command, reason)`` with path in direct | text | greeting.
+    ``command`` is the transcript with the wake word stripped. No routing, no
+    skill/tool execution, no router or conversation state is touched.
+    """
+    from core.audio_turn_routing import (DIRECT, GREETING, TEXT, is_wake_only,
+                                         keyword_text_path_reason)
+    from core.wake_word_utils import find_wake_word, strip_wake_word
+    raw = (text or "").strip()
+    if not raw:
+        return DIRECT, "", "blank"
+    if is_wake_only(raw, wake_word):
+        return GREETING, "jarvis_only", "wake_only"
+    command = strip_wake_word(raw, wake_word) if find_wake_word(raw, wake_word) else raw
+    reason = None
+    if router is not None and hasattr(router, "text_path_reason"):
+        reason = router.text_path_reason(command, in_conversation)
+    else:
+        reason = keyword_text_path_reason(command)
+    if reason:
+        return TEXT, command, reason
+    return DIRECT, command, "chat"

@@ -1,7 +1,7 @@
 """
 LLM Router
 
-Routes requests to appropriate LLM (local Qwen or Claude API fallback).
+Routes requests to local models with an optional configured cloud fallback.
 Handles prompt formatting, response quality gating, and smart fallback.
 Supports tool calling (Qwen3) for web research integration.
 
@@ -9,7 +9,7 @@ Fallback strategy (local-first):
   1. Qwen generates response
   2. Quality gate checks for bad output (empty, gibberish, echoes)
   3. If bad, retry local once with a nudge prompt
-  4. If still bad, fall back to Claude API as last resort
+  4. If still bad, use the configured cloud provider when enabled and permitted
 """
 
 import subprocess
@@ -29,12 +29,156 @@ import json
 import threading
 
 
+
+_CH_OPEN = "<|channel>"
+_CH_CLOSE = "<channel|>"
+
+
+class ChannelMarkerFilter:
+    """Streaming sanitizer for Gemma channel markers.
+
+    Removes ``<|channel>thought ... <channel|>`` blocks (including the empty
+    ``<|channel>thought
+<channel|>`` Gemma emits with thinking disabled) and
+    stray ``<|channel>`` / ``<channel|>`` tokens. Robust across chunk splits:
+    a possible marker prefix at the end of a chunk is held back until the next
+    chunk decides it. Normal text passes through unchanged.
+    """
+
+    def __init__(self):
+        self._buf = ""
+        self._mode = "normal"       # normal | probe | block
+
+    @staticmethod
+    def _holdback(buf: str) -> int:
+        """Length of the longest buf suffix that is a proper prefix of a marker."""
+        best = 0
+        for marker in (_CH_OPEN, _CH_CLOSE):
+            for n in range(min(len(marker) - 1, len(buf)), 0, -1):
+                if buf.endswith(marker[:n]):
+                    best = max(best, n)
+                    break
+        return best
+
+    def feed(self, text: str) -> str:
+        if not text:
+            return ""
+        self._buf += text
+        out = []
+        while True:
+            buf = self._buf
+            if self._mode == "block":
+                idx = buf.find(_CH_CLOSE)
+                if idx >= 0:
+                    self._buf = buf[idx + len(_CH_CLOSE):]
+                    self._mode = "normal"
+                    continue
+                self._buf = buf[-(len(_CH_CLOSE) - 1):]     # drop thought text
+                break
+            if self._mode == "probe":
+                if buf.startswith("thought"):
+                    self._buf = buf[len("thought"):]
+                    self._mode = "block"
+                    continue
+                if "thought".startswith(buf):
+                    break                                   # undecided, wait
+                self._mode = "normal"                       # stray open marker
+                continue
+            o = buf.find(_CH_OPEN)
+            c = buf.find(_CH_CLOSE)
+            hits = [i for i in (o, c) if i >= 0]
+            if not hits:
+                keep = self._holdback(buf)
+                out.append(buf[:len(buf) - keep] if keep else buf)
+                self._buf = buf[len(buf) - keep:] if keep else ""
+                break
+            first = min(hits)
+            out.append(buf[:first])
+            if first == c:
+                self._buf = buf[c + len(_CH_CLOSE):]
+            else:
+                self._buf = buf[o + len(_CH_OPEN):]
+                self._mode = "probe"
+        return "".join(out)
+
+    def flush(self) -> str:
+        """End of stream: release held-back plain text (never marker/thought text)."""
+        tail = self._buf if self._mode == "normal" else ""
+        self._buf = ""
+        self._mode = "normal"
+        return tail
+
+
+def strip_channel_markers(text: str) -> str:
+    """One-shot sanitizer for complete responses."""
+    if not text or ("channel>" not in text and "<channel" not in text and "<|channel" not in text):
+        return text
+    filt = ChannelMarkerFilter()
+    return filt.feed(text) + filt.flush()
+
+
+class StreamCancelHandle:
+    """Per-stream cancel handle.
+
+    One handle belongs to exactly one LLM stream (stream / stream_with_tools /
+    continue_after_tool_call). ``cancel()`` closes only that stream's HTTP response, so
+    cancelling turn A can never close or un-cancel turn B (speculative producers run
+    concurrently with the real turn). Create via ``LLMRouter.create_stream_handle()`` and
+    pass as ``cancel_handle=``; without one, every stream makes its own private handle."""
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._response = None
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    def set_response(self, response) -> None:
+        with self._lock:
+            self._response = response
+        if self._event.is_set():          # cancelled before the response existed
+            self._close(response)
+
+    def clear_response(self, response) -> None:
+        with self._lock:
+            if self._response is response:
+                self._response = None
+
+    @staticmethod
+    def _close(response) -> None:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
+    def cancel(self) -> None:
+        self._event.set()
+        with self._lock:
+            response, self._response = self._response, None
+        self._close(response)
+
+
+class ExpertCallError(RuntimeError):
+    """The expert produced no usable answer (never substituted by another model)."""
+
+
 @dataclass
 class ToolCallRequest:
-    """Sentinel yielded by stream_with_tools() when the LLM requests a tool call."""
+    """Sentinel yielded by stream_with_tools() when the LLM requests a tool call.
+
+    ``messages`` is the per-stream message list to continue from (so
+    continue_after_tool_call() does not depend on the router-global
+    ``_tool_call_messages`` that concurrent streams overwrite)."""
     name: str
     arguments: dict
     call_id: str = ""
+    messages: Optional[list] = field(default=None, repr=False, compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +192,27 @@ from core.tool_registry import (  # noqa: E402
     TAKE_SCREENSHOT_TOOL, CAPTURE_WEBCAM_TOOL,
     build_tool_prompt_rules,
 )
+
+
+_DE_MONTHS = ("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
+              "August", "September", "Oktober", "November", "Dezember")
+_DE_WEEKDAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+                "Samstag", "Sonntag")
+
+
+def _german_date(now: datetime) -> str:
+    """Locale-independent German date, e.g. 'Freitag, 26. September 2026'."""
+    return f"{_DE_WEEKDAYS[now.weekday()]}, {now.day}. {_DE_MONTHS[now.month - 1]} {now.year}"
+
+
+def _cloud_credential_matches_provider(provider: str, key_env: str) -> bool:
+    """Require provider-specific credentials to prevent cross-provider key leaks."""
+    normalized_key = str(key_env or "").strip().casefold()
+    if provider == "anthropic":
+        return normalized_key == "anthropic_api_key"
+    if provider == "openrouter":
+        return normalized_key == "openrouter_api_key"
+    return False
 
 
 def _log_tool_call(logger_, privacy_gate, label: str, tool_call_name: str, args: dict) -> None:
@@ -67,6 +232,8 @@ def _log_tool_call(logger_, privacy_gate, label: str, tool_call_name: str, args:
 class LLMRouter:
     """Routes LLM requests to local or API models with smart fallback"""
 
+    PROBE_MAX_TIMEOUT_S = 0.3
+
     def __init__(self, config):
         """
         Initialize LLM router
@@ -81,17 +248,28 @@ class LLMRouter:
         # User location (injected into system prompt)
         self.home_location = config.get("location.home_address")
 
-        # Local LLM configuration (llama.cpp)
-        self.local_model_path = config.get("llm.local.model_path")
-        self.llama_completion = os.path.expanduser(config.get("llm.local.llama_completion"))
-        self.context_size = config.get("llm.local.context_size", 8192)
-        self.gpu_layers = config.get("llm.local.gpu_layers", 999)
-        self.batch_size = config.get("llm.local.batch_size", 512)
-        self.ubatch_size = config.get("llm.local.ubatch_size", 128)
-        self.temperature = config.get("llm.local.temperature", 0.6)
-        self.top_p = config.get("llm.local.top_p", 0.8)
-        self.top_k = config.get("llm.local.top_k", 20)
-        self.tool_calling = config.get("llm.local.tool_calling", False)
+        # Local LLM configuration (llama.cpp).
+        # llm.primary.* wins; llm.local.* is the legacy compat alias.
+        def _pget(key, default=None):
+            value = config.get(f"llm.primary.{key}")
+            return value if value is not None else config.get(f"llm.local.{key}", default)
+
+        self._primary_configured = config.get("llm.primary.endpoint") is not None
+        self.local_model_path = _pget("model_path")
+        self.llama_completion = os.path.expanduser(config.get("llm.local.llama_completion") or "")
+        self.context_size = _pget("context_size", 8192)
+        self.gpu_layers = _pget("gpu_layers", 999)
+        self.batch_size = _pget("batch_size", 512)
+        self.ubatch_size = _pget("ubatch_size", 128)
+        self.temperature = _pget("temperature", 0.6)
+        self.top_p = _pget("top_p", 0.8)
+        self.top_k = _pget("top_k", 20)
+        self.tool_calling = _pget("tool_calling", False)
+        # Provider label comes from config; legacy llm.local-only setups were Qwen.
+        self.primary_provider = str(
+            config.get("llm.primary.provider") or ("gemma" if self._primary_configured else "qwen")
+        ).lower()
+        self.audio_direct = bool(config.get("llm.primary.audio_direct", False))
 
         # Verify local model exists
         if self.local_model_path:
@@ -100,7 +278,7 @@ class LLMRouter:
                 self.logger.warning(f"Local LLM model not found: {model_path}")
                 self.local_model_path = None
 
-        # API configuration (Claude)
+        # Cloud provider configuration is explicit; an absent provider is disabled.
         # Call metadata for console stats panel
         self.last_call_info = None
         # Accumulated call chain — tracks ALL LLM calls within a pipeline run.
@@ -110,8 +288,8 @@ class LLMRouter:
         self._active_stream_lock = threading.Lock()
         self._stream_cancel_event = threading.Event()
 
-        self.api_provider = config.get("llm.api.provider", "anthropic")
-        self.api_model = config.get("llm.api.model", "claude-sonnet-4-20250514")
+        self.api_provider = config.get("llm.api.provider")
+        self.api_model = config.get("llm.api.model")
         self.api_key_env = config.get("llm.api.api_key_env")
 
         # Fallback configuration
@@ -119,10 +297,11 @@ class LLMRouter:
         self.api_call_count = 0
 
         # Local LLM endpoint (consolidate — was hardcoded in 6 places)
-        self.local_endpoint = config.get(
-            "llm.local.endpoint",
-            "http://127.0.0.1:8080/v1/chat/completions",
+        self.local_endpoint = (
+            config.get("llm.primary.endpoint")
+            or config.get("llm.local.endpoint", "http://127.0.0.1:8080/v1/chat/completions")
         )
+        self._health_cache: dict = {}
 
         # Small model endpoint (4B infrastructure model for synthesis/summarization)
         self.small_endpoint = config.get("llm.small.endpoint")
@@ -138,6 +317,108 @@ class LLMRouter:
         self.logger.info(f"LLM Router initialized (fallback={'enabled' if self.fallback_enabled else 'disabled'})")
         if self.local_model_path:
             self.logger.info(f"Local model: {Path(self.local_model_path).name}")
+
+    # ── Role resolution (PRIMARY = Gemma, EXPERT = Qwen) ─────────────────
+    # Interface for expert delegation (core/model_handover.py):
+    #   llm.chat(msg, ..., role="expert")  /  llm.stream(msg, ..., role="expert")
+    # routes to llm.expert.* (own endpoint/model/sampling/provider). The expert
+    # answer is produced under the normal JARVIS system prompt and is delivered
+    # by Coordinator.deliver_expert_answer() -- no second primary pass.
+    # role=None/"primary" (default) never touches the expert endpoint.
+    def resolve_role(self, role: str | None = None) -> dict:
+        """Resolve a role to endpoint/model/sampling/provider. Raises ValueError
+        for an expert role without a configured endpoint (never silently
+        substitutes the primary model)."""
+        role = (role or "primary").strip().lower()
+        if role == "expert":
+            def g(key, default=None):
+                value = self.config.get(f"llm.expert.{key}")
+                return default if value is None else value
+            endpoint = g("endpoint")
+            if not endpoint:
+                raise ValueError("llm.expert.endpoint is not configured")
+            model_path = g("model_path")
+            return {
+                "role": "expert",
+                "endpoint": endpoint,
+                "model_path": model_path,
+                "model_name": Path(model_path).stem if model_path else "expert",
+                "provider": str(g("provider", "qwen")).lower(),
+                "temperature": g("temperature", 0.6),
+                "top_p": g("top_p", 0.8),
+                "top_k": g("top_k", 20),
+                "tool_calling": bool(g("tool_calling", False)),
+                "enable_thinking": g("enable_thinking", False),
+                "audio_direct": False,
+            }
+        model_path = getattr(self, "local_model_path", None)
+        return {
+            "role": "primary",
+            "endpoint": getattr(self, "local_endpoint", None),
+            "model_path": model_path,
+            "model_name": Path(model_path).stem if model_path else "unknown",
+            "provider": getattr(self, "primary_provider", "qwen"),
+            "temperature": getattr(self, "temperature", 0.6),
+            "top_p": getattr(self, "top_p", 0.8),
+            "top_k": getattr(self, "top_k", 20),
+            "tool_calling": bool(getattr(self, "tool_calling", False)),
+            # Gemma 4 streams its reasoning into `reasoning_content` and leaves `content`
+            # empty until it is done -> JARVIS saw empty answers. Thinking is off by default.
+            "enable_thinking": (getattr(self, "config", None).get("llm.primary.enable_thinking", False)
+                                if getattr(self, "config", None) is not None else False),
+            "audio_direct": getattr(self, "audio_direct", False),
+        }
+
+    @staticmethod
+    def _sampling(rc: dict, temperature: float | None = None) -> dict:
+        params = {
+            "temperature": temperature if temperature is not None else rc["temperature"],
+            "top_p": rc["top_p"],
+        }
+        if rc.get("top_k") is not None:
+            params["top_k"] = rc["top_k"]
+        return params
+
+    @staticmethod
+    def _provider_extras(rc: dict) -> dict:
+        """Thinking switch for the role's chat template (Gemma primary and Qwen expert)."""
+        if rc.get("enable_thinking") is not None:
+            return {"chat_template_kwargs": {"enable_thinking": bool(rc["enable_thinking"])}}
+        return {}
+
+    def probe_role(self, role: str | None = None, ttl: float | None = None,
+                   timeout: float = 0.3) -> str:
+        """Cheap cached llama-server /health probe.
+
+        Returns "READY" (200), "STARTING" (503 while the model loads) or
+        "DOWN" (connection refused / other). Called from the STT/audio threads, so it
+        never blocks longer than PROBE_MAX_TIMEOUT_S (0.3 s) whatever `timeout` says;
+        a localhost /health answers in milliseconds, a hung server counts as DOWN.
+        """
+        timeout = max(0.05, min(float(timeout), self.PROBE_MAX_TIMEOUT_S))
+        try:
+            rc = self.resolve_role(role)
+        except ValueError:
+            return "DOWN"
+        if ttl is None:
+            ttl = float(self.config.get("llm.primary.health_ttl_s", 2.0) or 0.0)
+        now = time.monotonic()
+        cached = self._health_cache.get(rc["role"])
+        if cached and now - cached[0] < ttl:
+            return cached[1]
+        base = rc["endpoint"].split("/v1/")[0].rstrip("/")
+        try:
+            resp = requests.get(base + "/health", timeout=timeout)
+            if resp.status_code == 200:
+                state = "READY"
+            elif resp.status_code == 503:
+                state = "STARTING"
+            else:
+                state = "DOWN"
+        except Exception:
+            state = "DOWN"
+        self._health_cache[rc["role"]] = (now, state)
+        return state
 
     def _record_call(self, info: dict):
         """Record an LLM call to both last_call_info and the call chain."""
@@ -249,7 +530,9 @@ class LLMRouter:
             return "echo"
 
         # Contains raw prompt artifacts that cleaning missed
-        bad_markers = ["<|im_start|>", "<|im_end|>", "[INST]", "[/INST]", "<<SYS>>", "<think>", "</think>"]
+        bad_markers = ["<|im_start|>", "<|im_end|>", "[INST]", "[/INST]", "<<SYS>>"]
+        if self.primary_provider == "qwen":
+            bad_markers += ["<think>", "</think>"]
         for marker in bad_markers:
             if marker in text:
                 self.logger.debug("Quality gate: artifacts (%s) in response: %.80s", marker, text)
@@ -258,12 +541,32 @@ class LLMRouter:
         return ""
 
     @staticmethod
-    def _build_user_message(text: str, image_data: str | None = None) -> dict:
-        """Build a user message dict, optionally with multimodal image content.
+    def encode_audio_wav_b64(audio, sample_rate: int = 16000) -> str:
+        """float32 mono numpy (16 kHz) -> 16-bit PCM WAV bytes -> base64 str."""
+        import base64
+        import io
+        import wave
+
+        import numpy as np
+        samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(int(sample_rate))
+            wav.writeframes(pcm.tobytes())
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
+    @staticmethod
+    def _build_user_message(text: str, image_data: str | None = None,
+                            audio_data: str | None = None) -> dict:
+        """Build a user message dict, optionally with multimodal image/audio content.
 
         Args:
             text: The text content of the user message
             image_data: Optional base64-encoded image data
+            audio_data: Optional base64-encoded 16-bit PCM WAV (see encode_audio_wav_b64)
 
         Returns:
             OpenAI-compatible message dict with string or array content
@@ -273,16 +576,19 @@ class LLMRouter:
                     len(text) if text else 0,
                     "yes" if image_data else "no",
                     f" base64_len={len(image_data)}" if image_data else "")
-        if image_data:
-            return {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": text},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:image/png;base64,{image_data}"
-                    }},
-                ],
-            }
+        if image_data or audio_data:
+            parts = []
+            if text:
+                parts.append({"type": "text", "text": text})
+            if image_data:
+                parts.append({"type": "image_url", "image_url": {
+                    "url": f"data:image/png;base64,{image_data}"
+                }})
+            if audio_data:
+                parts.append({"type": "input_audio", "input_audio": {
+                    "data": audio_data, "format": "wav",
+                }})
+            return {"role": "user", "content": parts}
         return {"role": "user", "content": text}
 
     def generate(self, prompt: str, use_api: bool = False, max_tokens: int = 512,
@@ -292,11 +598,11 @@ class LLMRouter:
         Generate response from LLM.
 
         When use_api is False and fallback is enabled, uses smart fallback:
-        local → quality check → retry local → quality check → Claude API
+        local → quality check → retry local → quality check → configured cloud provider
 
         Args:
             prompt: Input prompt
-            use_api: Whether to force API (Claude) instead of local
+            use_api: Whether to force the configured cloud provider instead of local
             max_tokens: Maximum tokens to generate
             timeout: HTTP request timeout in seconds (local only)
             use_small: Route to 4B infrastructure model (synthesis/summarization)
@@ -324,25 +630,24 @@ class LLMRouter:
         """Generate using llama-server REST API"""
         from core import persona
         system_prompt = persona.system_prompt_brief()
-        model_name = Path(self.local_model_path).stem if self.local_model_path else "unknown"
+        _rc = self.resolve_role("primary")
+        model_name = _rc["model_name"]
 
         start = time.time()
         try:
+            _body = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                **self._sampling(_rc, temperature),
+                "max_tokens": max_tokens,
+            }
+            if _rc["provider"] == "qwen":
+                _body["chat_template_kwargs"] = {"enable_thinking": False}
             response = requests.post(
-                self.local_endpoint,
-                json={
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    "temperature": temperature if temperature is not None else self.temperature,
-                    "top_p": self.top_p,
-                    "top_k": self.top_k,
-                    "max_tokens": max_tokens,
-                    "chat_template_kwargs": {
-                        "enable_thinking": False
-                    }
-                },
+                _rc["endpoint"],
+                json=_body,
                 timeout=timeout
             )
             # Log context overflow clearly instead of generic error
@@ -361,7 +666,7 @@ class LLMRouter:
                 else:
                     self.logger.error(f"LLM server rejected request: {err}")
                 self._record_call({
-                    "provider": "qwen", "method": "generate",
+                    "provider": _rc["provider"], "method": "generate",
                     "input_tokens": None, "output_tokens": None,
                     "estimated_tokens": None, "model": model_name,
                     "latency_ms": (time.time() - start) * 1000,
@@ -373,7 +678,7 @@ class LLMRouter:
             data = response.json()
             usage = data.get("usage", {})
             self._record_call({
-                "provider": "qwen", "method": "generate",
+                "provider": _rc["provider"], "method": "generate",
                 "input_tokens": usage.get("prompt_tokens"),
                 "output_tokens": usage.get("completion_tokens"),
                 "estimated_tokens": None, "model": model_name,
@@ -381,11 +686,11 @@ class LLMRouter:
                 "ttft_ms": None, "quality_gate": False,
                 "is_fallback": False, "error": None,
             })
-            return self.strip_filler(data["choices"][0]["message"]["content"].strip())
+            return self.strip_filler(strip_channel_markers(data["choices"][0]["message"]["content"]).strip())
         except Exception as e:
             self.logger.error(f"LLM server error: {e}")
             self._record_call({
-                "provider": "qwen", "method": "generate",
+                "provider": _rc["provider"], "method": "generate",
                 "input_tokens": None, "output_tokens": None,
                 "estimated_tokens": None, "model": model_name,
                 "latency_ms": (time.time() - start) * 1000,
@@ -435,7 +740,7 @@ class LLMRouter:
                 "ttft_ms": None, "quality_gate": False,
                 "is_fallback": False, "error": None,
             })
-            return self.strip_filler(data["choices"][0]["message"]["content"].strip())
+            return self.strip_filler(strip_channel_markers(data["choices"][0]["message"]["content"]).strip())
         except Exception as e:
             self.logger.warning(f"Small model error: {e}")
             self._record_call({
@@ -448,89 +753,84 @@ class LLMRouter:
             })
             return ""
 
-    def _generate_api(self, prompt: str, max_tokens: int = 512) -> str:
-        """
-        Generate response using Claude API
-
-        Args:
-            prompt: Input prompt
-            max_tokens: Maximum tokens to generate
-
-        Returns:
-            Generated text
-        """
+    def _cloud_completion(self, messages: list, max_tokens: int,
+                          system_prompt: str = None) -> tuple[str, int, int, str]:
+        """Call only the explicitly configured, enabled cloud provider."""
         if not self._privacy_gate.allow(Capability.CLOUD_LLM):
-            self.logger.info("_generate_api denied by privacy gate — no cloud request sent")
-            return ""
+            self.logger.info("Cloud LLM denied by privacy gate; no request sent")
+            return "", None, None, "privacy_gate_blocked"
 
-        start = time.time()
+        provider = str(self.config.get("llm.api.provider") or "").strip().lower()
+        model = self.config.get("llm.api.model")
+        key_env = self.config.get("llm.api.api_key_env")
+        endpoint = self.config.get("llm.api.endpoint")
+        if not self.config.get("llm.api.enabled", False):
+            return "", None, None, "cloud_disabled"
+        if provider not in {"openrouter", "anthropic"} or not model or not key_env:
+            self.logger.info("Cloud LLM is unconfigured; provider, model, and credential name are required")
+            return "", None, None, "cloud_unconfigured"
+        if not _cloud_credential_matches_provider(provider, key_env):
+            self.logger.warning("Configured cloud credential does not match the selected provider")
+            return "", None, None, "cloud_credential_mismatch"
+        if provider == "openrouter" and not endpoint:
+            return "", None, None, "cloud_endpoint_unconfigured"
+
+        api_key = self.config.get_env(key_env)
+        if not api_key or str(api_key).lower().startswith("your_"):
+            self.logger.warning("Configured cloud provider credential is unavailable")
+            return "", None, None, "api_key_not_configured"
+
         try:
-            # Import anthropic SDK
+            if provider == "openrouter":
+                request_messages = list(messages)
+                if system_prompt:
+                    request_messages.insert(0, {"role": "system", "content": system_prompt})
+                # OpenRouter REST contract: https://openrouter.ai/docs/quickstart
+                response = requests.post(
+                    endpoint,
+                    headers={"Authorization": f"Bearer {api_key}",
+                             "Content-Type": "application/json"},
+                    json={"model": model, "messages": request_messages,
+                          "max_tokens": max_tokens},
+                    timeout=60,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                text = payload["choices"][0]["message"]["content"] or ""
+                usage = payload.get("usage") or {}
+                return text, usage.get("prompt_tokens"), usage.get("completion_tokens"), None
+
+            # Optional provider: importing its SDK is reachable only after the
+            # explicit provider value above has selected Anthropic.
             import anthropic
-
-            # Get API key
-            api_key = self.config.get_env(self.api_key_env)
-            if not api_key or api_key == "your_key_here":
-                self.logger.error("Claude API key not configured")
-                self._record_call({
-                    "provider": "claude", "method": "generate",
-                    "input_tokens": None, "output_tokens": None,
-                    "estimated_tokens": None, "model": self.api_model,
-                    "latency_ms": (time.time() - start) * 1000,
-                    "ttft_ms": None, "quality_gate": False,
-                    "is_fallback": True, "error": "api_key_not_configured",
-                })
-                return "I'm sorry, I don't have access to the Claude API at the moment."
-
-            # Create client
             client = anthropic.Anthropic(api_key=api_key)
-
-            self.logger.debug("Calling Claude API...")
-
-            # Generate response
-            message = client.messages.create(
-                model=self.api_model,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-
-            response = message.content[0].text
-            self._record_call({
-                "provider": "claude", "method": "generate",
-                "input_tokens": message.usage.input_tokens,
-                "output_tokens": message.usage.output_tokens,
-                "estimated_tokens": None, "model": self.api_model,
-                "latency_ms": (time.time() - start) * 1000,
-                "ttft_ms": None, "quality_gate": False,
-                "is_fallback": True, "error": None,
-            })
-
-            return response
-
+            request = {"model": model, "max_tokens": max_tokens, "messages": messages}
+            if system_prompt:
+                request["system"] = system_prompt
+            response = client.messages.create(**request)
+            return (response.content[0].text, response.usage.input_tokens,
+                    response.usage.output_tokens, None)
         except ImportError:
-            self.logger.error("anthropic package not installed")
-            self._record_call({
-                "provider": "claude", "method": "generate",
-                "input_tokens": None, "output_tokens": None,
-                "estimated_tokens": None, "model": self.api_model,
-                "latency_ms": (time.time() - start) * 1000,
-                "ttft_ms": None, "quality_gate": False,
-                "is_fallback": True, "error": "anthropic_not_installed",
-            })
-            return "I'm sorry, the Claude API is not available."
-        except Exception as e:
-            self.logger.error(f"Claude API call failed: {e}")
-            self._record_call({
-                "provider": "claude", "method": "generate",
-                "input_tokens": None, "output_tokens": None,
-                "estimated_tokens": None, "model": self.api_model,
-                "latency_ms": (time.time() - start) * 1000,
-                "ttft_ms": None, "quality_gate": False,
-                "is_fallback": True, "error": str(e),
-            })
-            return ""
+            self.logger.error("Configured cloud provider dependency is unavailable")
+            return "", None, None, "provider_dependency_unavailable"
+        except Exception as exc:
+            self.logger.error("Configured cloud provider call failed: %s", exc)
+            return "", None, None, "cloud_request_failed"
+
+    def _generate_api(self, prompt: str, max_tokens: int = 512) -> str:
+        """Generate a one-shot response through the configured cloud provider."""
+        start = time.time()
+        response, input_tokens, output_tokens, error = self._cloud_completion(
+            [{"role": "user", "content": prompt}], max_tokens,
+        )
+        self._record_call({
+            "provider": self.config.get("llm.api.provider"), "method": "generate",
+            "input_tokens": input_tokens, "output_tokens": output_tokens,
+            "estimated_tokens": None, "model": self.config.get("llm.api.model"),
+            "latency_ms": (time.time() - start) * 1000, "ttft_ms": None,
+            "quality_gate": False, "is_fallback": True, "error": error,
+        })
+        return response
     
     def _clean_llm_output(self, output: str) -> str:
         """
@@ -684,8 +984,20 @@ class LLMRouter:
         """Build the JARVIS system prompt (delegated to persona module)."""
         from core import persona
         if guest_mode:
-            return persona.system_prompt_guest()
-        return persona.system_prompt(home_location=self.home_location)
+            prompt = persona.system_prompt_guest()
+        else:
+            prompt = persona.system_prompt(home_location=self.home_location)
+        # Fixed response language (Gemma follows the audio's language otherwise).
+        _cfg = getattr(self, "config", None)
+        _lang = _cfg.get("llm.response_language", "de") if _cfg is not None else "de"
+        if str(_lang or "de").lower() == "de":
+            prompt += (
+                "\n\nSPRACHE (verbindlich): Sprich mit dem Benutzer ausschließlich Deutsch. "
+                "Jede Antwort ist auf Deutsch, auch nach Tool-Ergebnissen, bei englischen "
+                "Begriffen und wenn im Audio Englisch vorkommt. Wechsle die Sprache nur, wenn "
+                "der Benutzer ausdrücklich eine Übersetzung oder eine andere Sprache verlangt."
+            )
+        return prompt
 
     @staticmethod
     def _estimate_max_tokens(query: str) -> int:
@@ -752,106 +1064,76 @@ class LLMRouter:
         else:
             return f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n"
 
+    def _primary_text_fallback_allowed(self) -> bool:
+        """May a failed PRIMARY text turn use the explicitly configured cloud provider?
+
+        ``llm.primary.text_fallback`` explicit true/false wins; unset keeps the legacy
+        fallback toggle. Cloud enablement, provider, model, and credentials are required."""
+        explicit = self.config.get("llm.primary.text_fallback")
+        allowed = self.fallback_enabled if explicit is None else bool(explicit)
+        provider = str(self.config.get("llm.api.provider") or "").strip().lower()
+        key_env = self.config.get("llm.api.api_key_env")
+        if (not allowed or not self.config.get("llm.api.enabled", False)
+                or provider not in {"openrouter", "anthropic"}
+                or not self.config.get("llm.api.model")
+                or not key_env
+                or not _cloud_credential_matches_provider(provider, key_env)
+                or (provider == "openrouter" and not self.config.get("llm.api.endpoint"))):
+            return False
+        if not self._privacy_gate.allow(Capability.CLOUD_LLM):
+            return False
+        try:
+            key = self.config.get_env(key_env)
+        except Exception:
+            key = None
+        return bool(key) and not str(key).lower().startswith("your_")
+
     def _generate_api_chat(self, user_message: str, conversation_history: str = "",
                            max_tokens: int = None,
                            conversation_messages: list = None,
                            guest_mode: bool = False) -> str:
-        """Generate chat response via Claude API with proper message format"""
+        """Generate a chat response through the explicitly configured cloud provider."""
         if max_tokens is None:
             max_tokens = self._estimate_max_tokens(user_message)
         start = time.time()
-        try:
-            import anthropic
+        messages = []
+        if conversation_messages:
+            messages = list(conversation_messages)
+        elif conversation_history:
+            messages = self._parse_history_string(conversation_history)
+        if not messages or messages[-1].get("role") != "user":
+            messages.append({"role": "user", "content": user_message})
 
-            api_key = self.config.get_env(self.api_key_env)
-            if not api_key or api_key == "your_key_here":
-                self.logger.error("Claude API key not configured")
-                self._record_call({
-                    "provider": "claude", "method": "chat",
-                    "input_tokens": None, "output_tokens": None,
-                    "estimated_tokens": None, "model": self.api_model,
-                    "latency_ms": (time.time() - start) * 1000,
-                    "ttft_ms": None, "quality_gate": False,
-                    "is_fallback": True, "error": "api_key_not_configured",
-                })
-                return ""
-
-            client = anthropic.Anthropic(api_key=api_key)
-            system_prompt = self._build_system_prompt(guest_mode=guest_mode)
-
-            # Build messages — prefer pre-built list over string parsing
-            messages = []
-            if conversation_messages:
-                messages = list(conversation_messages)
-            elif conversation_history:
-                messages = self._parse_history_string(conversation_history)
-
-            if not messages or messages[-1]["role"] != "user":
-                messages.append({"role": "user", "content": user_message})
-
-            self.logger.info(f"🔄 Claude API fallback (call #{self.api_call_count + 1})")
-
-            message = client.messages.create(
-                model=self.api_model,
-                max_tokens=max_tokens,
-                system=system_prompt,
-                messages=messages
-            )
-
-            response = message.content[0].text
-            elapsed_ms = (time.time() - start) * 1000
+        response, input_tokens, output_tokens, error = self._cloud_completion(
+            messages, max_tokens, self._build_system_prompt(guest_mode=guest_mode),
+        )
+        elapsed_ms = (time.time() - start) * 1000
+        if response:
             self.api_call_count += 1
-            self._record_call({
-                "provider": "claude", "method": "chat",
-                "input_tokens": message.usage.input_tokens,
-                "output_tokens": message.usage.output_tokens,
-                "estimated_tokens": None, "model": self.api_model,
-                "latency_ms": elapsed_ms,
-                "ttft_ms": None, "quality_gate": False,
-                "is_fallback": True, "error": None,
-            })
-            self.logger.info(f"✅ Claude API responded in {elapsed_ms / 1000:.1f}s "
-                           f"(tokens: {message.usage.input_tokens}+{message.usage.output_tokens}, "
-                           f"total API calls this session: {self.api_call_count})")
-            return response
-
-        except ImportError:
-            self.logger.error("anthropic package not installed")
-            self._record_call({
-                "provider": "claude", "method": "chat",
-                "input_tokens": None, "output_tokens": None,
-                "estimated_tokens": None, "model": self.api_model,
-                "latency_ms": (time.time() - start) * 1000,
-                "ttft_ms": None, "quality_gate": False,
-                "is_fallback": True, "error": "anthropic_not_installed",
-            })
-            return ""
-        except Exception as e:
-            self.logger.error(f"Claude API call failed: {e}")
-            self._record_call({
-                "provider": "claude", "method": "chat",
-                "input_tokens": None, "output_tokens": None,
-                "estimated_tokens": None, "model": self.api_model,
-                "latency_ms": (time.time() - start) * 1000,
-                "ttft_ms": None, "quality_gate": False,
-                "is_fallback": True, "error": str(e),
-            })
-            return ""
+        self._record_call({
+            "provider": self.config.get("llm.api.provider"), "method": "chat",
+            "input_tokens": input_tokens, "output_tokens": output_tokens,
+            "estimated_tokens": None, "model": self.config.get("llm.api.model"),
+            "latency_ms": elapsed_ms, "ttft_ms": None,
+            "quality_gate": False, "is_fallback": True, "error": error,
+        })
+        return response
 
     def chat(self, user_message: str, conversation_history: str = "",
              use_api: bool = False, max_tokens: int = None,
              memory_context: str = None,
              conversation_messages: list = None,
-             image_data: str = None, guest_mode: bool = False) -> str:
+             image_data: str = None, guest_mode: bool = False,
+             role: str | None = None, audio_data: str | None = None) -> str:
         """
         Generate chat response with smart local-first fallback.
 
-        Flow: local Qwen → quality gate → retry local → quality gate → Claude API
+        Flow: local Qwen → quality gate → retry local → quality gate → configured cloud provider
 
         Args:
             user_message: Current user message
             conversation_history: Previous conversation (formatted)
-            use_api: Whether to force Claude API
+            use_api: Whether to force the configured cloud provider
             max_tokens: Maximum tokens to generate (auto-estimated from query if None)
             memory_context: Optional proactive memory context to inject into system prompt
             conversation_messages: Pre-built message list (bypasses string parsing)
@@ -863,6 +1145,9 @@ class LLMRouter:
         if max_tokens is None:
             max_tokens = self._estimate_max_tokens(user_message)
         # If explicitly requesting API, go straight there
+        if use_api and (audio_data or str(role or "primary").lower() != "primary"):
+            self.logger.warning("use_api ignored: expert/audio turns never go to the cloud API")
+            use_api = False
         if use_api:
             return self._generate_api_chat(user_message, conversation_history,
                                            max_tokens, conversation_messages,
@@ -871,19 +1156,29 @@ class LLMRouter:
         # --- Attempt 1: Local Qwen ---
         # When image_data is present, use streaming path (supports multimodal
         # messages natively) and collect the full response for quality gating.
-        if image_data:
+        # Expert role / audio also use the streaming path (JARVIS system prompt,
+        # multimodal content, role endpoint) instead of the ChatML string path.
+        if image_data or audio_data or (role and str(role).lower() != "primary"):
             tokens = []
             for token in self.stream(user_message, conversation_history,
                                      max_tokens, memory_context,
                                      conversation_messages,
                                      image_data=image_data,
-                                     guest_mode=guest_mode):
+                                     guest_mode=guest_mode,
+                                     role=role, audio_data=audio_data):
                 tokens.append(token)
             response = "".join(tokens)
             if response:
                 return self.strip_filler(response)
-            # Fall through to API fallback below if empty
-            if self.fallback_enabled:
+            # Expert role and audio turns must NEVER be answered by the cloud API:
+            # the expert answer would be a different model, and raw audio/transcript
+            # content must not leave the machine. Fail loudly so that
+            # ModelHandover.run_expert reports "expert_call_failed".
+            if str(role or "primary").lower() != "primary":
+                raise ExpertCallError("expert_empty_response")
+            if audio_data:
+                return ""
+            if self._primary_text_fallback_allowed():
                 return self._generate_api_chat(user_message, conversation_history,
                                                max_tokens, conversation_messages,
                                                guest_mode=guest_mode)
@@ -931,11 +1226,11 @@ class LLMRouter:
             self.logger.info(f"Local LLM succeeded on retry in {elapsed_ms:.0f}ms")
             return response
 
-        self.logger.warning(f"Local LLM failed twice ({quality_issue}) — falling back to Claude API")
+        self.logger.warning(f"Local LLM failed twice ({quality_issue}) — configured cloud fallback may be used")
 
-        # --- Attempt 3: Claude API (last resort) ---
-        if not self.fallback_enabled:
-            self.logger.warning("API fallback disabled, returning best local attempt")
+        # --- Attempt 3: configured cloud provider (if enabled and permitted) ---
+        if not self._primary_text_fallback_allowed():
+            self.logger.warning("Configured cloud fallback unavailable or disallowed; returning best local attempt")
             return response if response else ""
 
         api_response = self._generate_api_chat(user_message, conversation_history,
@@ -951,32 +1246,51 @@ class LLMRouter:
         self.logger.error("All LLM attempts failed")
         return response if response else ""
 
-    def _set_active_stream_response(self, response):
-        with self._active_stream_lock:
-            self._active_stream_response = response
+    # ── Per-stream cancel handles ────────────────────────────────────────
+    def _stream_lock(self):
+        return self.__dict__.setdefault("_active_stream_lock", threading.Lock())
 
-    def _clear_active_stream_response(self, response):
-        with self._active_stream_lock:
-            if self._active_stream_response is response:
-                self._active_stream_response = None
+    def create_stream_handle(self) -> StreamCancelHandle:
+        """New cancel handle for ``stream(..., cancel_handle=h)`` and friends.
+        ``h.cancel()`` / ``cancel_active_stream(h)`` stops exactly that stream."""
+        return StreamCancelHandle()
 
-    def cancel_active_stream(self):
-        """Close the currently owned local SSE response, if one is active."""
-        self._stream_cancel_event.set()
-        with self._active_stream_lock:
-            response = self._active_stream_response
+    def _open_stream(self, cancel_handle: Optional[StreamCancelHandle]) -> StreamCancelHandle:
+        handle = cancel_handle if cancel_handle is not None else StreamCancelHandle()
+        with self._stream_lock():
+            self.__dict__.setdefault("_stream_handle_set", set()).add(handle)
+        return handle
+
+    def _close_stream(self, handle: StreamCancelHandle) -> None:
+        with self._stream_lock():
+            self.__dict__.setdefault("_stream_handle_set", set()).discard(handle)
+
+    def cancel_active_stream(self, handle: Optional[StreamCancelHandle] = None):
+        """Cancel LLM streaming.
+
+        With ``handle``: cancel only that stream (precise; other streams untouched).
+        Without (legacy barge-in/turn-cancel semantics): cancel ALL currently active
+        streams of this router. Callers that run concurrent streams (speculative
+        producer vs. real turn) should pass their own handle."""
+        if handle is not None:
+            handle.cancel()
+            return
+        with self._stream_lock():
+            handles = list(self.__dict__.get("_stream_handle_set", ()))
+            legacy = getattr(self, "_active_stream_response", None)
             self._active_stream_response = None
-        if response is not None:
-            try:
-                response.close()
-            except Exception:
-                pass
+        for h in handles:
+            h.cancel()
+        StreamCancelHandle._close(legacy)
 
     def stream(self, user_message: str, conversation_history: str = "",
                max_tokens: int = None, memory_context: str = None,
                conversation_messages: list = None,
                image_data: str = None,
-               guest_mode: bool = False) -> Iterator[str]:
+               guest_mode: bool = False,
+               role: str | None = None,
+               audio_data: str | None = None,
+               cancel_handle: Optional[StreamCancelHandle] = None) -> Iterator[str]:
         """Stream tokens from the local LLM as they're generated.
 
         Uses the llama.cpp /v1/chat/completions endpoint with SSE streaming.
@@ -994,9 +1308,13 @@ class LLMRouter:
             Individual tokens as strings
         """
         # Reset call chain if this is a direct stream() call (not via stream_with_tools)
-        self._stream_cancel_event.clear()
         if not self.last_call_chain:
             self.reset_call_chain()
+        try:
+            _rc = self.resolve_role(role)
+        except ValueError as exc:
+            self.logger.error("LLM role unavailable: %s", exc)
+            return
 
         if max_tokens is None:
             max_tokens = self._estimate_max_tokens(user_message)
@@ -1013,9 +1331,9 @@ class LLMRouter:
 
         # Ensure current message is included (with optional image)
         if not messages or messages[-1].get("content") != user_message:
-            messages.append(self._build_user_message(user_message, image_data))
+            messages.append(self._build_user_message(user_message, image_data, *((audio_data,) if audio_data else ())))
 
-        model_name = Path(self.local_model_path).stem if self.local_model_path else "unknown"
+        model_name = _rc["model_name"]
         start = time.time()
         first_token_time = None
         total_chars = 0
@@ -1023,21 +1341,24 @@ class LLMRouter:
         _stream_input_tokens = None
         _stream_output_tokens = None
         response = None
+        # Audio prompt processing takes longer than text-only prefill.
+        _stream_timeout = 90 if audio_data else 30
+        _marker_filter = ChannelMarkerFilter()
+        _handle = self._open_stream(cancel_handle)
         try:
             response = requests.post(
-                self.local_endpoint,
+                _rc["endpoint"],
                 json={
                     "messages": messages,
-                    "temperature": self.temperature,
-                    "top_p": self.top_p,
-                    "top_k": self.top_k,
+                    **self._sampling(_rc),
                     "max_tokens": max_tokens,
                     "stream": True,
+                    **self._provider_extras(_rc),
                 },
-                timeout=30,
+                timeout=_stream_timeout,
                 stream=True,
             )
-            self._set_active_stream_response(response)
+            _handle.set_response(response)
 
             # Handle context overflow — trim oldest context and retry once
             if response.status_code == 400:
@@ -1056,19 +1377,18 @@ class LLMRouter:
                     if len(messages) > 7:
                         messages = [messages[0]] + messages[-6:]
                     response = requests.post(
-                        self.local_endpoint,
+                        _rc["endpoint"],
                         json={
                             "messages": messages,
-                            "temperature": self.temperature,
-                            "top_p": self.top_p,
-                            "top_k": self.top_k,
+                            **self._sampling(_rc),
                             "max_tokens": max_tokens,
                             "stream": True,
+                            **self._provider_extras(_rc),
                         },
-                        timeout=30,
+                        timeout=_stream_timeout,
                         stream=True,
                     )
-                    self._set_active_stream_response(response)
+                    _handle.set_response(response)
                 else:
                     self.logger.error(f"LLM server rejected request: {err}")
                     stream_error = "context_overflow"
@@ -1092,7 +1412,7 @@ class LLMRouter:
                             _stream_input_tokens = timings.get("prompt_n")
                             _stream_output_tokens = timings.get("predicted_n")
                         delta = chunk["choices"][0].get("delta", {})
-                        token = delta.get("content", "")
+                        token = _marker_filter.feed(delta.get("content", "") or "")
                         if token:
                             if first_token_time is None:
                                 first_token_time = time.time()
@@ -1101,19 +1421,24 @@ class LLMRouter:
                     except (json.JSONDecodeError, KeyError, IndexError) as e:
                         self.logger.debug(f"Skipping malformed SSE chunk: {e}")
                         continue
+            _tail = _marker_filter.flush()
+            if _tail:
+                total_chars += len(_tail)
+                yield _tail
 
         except Exception as e:
             stream_error = str(e)
             self.logger.error(f"LLM streaming error: {e}")
         finally:
+            self._close_stream(_handle)
             if response is not None:
-                self._clear_active_stream_response(response)
+                _handle.clear_response(response)
                 try:
                     response.close()
                 except Exception:
                     pass
             self._record_call({
-                "provider": "qwen", "method": "stream",
+                "provider": _rc["provider"], "method": "stream",
                 "input_tokens": _stream_input_tokens,
                 "output_tokens": _stream_output_tokens,
                 "estimated_tokens": total_chars // 4 if total_chars and not _stream_output_tokens else None,
@@ -1133,7 +1458,11 @@ class LLMRouter:
                           tool_presence_penalty: float = None,
                           image_data: str = None,
                           force_web_search: bool = False,
+                          force_tool_call: str = None,
                           guest_mode: bool = False,
+                          role: str | None = None,
+                          audio_data: str | None = None,
+                          cancel_handle: Optional[StreamCancelHandle] = None,
                           ) -> Iterator[Union[str, ToolCallRequest]]:
         """Stream tokens from the local LLM with tool calling support.
 
@@ -1155,13 +1484,20 @@ class LLMRouter:
             str tokens for regular text, or a single ToolCallRequest.
         """
         # Reset call chain at the start of each pipeline run
-        self._stream_cancel_event.clear()
         self.reset_call_chain()
+        try:
+            _rc = self.resolve_role(role)
+        except ValueError as exc:
+            self.logger.error("LLM role unavailable: %s", exc)
+            return
 
-        if not self.tool_calling:
+        if not _rc["tool_calling"]:
             yield from self.stream(user_message, conversation_history,
                                    max_tokens, memory_context, conversation_messages,
-                                   guest_mode=guest_mode)
+                                   image_data=image_data,
+                                   guest_mode=guest_mode,
+                                   role=role, audio_data=audio_data,
+                                   cancel_handle=cancel_handle)
             return
 
         # Default to web search only (backward compatible)
@@ -1169,8 +1505,10 @@ class LLMRouter:
             tools = [WEB_SEARCH_TOOL]
 
         # Sampling parameters for tool selection phase
-        temp = tool_temperature if tool_temperature is not None else self.temperature
+        temp = tool_temperature if tool_temperature is not None else _rc["temperature"]
         pp = tool_presence_penalty  # None means omit from payload
+        if _rc["provider"] != "qwen":
+            pp = None  # presence-penalty tuning is Qwen-specific
 
         if max_tokens is None:
             max_tokens = self._estimate_max_tokens(user_message)
@@ -1181,7 +1519,7 @@ class LLMRouter:
         has_skill_tools = bool(tool_names - {"web_search"})
 
         now = datetime.now()
-        today = now.strftime("%B %d, %Y")
+        today = _german_date(now)
         current_time = now.strftime("%I:%M %p").lstrip("0")
 
         if has_skill_tools:
@@ -1193,7 +1531,7 @@ class LLMRouter:
                 f"\n\nToday's date is {today}. Current time: {current_time}."
                 "\nFor time or date questions, answer directly from the above — do NOT search.\n\n"
                 + rules_text
-                + ("" if guest_mode else f"\n\nREMINDER: You MUST address the user as '{get_honorific()}' in every response.")
+                + ("" if guest_mode else f"\n\nERINNERUNG: Du MUSST den Benutzer in jeder Antwort mit '{get_honorific()}' ansprechen.")
             )
         else:
             # --- Web-search-only prompt ---
@@ -1252,7 +1590,7 @@ class LLMRouter:
         # prior exchange into user_message for follow-up queries.
 
         if not messages or messages[-1].get("content") != user_message:
-            messages.append(self._build_user_message(user_message, image_data))
+            messages.append(self._build_user_message(user_message, image_data, *((audio_data,) if audio_data else ())))
 
         # 2-message constraint: enforce structurally, not by convention.
         # History in messages causes "pattern addiction" (JetBrains Koog).
@@ -1276,6 +1614,16 @@ class LLMRouter:
         # LLM tool selection and yield a ToolCallRequest directly.  The LLM
         # tends to answer ranking follow-ups from context rather than searching,
         # producing truncated or hallucinated lists.
+        if force_tool_call and force_tool_call in tool_names:
+            self.logger.info("force_tool_call: selecting existing tool %s", force_tool_call)
+            yield ToolCallRequest(
+                name=force_tool_call,
+                arguments={"action": "capture", "target": "monitor"},
+                call_id=f"forced_{force_tool_call}_0",
+                messages=messages,
+            )
+            return
+
         if force_web_search and "web_search" in tool_names:
             import re as _re
             # Strip <prior_context>...</prior_context> and "Now the user asks:"
@@ -1288,6 +1636,7 @@ class LLMRouter:
                 name="web_search",
                 arguments={"query": _clean},
                 call_id="forced_search_0",
+                messages=messages,
             )
             return
 
@@ -1306,13 +1655,12 @@ class LLMRouter:
         # Build the request payload
         payload = {
             "messages": messages,
-            "temperature": temp,
-            "top_p": self.top_p,
-            "top_k": self.top_k,
+            **self._sampling(_rc, temp),
             "max_tokens": max_tokens,
             "stream": True,
             "tools": tools,
             "tool_choice": tool_choice,
+            **self._provider_extras(_rc),
         }
         if pp is not None:
             payload["presence_penalty"] = pp
@@ -1322,7 +1670,7 @@ class LLMRouter:
         self.logger.debug("stream_with_tools: payload %d bytes, %d messages",
                           _payload_size, len(messages))
 
-        model_name = Path(self.local_model_path).stem if self.local_model_path else "unknown"
+        model_name = _rc["model_name"]
         start = time.time()
         first_token_time = None
         total_chars = 0
@@ -1330,14 +1678,17 @@ class LLMRouter:
         _stream_input_tokens = None
         _stream_output_tokens = None
         response = None
+        _tools_timeout = 90 if audio_data else 30
+        _marker_filter = ChannelMarkerFilter()
+        _handle = self._open_stream(cancel_handle)
         try:
             response = requests.post(
-                self.local_endpoint,
+                _rc["endpoint"],
                 json=payload,
-                timeout=30,
+                timeout=_tools_timeout,
                 stream=True,
             )
-            self._set_active_stream_response(response)
+            _handle.set_response(response)
 
             if response.status_code == 400:
                 try:
@@ -1355,12 +1706,12 @@ class LLMRouter:
                         self._tool_call_messages = messages
                     payload["messages"] = messages
                     response = requests.post(
-                        self.local_endpoint,
+                        _rc["endpoint"],
                         json=payload,
-                        timeout=30,
+                        timeout=_tools_timeout,
                         stream=True,
                     )
-                    self._set_active_stream_response(response)
+                    _handle.set_response(response)
                 else:
                     self.logger.error(f"LLM server rejected request: {err}")
                     stream_error = "context_overflow"
@@ -1412,7 +1763,7 @@ class LLMRouter:
                         continue
 
                     # Regular text token
-                    token = delta.get("content", "")
+                    token = _marker_filter.feed(delta.get("content", "") or "")
                     if token:
                         if first_token_time is None:
                             first_token_time = time.time()
@@ -1427,16 +1778,26 @@ class LLMRouter:
                             args = {"query": tool_call_args}
                         _log_tool_call(self.logger, self._privacy_gate,
                                        "Tool call", tool_call_name, args)
+                        _tail = _marker_filter.flush()
+                        if _tail:
+                            total_chars += len(_tail)
+                            yield _tail
                         yield ToolCallRequest(
                             name=tool_call_name,
                             arguments=args,
                             call_id=tool_call_id,
+                            messages=messages,
                         )
                         return
 
                 except (json.JSONDecodeError, KeyError, IndexError) as e:
                     self.logger.debug(f"Skipping malformed SSE chunk: {e}")
                     continue
+
+            _tail = _marker_filter.flush()
+            if _tail:
+                total_chars += len(_tail)
+                yield _tail
 
             # If we accumulated tool call fragments but no finish_reason
             if is_tool_call and tool_call_name:
@@ -1450,20 +1811,22 @@ class LLMRouter:
                     name=tool_call_name,
                     arguments=args,
                     call_id=tool_call_id,
+                    messages=messages,
                 )
 
         except Exception as e:
             stream_error = str(e)
             self.logger.error(f"LLM streaming (tool) error: {e}")
         finally:
+            self._close_stream(_handle)
             if response is not None:
-                self._clear_active_stream_response(response)
+                _handle.clear_response(response)
                 try:
                     response.close()
                 except Exception:
                     pass
             self._record_call({
-                "provider": "qwen", "method": "stream_with_tools",
+                "provider": _rc["provider"], "method": "stream_with_tools",
                 "input_tokens": _stream_input_tokens,
                 "output_tokens": _stream_output_tokens,
                 "estimated_tokens": total_chars // 4 if total_chars and not _stream_output_tokens else None,
@@ -1802,7 +2165,10 @@ class LLMRouter:
                                   image_data: str | None = None,
                                   synthesis_temperature: float | None = None,
                                   synthesis_category: str | None = None,
-                                  guest_mode: bool = False) -> Iterator[str]:
+                                  guest_mode: bool = False,
+                                  role: str | None = None,
+                                  audio_data: str | None = None,
+                                  cancel_handle: Optional[StreamCancelHandle] = None) -> Iterator[str]:
         """Continue LLM generation after a tool call completes.
 
         Sends the tool result back to the LLM and streams its synthesized answer.
@@ -1819,13 +2185,21 @@ class LLMRouter:
         Yields:
             Text tokens of the synthesized answer, or a ToolCallRequest
         """
-        self._stream_cancel_event.clear()
+        try:
+            _rc = self.resolve_role(role)
+        except ValueError as exc:
+            self.logger.error("LLM role unavailable: %s", exc)
+            return
         self.logger.debug(
             "continue_after_tool_call: tool=%s result_len=%d image=%s%s",
             tool_call.name, len(tool_result) if tool_result else 0,
             "yes" if image_data else "no",
             f" ({len(image_data)//1024}KB b64)" if image_data else "")
-        messages = list(getattr(self, '_tool_call_messages', []))
+        # Prefer the per-stream message list carried by the request; the router-global
+        # _tool_call_messages is only a fallback (concurrent streams overwrite it).
+        _base = getattr(tool_call, "messages", None)
+        messages = list(_base if _base is not None
+                        else getattr(self, '_tool_call_messages', []))
 
         # Add the assistant's tool call message
         messages.append({
@@ -1852,14 +2226,15 @@ class LLMRouter:
         # tool calls don't carry forward duplicate intermediate prompts.
         # The synthesis user-message is ephemeral — needed only for THIS
         # LLM call, not for subsequent chain steps.
-        self._tool_call_messages = list(messages)
+        _chain_messages = list(messages)
+        self._tool_call_messages = _chain_messages
 
         # Synthesis instruction — tell Qwen to give a direct answer.
         # Don't lead with the honorific since the ack phrase already used it.
         # Anti-hallucination is safe HERE (synthesis) — it only suppresses
         # tool calling when placed in the system prompt for stream_with_tools().
         now = datetime.now()
-        today = now.strftime("%B %d, %Y")
+        today = _german_date(now)
         current_time = now.strftime("%I:%M %p").lstrip("0")
         h = get_honorific()
         formal = get_formal_address()
@@ -1923,7 +2298,7 @@ class LLMRouter:
             self.logger.debug("continue_after_tool_call: domain_disclaimer injected for %s",
                               synthesis_category)
         synthesis_text = f"{synth_header}{domain_rules}\n{synth_footer}"
-        messages.append(self._build_user_message(synthesis_text, image_data))
+        messages.append(self._build_user_message(synthesis_text, image_data, *((audio_data,) if audio_data else ())))
         self.logger.debug("continue_after_tool_call: %d messages, synthesis_text_len=%d, category=%s",
                           len(messages), len(synthesis_text), synthesis_category)
 
@@ -1940,15 +2315,24 @@ class LLMRouter:
                                label="continue_after_tool_call",
                                synthesis_category=synthesis_category)
 
-        model_name = Path(self.local_model_path).stem if self.local_model_path else "unknown"
+        model_name = _rc["model_name"]
         start = time.time()
+        _marker_filter = ChannelMarkerFilter()
         first_token_time = None
         total_chars = 0
         stream_error = None
 
-        # Dual-model dispatch: try 4B for synthesis, fall back to 35B
-        _use_small = self.small_model_enabled and self.small_endpoint
-        _endpoint = self.small_endpoint if _use_small else self.local_endpoint
+        # Dual-model dispatch: try 4B for synthesis, fall back to the role model.
+        # The small tier is text-only: never route audio-bearing turns to it,
+        # and never use it for the expert role.
+        _has_audio = bool(audio_data) or any(
+            isinstance(m.get("content"), list)
+            and any(isinstance(p, dict) and p.get("type") == "input_audio" for p in m["content"])
+            for m in messages
+        )
+        _use_small = bool(self.small_model_enabled and self.small_endpoint
+                          and not _has_audio and _rc["role"] == "primary")
+        _endpoint = self.small_endpoint if _use_small else _rc["endpoint"]
         _model_label = "Qwen3.5-4B" if _use_small else model_name
 
         # Focused prompt for 4B: replace the bloated tool-calling system prompt
@@ -1965,15 +2349,14 @@ class LLMRouter:
                 _original_sys_len, len(messages[0]["content"]))
 
         _synth_temp = synthesis_temperature if synthesis_temperature is not None else (
-            self.small_temperature if _use_small else self.temperature
+            self.small_temperature if _use_small else _rc["temperature"]
         )
         payload = {
             "messages": messages,
-            "temperature": _synth_temp,
-            "top_p": self.top_p,
-            "top_k": self.top_k,
+            **self._sampling(_rc, _synth_temp),
             "max_tokens": max_tokens,
             "stream": True,
+            **self._provider_extras(_rc),
         }
         if tools:
             payload["tools"] = tools
@@ -1992,6 +2375,7 @@ class LLMRouter:
         _stream_output_tokens = None
         tc_id = None
         response = None
+        _handle = self._open_stream(cancel_handle)
 
         # Payload-aware timeout: scale with message content length.
         # Base 30s + 1s per 1000 estimated tokens, capped at 120s.
@@ -2001,7 +2385,7 @@ class LLMRouter:
         _timeout = min(120, 30 + (_est_tokens // 1000))
         # Multimodal requests (image_data) need longer timeout —
         # mmproj processes the image on CPU before generating tokens.
-        if image_data:
+        if image_data or _has_audio:
             _timeout = max(_timeout, 90)
         # 4B is faster — shorter timeout, but not too aggressive
         if _use_small:
@@ -2014,16 +2398,16 @@ class LLMRouter:
                 timeout=_timeout,
                 stream=True,
             )
-            self._set_active_stream_response(response)
+            _handle.set_response(response)
             # 4B fallback: if small model fails, retry on 35B transparently
             if _use_small and response.status_code != 200:
                 self.logger.warning(
                     "Small model HTTP %d for synthesis — falling back to 35B",
                     response.status_code)
-                _endpoint = self.local_endpoint
+                _endpoint = _rc["endpoint"]
                 _model_label = model_name
                 _use_small = False
-                _synth_temp = synthesis_temperature if synthesis_temperature is not None else self.temperature
+                _synth_temp = synthesis_temperature if synthesis_temperature is not None else _rc["temperature"]
                 payload["temperature"] = _synth_temp
                 _timeout = min(120, 30 + (_est_tokens // 1000))
                 if image_data:
@@ -2034,7 +2418,7 @@ class LLMRouter:
                     timeout=_timeout,
                     stream=True,
                 )
-                self._set_active_stream_response(response)
+                _handle.set_response(response)
             response.raise_for_status()
             self.logger.debug("continue_after_tool_call: HTTP %d (%s)", response.status_code, _model_label)
 
@@ -2078,11 +2462,16 @@ class LLMRouter:
                         self.logger.info(
                             f"Chained tool call: {tc_name}({args})")
                         # _tool_call_messages already saved before synthesis prompt
+                        _tail = _marker_filter.flush()
+                        if _tail:
+                            total_chars += len(_tail)
+                            yield _tail
                         yield ToolCallRequest(
-                            name=tc_name, arguments=args, call_id=tc_id)
+                            name=tc_name, arguments=args, call_id=tc_id,
+                            messages=_chain_messages)
                         return
 
-                    token = delta.get("content", "")
+                    token = _marker_filter.feed(delta.get("content", "") or "")
                     if token:
                         if first_token_time is None:
                             first_token_time = time.time()
@@ -2090,6 +2479,10 @@ class LLMRouter:
                         yield token
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
+            _tail = _marker_filter.flush()
+            if _tail:
+                total_chars += len(_tail)
+                yield _tail
 
             # Handle accumulated tool call without finish_reason
             if is_tool_call and tc_name:
@@ -2101,18 +2494,19 @@ class LLMRouter:
                     f"Chained tool call (no finish): {tc_name}({args})")
                 # _tool_call_messages already saved before synthesis prompt
                 yield ToolCallRequest(
-                    name=tc_name, arguments=args, call_id=tc_id)
+                    name=tc_name, arguments=args, call_id=tc_id,
+                    messages=_chain_messages)
 
         except (requests.ConnectionError, requests.Timeout) as e:
-            if self._stream_cancel_event.is_set():
+            if _handle.cancelled:
                 return
             if _use_small:
                 # 4B unreachable — fall back to 35B for this synthesis
                 self.logger.warning("Small model connection failed (%s) — falling back to 35B", e)
-                _endpoint = self.local_endpoint
+                _endpoint = _rc["endpoint"]
                 _model_label = model_name
                 _use_small = False
-                _synth_temp = synthesis_temperature if synthesis_temperature is not None else self.temperature
+                _synth_temp = synthesis_temperature if synthesis_temperature is not None else _rc["temperature"]
                 payload["temperature"] = _synth_temp
                 _timeout = min(120, 30 + (_est_tokens // 1000))
                 if image_data:
@@ -2121,8 +2515,9 @@ class LLMRouter:
                     response = requests.post(
                         _endpoint, json=payload, timeout=_timeout, stream=True,
                     )
-                    self._set_active_stream_response(response)
+                    _handle.set_response(response)
                     response.raise_for_status()
+                    _fb_filter = ChannelMarkerFilter()
                     for line in response.iter_lines():
                         if not line:
                             continue
@@ -2134,7 +2529,8 @@ class LLMRouter:
                             break
                         try:
                             chunk = json.loads(data)
-                            token = chunk["choices"][0].get("delta", {}).get("content", "")
+                            token = _fb_filter.feed(
+                                chunk["choices"][0].get("delta", {}).get("content", "") or "")
                             if token:
                                 if first_token_time is None:
                                     first_token_time = time.time()
@@ -2142,6 +2538,10 @@ class LLMRouter:
                                 yield token
                         except (json.JSONDecodeError, KeyError, IndexError):
                             continue
+                    _fb_tail = _fb_filter.flush()
+                    if _fb_tail:
+                        total_chars += len(_fb_tail)
+                        yield _fb_tail
                 except Exception as e2:
                     stream_error = str(e2)
                     self.logger.error(f"35B fallback also failed: {e2}")
@@ -2149,13 +2549,14 @@ class LLMRouter:
                 stream_error = str(e)
                 self.logger.error(f"LLM continue_after_tool_call error: {e}")
         except Exception as e:
-            if self._stream_cancel_event.is_set():
+            if _handle.cancelled:
                 return
             stream_error = str(e)
             self.logger.error(f"LLM continue_after_tool_call error: {e}")
         finally:
+            self._close_stream(_handle)
             if response is not None:
-                self._clear_active_stream_response(response)
+                _handle.clear_response(response)
                 try:
                     response.close()
                 except Exception:
@@ -2167,7 +2568,7 @@ class LLMRouter:
                 total_chars, elapsed,
                 f", TTFT={ttft:.0f}ms" if ttft else ", TTFT=none (zero tokens)")
             self._record_call({
-                "provider": "qwen-small" if _use_small else "qwen",
+                "provider": f"{_rc['provider']}-small" if _use_small else _rc["provider"],
                 "method": "continue_after_tool_call",
                 "input_tokens": _stream_input_tokens,
                 "output_tokens": _stream_output_tokens,

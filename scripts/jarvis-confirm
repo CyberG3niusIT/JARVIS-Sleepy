@@ -80,7 +80,7 @@ def main():
     print("")
 
     # Password verified locally — send pre-verified confirmation to web service
-    url = f"http://127.0.0.1:8088/api/governance/proposals/{proposal_id}/confirm"
+    url = f"http://127.0.0.1:8091/api/governance/proposals/{proposal_id}/confirm"
     payload = json.dumps({
         "confirmation_code": confirmation_code,
         "password_verified": True,

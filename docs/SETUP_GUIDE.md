@@ -58,9 +58,8 @@ Add your keys:
 # Porcupine Wake Word (required for voice mode)
 PORCUPINE_ACCESS_KEY=<get from https://picovoice.ai/>
 
-# Anthropic Claude API (optional — quality fallback only)
-# Local Qwen3.5-35B-A3B handles most queries; Claude is last resort
-ANTHROPIC_API_KEY=<get from https://console.anthropic.com/>
+# Optional cloud fallback (disabled until explicitly configured in config.yaml)
+OPENROUTER_API_KEY=<get from https://openrouter.ai/keys>
 
 # OpenWeather API (optional — weather skill)
 OPENWEATHER_API_KEY=<get from https://openweathermap.org/api>
@@ -281,7 +280,7 @@ python3 jarvis_console.py
 - **STT (CPU):** 0.3-0.5s
 - **LLM tool calling (local Qwen3.5):** ~2.5s (1s tool decision + 1.5s response)
 - **LLM direct (local Qwen3.5):** 1-4s depending on response length
-- **LLM (Claude API fallback):** 1-3s
+- **LLM (optional configured cloud fallback):** depends on the selected provider and model
 - **TTS (Kokoro):** 0.3-0.8s (TTSCache: 281 pre-synthesized phrases, 11ms load, persistent disk cache for instant startup)
 
 ### System Resources
@@ -314,10 +313,10 @@ python3 jarvis_console.py
 - **Free Tier:** Yes (limited)
 - **Required:** Yes (voice mode only — console/web don't need it)
 
-### Anthropic Claude
-- **Get:** https://console.anthropic.com/
-- **Free Tier:** $5 credit for new accounts
-- **Required:** No — quality fallback only. Local Qwen3.5-35B-A3B handles most queries
+### Cloud LLM fallback
+- **Preferred provider:** OpenRouter; set `llm.api.enabled`, provider, model, endpoint, and credential name in `config.yaml`.
+- Anthropic remains optional and is used only when `llm.api.provider: anthropic` is explicitly configured; only for that provider, install `pip install -r requirements-anthropic.txt`. The standard `requirements.txt` does not install the Anthropic SDK.
+- **Required:** No — cloud fallback is optional; local inference remains the primary path.
 
 ### OpenWeather
 - **Get:** https://openweathermap.org/api

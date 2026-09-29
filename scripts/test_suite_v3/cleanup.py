@@ -258,7 +258,7 @@ def snapshot_db_state() -> StateSnapshot:
     return snap
 
 
-async def snapshot_state(base_url: str = "http://localhost:8088",
+async def snapshot_state(base_url: str = "http://localhost:8091",
                          token: str = "") -> StateSnapshot:
     """Capture current memory facts, reminders, share/ files, and DB baselines."""
     headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -310,7 +310,7 @@ def detect_artifacts(info_messages: list[str], response_text: str) -> list[Artif
     return artifacts
 
 
-async def cleanup_memory_facts(new_fact_ids: set[int], base_url: str = "http://localhost:8088",
+async def cleanup_memory_facts(new_fact_ids: set[int], base_url: str = "http://localhost:8091",
                                 token: str = "") -> list[str]:
     """Delete memory facts created during testing."""
     actions = []
@@ -571,7 +571,7 @@ def deep_cleanup(pre_snapshot: StateSnapshot) -> dict[str, int]:
 # ── Run-level safety net ─────────────────────────────────────────────────
 
 async def verify_clean_state(pre_snapshot: StateSnapshot,
-                              base_url: str = "http://localhost:8088",
+                              base_url: str = "http://localhost:8091",
                               token: str = "",
                               auto_clean: bool = False) -> CleanupReport:
     """Compare current state to pre-run snapshot. Report and optionally clean leaks.

@@ -41,15 +41,19 @@ from core.privacy_gate import get_privacy_gate, Capability
 _instance: Optional["MemoryManager"] = None
 
 
-def get_memory_manager(config=None, conversation=None, embedding_model=None) -> Optional["MemoryManager"]:
+def get_memory_manager(config=None, conversation=None, embedding_model=None,
+                       read_only=False) -> Optional["MemoryManager"]:
     """Get or create the singleton MemoryManager.
 
     Call with all args on first invocation (from jarvis_continuous.py).
     Call with no args from skills to retrieve the existing instance.
+
+    ``read_only=True`` (jarvis_web.py --desktop-mode) creates a manager that only reads:
+    every write path is rejected and logged (see MemoryManager._reject_write).
     """
     global _instance
     if _instance is None and config is not None:
-        _instance = MemoryManager(config, conversation, embedding_model)
+        _instance = MemoryManager(config, conversation, embedding_model, read_only=read_only)
     return _instance
 
 
@@ -211,19 +215,26 @@ class MemoryManager:
         window = prefix[-cls._NEGATION_WINDOW:]
         return bool(cls._NEGATION_WORDS & set(window))
 
-    def __init__(self, config, conversation, embedding_model=None):
+    def __init__(self, config, conversation, embedding_model=None, read_only=False):
         self.config = config
         self.conversation = conversation
         self.embedding_model = embedding_model  # nomic-embed-text-v1.5, shared from skill_manager
 
         self.logger = get_logger(__name__, config)
 
+        # Read-only mode: a second process (jarvis_web.py --desktop-mode) may read the stores that
+        # the voice daemon owns, but it must never write them. There is no cross-process
+        # single-writer contract for the FAISS index yet, so a stale copy would overwrite the owner's.
+        self.read_only = bool(read_only)
+        self.rejected_writes: dict[str, int] = {}
+
         # Paths
         self.db_path = Path(config.get("conversational_memory.db_path",
             "/home/alex/jarvis-data/data/memory.db"))
         self.faiss_index_path = Path(config.get("conversational_memory.faiss_index_path",
             "/home/alex/jarvis-data/data/memory_faiss"))
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Batch extraction config (Phase 4)
         self.batch_interval = config.get("conversational_memory.batch_extraction_interval", 25)
@@ -277,7 +288,10 @@ class MemoryManager:
 
         self._init_db()
         self._init_faiss()
-        self.cleanup_old_interactions()
+        if not self.read_only:
+            self.cleanup_old_interactions()
+        else:
+            self.logger.warning("MemoryManager READ-ONLY: Schreibzugriffe auf Fakten, Interaktionen und FAISS-Index werden abgelehnt.")
         self.logger.info(
             f"MemoryManager initialized (Phase 7: facts + FAISS + recall + batch + proactive + forget/transparency + per-turn "
             f"[{self.faiss_index.ntotal if self.faiss_index else 0} vectors, "
@@ -290,8 +304,25 @@ class MemoryManager:
     # Database
     # ------------------------------------------------------------------
 
+    READ_ONLY_MESSAGE = "Das Gedächtnis ist in diesem Modus schreibgeschützt; es wurde nichts geändert."
+
+    def _reject_write(self, operation: str) -> bool:
+        """True (and a logged rejection) when this manager is read-only.
+
+        Every write path calls this first. A rejected write is never silent: it is logged and
+        counted in ``rejected_writes`` so callers and tests can see what was refused.
+        """
+        if not self.read_only:
+            return False
+        self.rejected_writes[operation] = self.rejected_writes.get(operation, 0) + 1
+        self.logger.warning("Memory read-only (Desktop-Modus): Schreibzugriff '%s' abgelehnt.", operation)
+        return True
+
     def _init_db(self):
         """Create the facts table and indexes if they don't exist."""
+        if self.read_only:
+            # No schema creation or migration from a read-only process: the owner does that.
+            return
         with self._db_lock:
             conn = sqlite3.connect(str(self.db_path))
             try:
@@ -451,7 +482,8 @@ class MemoryManager:
             return
 
         embed_dim = self._get_embedding_dim()
-        self.faiss_index_path.mkdir(parents=True, exist_ok=True)
+        if not self.read_only:
+            self.faiss_index_path.mkdir(parents=True, exist_ok=True)
         index_file = self.faiss_index_path / "default.index"
         meta_file = self.faiss_index_path / "default_meta.jsonl"
 
@@ -461,6 +493,15 @@ class MemoryManager:
 
             # Detect embedding model dimension change (e.g. MiniLM 384 → nomic 768)
             if self.faiss_index.d != embed_dim:
+                if self.read_only:
+                    # Never rebuild or overwrite the owner's index from a read-only process.
+                    self.logger.warning(
+                        f"FAISS dimension mismatch: index={self.faiss_index.d}, model={embed_dim}. "
+                        "Read-only: Index bleibt unangetastet und wird nicht für die Suche genutzt."
+                    )
+                    self.faiss_index = None
+                    self.faiss_metadata = []
+                    return
                 self.logger.warning(
                     f"⚠️ FAISS dimension mismatch: index={self.faiss_index.d}, "
                     f"model={embed_dim}. Discarding old index — backfill will rebuild."
@@ -492,15 +533,17 @@ class MemoryManager:
                         vectors = faiss.rev_swig_ptr(old_index.get_xb(), n_vectors * embed_dim)
                         vectors = np.array(vectors, dtype=np.float32).reshape(n_vectors, embed_dim)
                         self.faiss_index.add(vectors[:n_meta])
-                # Persist the corrected state
-                self._save_faiss_index()
+                # Persist the corrected state (a read-only process only corrects its in-memory copy)
+                if not self.read_only:
+                    self._save_faiss_index()
 
             self.logger.info(
                 f"Loaded FAISS index: {self.faiss_index.ntotal} vectors, "
                 f"{len(self.faiss_metadata)} metadata entries"
             )
-            # Clean up stale temp files from interrupted saves
-            for tmp_name in ("default.index.tmp", "default_meta.jsonl.tmp"):
+            # Clean up stale temp files from interrupted saves. Never in read-only mode: a temp file
+            # may belong to a save the owning process is performing right now.
+            for tmp_name in () if self.read_only else ("default.index.tmp", "default_meta.jsonl.tmp"):
                 tmp_file = self.faiss_index_path / tmp_name
                 if tmp_file.exists():
                     tmp_file.unlink()
@@ -531,6 +574,8 @@ class MemoryManager:
         place.  os.replace() is atomic on Linux, so a crash mid-save leaves
         the previous good copy intact instead of a half-written file.
         """
+        if self._reject_write("faiss_save"):
+            return
         if self.faiss_index is None:
             return
         try:
@@ -564,6 +609,8 @@ class MemoryManager:
 
     def index_message(self, message: dict):
         """Embed and add a single message to FAISS index. ~1-2ms."""
+        if self._reject_write("index_message"):
+            return
         if not self._privacy_gate.allow(Capability.EMBEDDING_GENERATE):
             return
         if self.faiss_index is None or not self.embedding_model:
@@ -592,6 +639,8 @@ class MemoryManager:
 
     def backfill_history(self):
         """One-time: embed all existing chat_history.jsonl messages into FAISS."""
+        if self._reject_write("backfill_history"):
+            return 0
         if self.faiss_index is None or not self.embedding_model:
             self.logger.error("Cannot backfill: FAISS or embedding model not available")
             return 0
@@ -991,6 +1040,8 @@ class MemoryManager:
 
     def handle_forget(self, query: str, user_id: str = "primary_user") -> str:
         """Find matching facts and prepare deletion preview with confirmation."""
+        if self._reject_write("handle_forget"):
+            return self.READ_ONLY_MESSAGE
         from core.honorific import get_honorific
 
         topic = self._extract_forget_topic(query)
@@ -1047,6 +1098,8 @@ class MemoryManager:
 
     def confirm_forget(self) -> str:
         """Execute pending forget after user confirmation."""
+        if self._reject_write("confirm_forget"):
+            return self.READ_ONLY_MESSAGE
         from core.honorific import get_honorific
         h = get_honorific()
 
@@ -1338,6 +1391,8 @@ class MemoryManager:
         Designed to be <5ms per message. Only processes user messages.
         Returns list of stored fact dicts.
         """
+        if self._reject_write("extract_facts_realtime"):
+            return []
         if message.get("role") != "user":
             return []
 
@@ -1446,6 +1501,8 @@ class MemoryManager:
 
     def on_message(self, message: dict):
         """Called on every message. Handles FAISS indexing + fact extraction + batch trigger + per-turn extraction."""
+        if self._reject_write("on_message"):
+            return
         # PRIV-003/PRIV-001: while privacy is active, this message's
         # content must never be indexed, extracted, or queued for
         # background extraction. No candidate/short-term/long-term write
@@ -1722,6 +1779,8 @@ class MemoryManager:
         rows, or both reinforce from the same stale snapshot and lose one
         of two observations (TOCTOU race).
         """
+        if self._reject_write("store_fact"):
+            return None
         if not self._privacy_gate.allow(Capability.MEMORY_WRITE):
             # PRIV-003: no candidate/confirmed write of any kind while
             # privacy is active — including from a background extraction
@@ -2006,6 +2065,8 @@ class MemoryManager:
 
     def update_fact(self, fact_id: str, **kwargs) -> bool:
         """Update specific fields on a fact."""
+        if self._reject_write("update_fact"):
+            return False
         if not kwargs:
             return False
 
@@ -2032,6 +2093,8 @@ class MemoryManager:
 
     def delete_fact(self, fact_id: str, soft: bool = True) -> bool:
         """Delete a fact. Soft delete by default (sets deleted=1)."""
+        if self._reject_write("delete_fact"):
+            return False
         with self._db_lock:
             conn = sqlite3.connect(str(self.db_path))
             try:
@@ -2227,6 +2290,8 @@ class MemoryManager:
 
         Types: 'research', 'tool_call', 'conversation', 'document', 'skill'
         """
+        if self._reject_write("persist_interaction"):
+            return None
         self.logger.debug("persist_interaction: type=%s query_len=%d answer_len=%d user=%s",
                           interaction_type, len(query) if query else 0,
                           len(answer) if answer else 0, user_id)
@@ -2285,6 +2350,8 @@ class MemoryManager:
             duration_seconds: Window duration in seconds (for metadata)
             user_id: User who owned the session
         """
+        if self._reject_write("promote_session_artifacts"):
+            return
         if not artifacts:
             return
 
@@ -2437,6 +2504,8 @@ class MemoryManager:
 
     def cleanup_old_interactions(self, retention_days: int = 30):
         """Remove interactions older than retention period."""
+        if self._reject_write("cleanup_old_interactions"):
+            return
         cutoff = time.time() - (retention_days * 86400)
         with self._db_lock:
             conn = self._get_conn()
@@ -2483,6 +2552,8 @@ class MemoryManager:
         directly for audit — decay must be "nachvollziehbar/testbar",
         per the task, not a silent hard delete.
         """
+        if self._reject_write("run_decay_pass"):
+            return {"archived_count": 0, "archived_fact_ids": []}
         if now is None:
             now = time.time()
         cutoff = now - (self.decay_days * 86400)
@@ -2556,6 +2627,8 @@ class MemoryManager:
         and were explicitly out of scope ("kein autonomer permanenter
         LLM-Selbstreflexionsloop") — not attempted speculatively.
         """
+        if self._reject_write("run_consolidation"):
+            return {"skipped": True, "reason": "read_only"}
         if self._consolidation_runs >= self.max_consolidation_runs:
             self.logger.warning(
                 "Autonomy budget: max_consolidation_runs (%d) reached "
@@ -2588,6 +2661,8 @@ class MemoryManager:
         row is still permanently excluded from _find_similar_fact()'s
         matching pool regardless of its evidence_count.
         """
+        if self._reject_write("merge_duplicate_excluded_candidates"):
+            return {"merged_count": 0}
         with self._db_lock:
             conn = self._get_conn()
             try:

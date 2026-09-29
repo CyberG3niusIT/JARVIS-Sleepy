@@ -1,31 +1,34 @@
-## What does this change?
+## Was aendert sich?
 
-<!-- Describe what this PR does -->
+<!-- Kurzbeschreibung -->
 
-## Why?
+## Warum?
 
-<!-- What problem does it solve? -->
+<!-- Welches Problem wird geloest? -->
 
-## Component(s) affected
+## Betroffene Komponente(n)
 
-<!-- STT, TTS, LLM, routing, tools, vision, memory, frontend, tests -->
+<!-- STT, TTS, LLM, Routing, Tools, Vision, Memory, Runtime, Tests -->
 
-## Testing
+## Tests
 
-- [ ] Unit tests pass (`python -m pytest tests/ -v`)
-- [ ] Conversation tests pass (`python -m pytest tests/conversations/ -v`)
-- [ ] Tested with live voice interaction
-- [ ] VRAM usage checked (no regression)
+- [ ] Gezielte Unit-Tests gelaufen (Befehl und Ergebnis unten eintragen), z. B. `scripts\wsl-pytest.ps1 tests/unit/<datei>.py`
+- [ ] Nicht getestete Teile benannt (z. B. Hardware, Live-Voice)
+- [ ] Live-Voice-Test durchgefuehrt (falls Voice-Pfad betroffen)
 
-## Privacy check
+```
+<Befehl + Ausgabe>
+```
 
-- [ ] No new external network calls (or justified and user-initiated)
-- [ ] No telemetry or data collection added
-- [ ] Voice data stays local
+## Privacy
 
-## Checklist
+- [ ] Keine neuen externen Netzwerkaufrufe (oder begruendet und nutzerinitiiert)
+- [ ] Privacy-Gate nicht umgangen; keine Telemetrie
+- [ ] Audio/Transkripte bleiben lokal
 
-- [ ] Code follows existing style
-- [ ] Docstrings for new public functions
-- [ ] No unnecessary new dependencies
-- [ ] VRAM impact documented if applicable
+## Checkliste
+
+- [ ] Keine Aenderung an `.env`, `config.yaml`, `*.service` ohne Absprache
+- [ ] Neue Config-Schluessel in `config.yaml` und `Dokumentation/10_CONFIGURATION.md` eingetragen
+- [ ] Betroffene Doku in `Dokumentation/` aktualisiert
+- [ ] Keine unnoetigen neuen Abhaengigkeiten

@@ -46,7 +46,7 @@
     const valFallback = document.getElementById('val-fallback');
     const valLatency = document.getElementById('val-latency');
     const valTtft = document.getElementById('val-ttft');
-    const valCost = document.getElementById('val-cost');
+    const valCloudCalls = document.getElementById('val-cloud-calls');
 
     // Explorer
     const interactionsBody = document.getElementById('interactions-body');
@@ -134,9 +134,10 @@
 
             valLatency.textContent = formatMs(d.avg_latency_ms);
             valTtft.textContent = formatMs(d.avg_ttft_ms);
-            valCost.textContent = d.claude_cost_estimate > 0
-                ? `$${d.claude_cost_estimate.toFixed(4)}`
-                : '$0';
+            const providers = d.provider_breakdown || {};
+            valCloudCalls.textContent = formatNum(
+                (providers.openrouter || 0) + (providers.anthropic || 0) + (providers.claude || 0)
+            );
         } catch (e) {
             console.error('fetchSummary:', e);
         }
@@ -154,9 +155,9 @@
             const promptTok = data.map(d => d.prompt_tok || 0);
             const completionTok = data.map(d => d.completion_tok || 0);
             const estimatedTok = data.map(d => d.estimated_tok || 0);
-            const qwenCounts = data.map(d => d.qwen_count || 0);
-            const claudeCounts = data.map(d => d.claude_count || 0);
-            const skillCounts = data.map((d, i) => Math.max(0, (d.interactions || 0) - (d.qwen_count || 0) - (d.claude_count || 0)));
+            const localCounts = data.map(d => d.local_model_count ?? d.qwen_count ?? 0);
+            const cloudCounts = data.map(d => d.cloud_count ?? d.claude_count ?? 0);
+            const skillCounts = data.map((d, i) => Math.max(0, (d.interactions || 0) - localCounts[i] - cloudCounts[i]));
 
             // Interactions chart
             if (chartInteractions) chartInteractions.destroy();
@@ -174,8 +175,8 @@
                             tension: 0.3,
                         },
                         {
-                            label: 'Qwen (LLM)',
-                            data: qwenCounts,
+                            label: 'Local Models',
+                            data: localCounts,
                             borderColor: '#34d399',
                             backgroundColor: 'rgba(52, 211, 153, 0.1)',
                             fill: true,
@@ -190,8 +191,8 @@
                             tension: 0.3,
                         },
                         {
-                            label: 'Claude (API)',
-                            data: claudeCounts,
+                            label: 'Cloud API',
+                            data: cloudCounts,
                             borderColor: '#fbbf24',
                             backgroundColor: 'rgba(251, 191, 36, 0.1)',
                             fill: true,
@@ -429,7 +430,8 @@
                 ? `${row.prompt_tokens || 0}/${row.completion_tokens || 0}`
                 : row.estimated_tokens ? `~${row.estimated_tokens}` : '--';
 
-            const providerClass = row.provider === 'claude' ? 'provider-claude'
+            const providerClass = ['openrouter', 'anthropic', 'claude'].includes(row.provider)
+                ? 'provider-cloud'
                 : row.provider === 'qwen' ? 'provider-qwen'
                 : row.provider === 'skill' ? 'provider-skill' : '';
             const errorClass = row.error ? 'has-error' : '';

@@ -1448,7 +1448,7 @@ def run_console(config, mode, user_id="user"):
                     image_data=result.image_data,
                 )
                 if not response:
-                    response = "I'm sorry, I'm having trouble processing that right now."
+                    response = "Entschuldigung, ich kann das gerade nicht verarbeiten."
                 else:
                     response = llm.strip_filler(response)
 

@@ -1,5 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+# The lifecycle now writes a marker below LOCALAPPDATA; keep the test off the real per-user state.
+$env:LOCALAPPDATA = Join-Path ([System.IO.Path]::GetTempPath()) ("jarvis-runtime-test-" + [Guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path $env:LOCALAPPDATA
 $modulePath = Join-Path $repoRoot 'JARVIS.Runtime.psm1'
 Import-Module $modulePath -Force
 $module = Get-Module JARVIS.Runtime

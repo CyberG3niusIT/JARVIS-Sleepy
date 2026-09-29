@@ -90,6 +90,8 @@ class Capability(enum.Enum):
     REMOTE_TOOL = "remote_tool"
     CONTENT_LOGGING = "content_logging"
     PROACTIVE_OBSERVATION = "proactive_observation"
+    MAIL_READ = "mail_read"
+    MAIL_WRITE = "mail_write"
 
 
 # Everything that touches, derives from, or exfiltrates user content is
@@ -111,6 +113,8 @@ _PRIVACY_BLOCKED = frozenset({
     Capability.CLOUD_LLM,
     Capability.CONTENT_LOGGING,
     Capability.PROACTIVE_OBSERVATION,
+    Capability.MAIL_READ,
+    Capability.MAIL_WRITE,
 })
 
 # PRIVACY_LOCK inherits every PRIVACY restriction and additionally closes

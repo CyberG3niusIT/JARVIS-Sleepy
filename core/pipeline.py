@@ -19,6 +19,7 @@ import threading
 import time
 import logging
 from difflib import SequenceMatcher
+from core.wake_word_utils import find_wake_word, strip_wake_word
 from typing import Optional
 
 from core.events import Event, EventType, PipelineState
@@ -85,7 +86,7 @@ def _detect_show_me(text):
         if lower.startswith(prefix):
             return 'auto'
     return None
-from core.llm_router import ToolCallRequest
+from core.llm_router import ToolCallRequest, _cloud_credential_matches_provider
 from core.web_research import WebResearcher, format_search_results
 from core.self_awareness import SelfAwareness
 from core.task_planner import TaskPlanner
@@ -113,7 +114,26 @@ class STTWorker(threading.Thread):
         self.speaker_id = speaker_id
         self.listener = listener
         self.on_barge_in = None
+        # Direct audio (Gemma hears the audio): Coordinator.start_direct_audio_turn
+        # starts the model request BEFORE/parallel to transcription; STT below is
+        # then only wake-compat / diagnostics / stop-fast-path.
+        self.on_audio_turn = None          # (audio, generation) -> AudioTurn | None
+        self.on_audio_turn_reject = None   # (turn_id, reason) -> None
+        # Held ungated (conversation window) turns: (audio_turn, text|None, reason) -> None.
+        # Called from THIS thread: the coordinator loop is busy consuming the turn.
+        self.on_audio_turn_verdict = None
+        # Privacy: a turn whose audio/transcript raced a privacy transition is
+        # cancelled regardless of its gate: (turn_id, reason) -> None
+        self.on_audio_turn_cancel = None
+        # Stop fast path outside TTS: (text, audio_turn) -> True when the transcript was a
+        # stop-only command and was fully consumed (no LLM turn may follow).
+        self.on_stop_only = None
         self.logger = get_logger("pipeline.stt", config)
+        try:
+            from core.privacy_gate import get_privacy_gate
+            self._privacy_gate = get_privacy_gate(config)
+        except Exception:
+            self._privacy_gate = None
         self._cached_speaker_id = None
         self._cached_speaker_confidence = 0.0
         self._last_strong_match_time = 0.0
@@ -124,6 +144,50 @@ class STTWorker(threading.Thread):
     SESSION_MARGIN = 0.03
     MAX_BORDERLINE = 2
 
+    def _reject_audio_turn(self, audio_turn, reason: str):
+        """A gated speculative turn without wake evidence must not answer."""
+        if (audio_turn is not None and audio_turn.gate_required
+                and self.on_audio_turn_reject is not None):
+            try:
+                self.on_audio_turn_reject(audio_turn.turn_id, reason)
+            except Exception:
+                self.logger.debug("audio turn reject failed", exc_info=True)
+
+    def _privacy_allows_stt(self) -> bool:
+        """STT and mic ingest must both be allowed (privacy gate)."""
+        gate = self._privacy_gate
+        if gate is None:
+            return True
+        try:
+            from core.privacy_gate import Capability
+            return bool(gate.allow(Capability.STT) and gate.allow(Capability.MIC_INGEST))
+        except Exception:
+            return False
+
+    def _cancel_audio_turn(self, audio_turn, reason: str):
+        """Cancel a direct-audio turn regardless of gate (privacy/stale)."""
+        if audio_turn is None:
+            return
+        cb = self.on_audio_turn_cancel
+        if cb is not None:
+            try:
+                cb(audio_turn.turn_id, reason)
+                return
+            except Exception:
+                self.logger.debug("audio turn cancel failed", exc_info=True)
+        self._reject_audio_turn(audio_turn, reason)
+
+    def _audio_turn_verdict(self, audio_turn, text, reason: str = ""):
+        """Give a held ungated turn its STT verdict (text=None: no transcript)."""
+        if (audio_turn is None or audio_turn.gate_required
+                or not getattr(audio_turn, "hold_for_verdict", False)
+                or self.on_audio_turn_verdict is None):
+            return
+        try:
+            self.on_audio_turn_verdict(audio_turn, text, reason)
+        except Exception:
+            self.logger.debug("audio turn verdict failed", exc_info=True)
+
     def run(self):
         self.logger.info("STT worker started")
         while True:
@@ -131,6 +195,18 @@ class STTWorker(threading.Thread):
             if item is None:  # shutdown sentinel
                 self.logger.info("STT worker shutting down")
                 break
+            audio_turn = None
+            deferred_command = None
+
+            def _dispatch_deferred():
+                nonlocal deferred_command
+                if deferred_command is not None:
+                    self.event_queue.put(Event(
+                        EventType.COMMAND_DETECTED,
+                        data={"direct_audio_turn": deferred_command.turn_id},
+                        source="stt_worker",
+                    ))
+                    deferred_command = None
             try:
                 if isinstance(item, dict) and "audio" in item:
                     audio = item["audio"]
@@ -146,6 +222,40 @@ class STTWorker(threading.Thread):
                     continue
                 sample_rate = 16000  # audio is always resampled to 16 kHz
                 now = time.monotonic()
+
+                # Privacy: audio that was queued before a privacy transition must
+                # neither reach the model nor STT.
+                if not self._privacy_allows_stt():
+                    self.logger.info("Audio dropped: privacy gate blocks STT/mic")
+                    continue
+                privacy_epoch = None
+                if self._privacy_gate is not None:
+                    try:
+                        privacy_epoch = self._privacy_gate.epoch()
+                    except Exception:
+                        privacy_epoch = None
+
+                # Direct audio: start the model request immediately; STT below
+                # runs in parallel and never delays or replaces the model input.
+                if not during_tts and self.on_audio_turn is not None:
+                    try:
+                        audio_turn = self.on_audio_turn(audio, generation)
+                    except Exception:
+                        self.logger.error("Direct audio start failed", exc_info=True)
+                        audio_turn = None
+                    if audio_turn is not None and not audio_turn.gate_required:
+                        # Inside an active conversation window there is no wake gate.
+                        if (isinstance(item, dict) and item.get("fast_stop_candidate")
+                                and self.on_stop_only is not None):
+                            # Short segment: might be "stopp". Hold the command until the
+                            # (short) STT result says otherwise; it is never lost.
+                            deferred_command = audio_turn
+                        else:
+                            self.event_queue.put(Event(
+                                EventType.COMMAND_DETECTED,
+                                data={"direct_audio_turn": audio_turn.turn_id},
+                                source="stt_worker",
+                            ))
 
                 if during_tts:
                     # Global stop must not wait for, or depend on, speaker ID.
@@ -173,6 +283,12 @@ class STTWorker(threading.Thread):
                         self._cached_speaker_id = None
                         self._cached_speaker_confidence = 0.0
                         self._borderline_count = 0
+                    if audio_turn is not None:
+                        # Handed to the coordinator with the turn: the consumer applies it
+                        # BEFORE building guest/history context (never the previous speaker).
+                        audio_turn.speaker_id = speaker_user_id
+                        audio_turn.speaker_confidence = speaker_confidence
+                        audio_turn.speaker_resolved = True
                     text = self.stt.transcribe(
                         audio, sample_rate, speaker_user_id=speaker_user_id
                     )
@@ -180,11 +296,32 @@ class STTWorker(threading.Thread):
                     text = self.stt.transcribe(audio, sample_rate)
                     speaker_user_id, speaker_confidence = None, 0.0
 
+                if (not self._privacy_allows_stt()
+                        or (privacy_epoch is not None and self._privacy_gate is not None
+                            and not self._privacy_gate.is_current_epoch(privacy_epoch))):
+                    self.logger.info("Transcript dropped: privacy transition during STT")
+                    self._cancel_audio_turn(audio_turn, "privacy")
+                    deferred_command = None
+                    continue
+
                 if (generation is not None and self.listener is not None
                         and generation != self.listener._capture_generation):
+                    self._cancel_audio_turn(audio_turn, "stale")
+                    self._audio_turn_verdict(audio_turn, None, "stale")
+                    _dispatch_deferred()
                     continue
 
                 if text and text.strip():
+                    if not during_tts and self.on_stop_only is not None:
+                        try:
+                            consumed = bool(self.on_stop_only(text.strip(), audio_turn))
+                        except Exception:
+                            self.logger.error("Stop fast path failed", exc_info=True)
+                            consumed = False
+                        if consumed:
+                            deferred_command = None   # stop-only: no LLM turn
+                            self._audio_turn_verdict(audio_turn, None, "stop")
+                            continue
                     if during_tts:
                         accepted = False
                         if self.on_barge_in is not None:
@@ -194,14 +331,19 @@ class STTWorker(threading.Thread):
                         if not accepted:
                             self.logger.info("Discarded speech during TTS (not a confirmed interrupt)")
                         continue
+                    # Held ungated turn: the STT verdict releases/diverts/rejects it
+                    # (must happen before the queued command is consumed further).
+                    self._audio_turn_verdict(audio_turn, text.strip(), "")
                     # Enriched event data when speaker ID is available
-                    if self.speaker_id is not None or generation is not None:
+                    if self.speaker_id is not None or generation is not None or audio_turn is not None:
                         data = {
                             "text": text.strip(),
                             "speaker_id": speaker_user_id,
                             "speaker_confidence": speaker_confidence,
                             "capture_generation": generation,
                         }
+                        if audio_turn is not None:
+                            data["audio_turn_id"] = audio_turn.turn_id
                     else:
                         data = text.strip()
 
@@ -210,12 +352,19 @@ class STTWorker(threading.Thread):
                         data=data,
                         source="stt_worker",
                     ))
+                    _dispatch_deferred()
                 else:
                     self.logger.info("Blank transcription")
                     print("⚠️  (no speech detected)")
+                    self._reject_audio_turn(audio_turn, "blank")
+                    self._audio_turn_verdict(audio_turn, None, "blank")
+                    _dispatch_deferred()
             except Exception as e:
                 error_type = type(e).__name__
                 self.logger.error("STT worker failed (%s)", error_type)
+                self._reject_audio_turn(audio_turn, "stt_error")
+                self._audio_turn_verdict(audio_turn, None, "stt_error")
+                _dispatch_deferred()
                 self.event_queue.put(Event(
                     EventType.ERROR,
                     data={"source": "stt", "error_type": error_type},
@@ -1094,6 +1243,25 @@ class Coordinator:
             accumulator=self.accumulator,
         )
 
+        # Direct audio (Gemma PRIMARY hears the turn audio itself).
+        from core.direct_audio import DirectAudioService
+        self.direct_audio = DirectAudioService(
+            llm, config,
+            context_provider=self._direct_audio_context,
+            text_fallback_available=self._text_fallback_available,
+            content_allowed=self._content_logging_allowed,
+        )
+        try:
+            from core.privacy_gate import get_privacy_gate
+            get_privacy_gate(config).register_flush_callback(self._privacy_flush_direct_audio)
+        except Exception as exc:
+            self.logger.warning("Direct audio privacy flush not registered: %s", exc)
+
+        # Primary <-> Expert handover (None unless attach_handover() is called).
+        self.handover = None
+        self._pending_expert = None
+        self._starting_notice_ts = 0.0
+
         # Wire profile manager to conversation for speaker labels
         if self.profile_manager:
             self.conversation.set_profile_manager(self.profile_manager)
@@ -1213,15 +1381,18 @@ class Coordinator:
         """Process raw transcription text: validate, check wake word or
         conversation window, and emit COMMAND_DETECTED if appropriate."""
         self._last_transcription_ts = time.monotonic()
+        audio_turn_id = None
         # Extract text and speaker context from enriched or plain event data
         if isinstance(event.data, dict):
             raw_text = event.data["text"]
             speaker_id = event.data.get("speaker_id")
             speaker_confidence = event.data.get("speaker_confidence", 0.0)
             generation = event.data.get("capture_generation")
+            audio_turn_id = event.data.get("audio_turn_id")
             if (generation is not None and not event.data.get("barge_in")
                     and generation != getattr(self.listener, "_capture_generation", generation)):
                 self.logger.info("Discarded stale transcription from an earlier audio generation")
+                self.reject_audio_turn(audio_turn_id, "stale")
                 return
             self._apply_speaker_context(speaker_id, speaker_confidence)
         else:
@@ -1234,11 +1405,13 @@ class Coordinator:
            (text.startswith('[') and text.endswith(']')):
             self.logger.info("Ignoring Whisper noise annotation (%d chars)", len(text))
             print("⚠️  Ignoring background noise")
+            self.reject_audio_turn(audio_turn_id, "noise")
             return
 
         # Filter garbage (repetitive chars from TTS bleed, etc.)
         if is_garbage_transcription(text):
             self.logger.info("Ignoring garbage transcription (%d chars)", len(text))
+            self.reject_audio_turn(audio_turn_id, "garbage")
             return
 
         # Apply brand-name corrections (quinn→qwen, etc.) before any routing
@@ -1246,11 +1419,24 @@ class Coordinator:
 
         self.logger.info("Transcription received (%d chars)", len(text))
 
+        # Direct-audio turn: the model already got the audio. The transcript is
+        # metadata (asr_hint) plus the wake gate for speculative turns.
+        if audio_turn_id is not None:
+            if self.direct_audio.get(audio_turn_id) is None:
+                # Turn already answered, diverted, rejected or cancelled (privacy/stop):
+                # the transcript must NOT re-enter the legacy text path.
+                self.logger.info("Transcript of a finished direct-audio turn ignored")
+                return
+            if self._resolve_direct_turn_from_transcript(audio_turn_id, text):
+                return
+
         # Conversation window — accept without wake word
         if self.listener.conversation_window_active:
             if self._is_conversation_noise(text):
                 self.logger.info("Filtered speech during conversation (%d chars)", len(text))
                 return
+            if find_wake_word(text, self.wake_word):
+                text = strip_wake_word(text, self.wake_word) or "jarvis_only"
             text = self._apply_command_corrections(text)
             self.listener._cancel_conversation_timer()
             self.logger.info("Accepting conversation response (%d chars)", len(text))
@@ -1261,65 +1447,16 @@ class Coordinator:
             ))
             return
 
-        # Wake word fuzzy match (threshold 0.80 — eliminates "paris" 0.73, etc.)
-        words = text.split()
-        wake_word_found = False
-        matched_word = ""
-        for word in words:
-            word_clean = word.strip('.,!?;:')
-            # JARVIS_DE_WAKE_ALIASES
-            # Typische deutsche Whisper-Varianten von 'Jarvis'.
-            # Die strenge 0.80-Schwelle bleibt erhalten.
-            wake_aliases = {
-                "jarvis",
-                "jarwis",
-                "jarwiss",
-                "charvis",
-                "charwis",
-                "chauvis",
-                "chauwis",
-                "scharvis",
-                "djarvis",
-                "dscharvis",
-                "tscharvis",
-                self.wake_word,
-            }
-            similarity = max(
-                SequenceMatcher(None, alias, word_clean).ratio()
-                for alias in wake_aliases
-            )
-            if similarity >= 0.80:
-                self.logger.info("Wake word detected (similarity: %.2f)", similarity)
-                wake_word_found = True
-                matched_word = word_clean
-                break
-
-        if wake_word_found:
+        wake_match = find_wake_word(text, self.wake_word)
+        if wake_match:
+            _, _, matched_word, similarity = wake_match
+            self.logger.info("Wake word detected (similarity: %.2f)", similarity)
             # Check if this is ambient conversation rather than a command
             if self._is_ambient_wake_word(text, matched_word):
                 print("🔇 Ambient mention (ignored)")
                 return
 
-            corrected_text = text.replace(matched_word, self.wake_word)
-
-            # Normalize common wake-word forms.
-            # Qwen hotword bias can occasionally duplicate the wake phrase,
-            # e.g. "jarvis hey jarvis öffne ...".
-            corrected_text = re.sub(
-                r"\bjarvis(?:\s+(?:hey\s+)?jarvis)+\b",
-                "jarvis",
-                corrected_text,
-                flags=re.IGNORECASE,
-            )
-
-            # "Hey Jarvis ..." is an invocation, not a command containing "hey".
-            corrected_text = re.sub(
-                r"^\s*(?:hey|hi|hallo)\s+jarvis\b",
-                "jarvis",
-                corrected_text,
-                flags=re.IGNORECASE,
-            )
-
+            corrected_text = strip_wake_word(text, self.wake_word)
             self.logger.info("Normalized wake-word transcript (%d chars)", len(text))
             self.event_queue.put(Event(
                 EventType.COMMAND_DETECTED,
@@ -1334,20 +1471,72 @@ class Coordinator:
 
     def _handle_command(self, event: Event):
         """Route a detected command through the priority chain."""
+        self._current_direct = None
+        try:
+            self._handle_command_impl(event)
+        finally:
+            current, self._current_direct = self._current_direct, None
+            if current is not None:
+                self.direct_audio.finish(current)   # drop tracking/timer of the popped turn
+
+    def _handle_command_impl(self, event: Event):
         self._last_command_start_ts = time.monotonic()
         self._turn_cancelled.clear()
         self._stop_only_interrupt = False
         self._active_response_text = ""
+        self._pending_expert = None      # never leak a delegation into another turn
         self._current_latency = LatencyTracker()
-        full_text = event.data
-        in_conversation = self.listener.conversation_window_active
+        direct = None
+        if isinstance(event.data, dict) and event.data.get("direct_audio_turn") is not None:
+            direct = self.direct_audio.pop(event.data["direct_audio_turn"], active=True)
+            self._current_direct = direct
+            if (direct is None
+                    or (direct.turn.is_rejected and not direct.superseded)
+                    or (direct.generation is not None
+                        and direct.generation != getattr(self.listener, "_capture_generation",
+                                                         direct.generation))):
+                if direct is not None:
+                    direct.turn.cancel()
+                self.logger.info("Direct audio turn no longer valid; ignored")
+                return
+            full_text = direct.placeholder
+            in_conversation = direct.in_conversation
+        else:
+            full_text = event.data
+            in_conversation = self.listener.conversation_window_active
         self.state = PipelineState.PROCESSING_COMMAND
         self.stats['commands_processed'] += 1
 
+        if direct is not None:
+            # STT verdict for held (conversation window) turns: release / text path / reject.
+            outcome, verdict_command = self._await_direct_verdict(direct)
+            if outcome == "abort":
+                self.logger.info("Direct audio turn ended without answer (%s)",
+                                 direct.verdict_reason or "cancelled")
+                if self._turn_cancelled.is_set():
+                    self._finish_cancelled_turn()
+                else:
+                    self.listener.resume_listening()
+                    self.state = PipelineState.IDLE
+                    self._last_command_end_ts = self._last_idle_ts = time.monotonic()
+                return
+            if outcome == "text":
+                # Tool/skill/canned turn or bare wake: normal text pipeline
+                # (router.route / _handle_minimal_greeting), no Gemma request.
+                self.logger.info("Direct audio turn -> text path (%s)", direct.verdict_reason)
+                full_text = verdict_command
+                direct = None
+            else:
+                self._finalize_direct_context(direct)
+
         # Parse input
-        if in_conversation:
+        if direct is not None:
+            command = direct.placeholder
+            if not in_conversation and self.memory_manager:
+                self.memory_manager.reset_surfacing_window()
+        elif in_conversation:
             self.logger.info("Conversation continues (%d chars)", len(full_text))
-            if self.wake_word in full_text.lower():
+            if find_wake_word(full_text, self.wake_word):
                 command = self._extract_command(full_text)
             else:
                 command = full_text
@@ -1363,7 +1552,9 @@ class Coordinator:
         self.listener.pause_listening()
 
         # Beep to acknowledge: wake-word activation OR conversation-window follow-up
-        if not in_conversation and self.wake_word in full_text.lower():
+        if direct is not None:
+            self._play_beep()
+        elif not in_conversation and find_wake_word(full_text, self.wake_word):
             self._play_beep()
         elif in_conversation:
             self._play_beep()
@@ -1384,11 +1575,18 @@ class Coordinator:
 
         # --- Process real command ---
         self.logger.debug("Passing command to router (%d chars)", len(command))
-        self.conversation.add_message(
-            "user", command,
-            speaker_confidence=self._last_speaker_confidence,
-            client_id="voice",
-        )
+        if direct is not None:
+            # The turn actually processed by the model: audio turn id +
+            # placeholder. The ASR transcript is only an asr_hint annotation.
+            from core.direct_audio import store_user_turn
+            store_user_turn(self.conversation, direct,
+                            speaker_confidence=self._last_speaker_confidence)
+        else:
+            self.conversation.add_message(
+                "user", command,
+                speaker_confidence=self._last_speaker_confidence,
+                client_id="voice",
+            )
         self.tts._spoke = False
 
         # --- Rapid speaker-switch retort (humorous "one at a time" interjection) ---
@@ -1406,6 +1604,8 @@ class Coordinator:
             in_conversation=in_conversation,
             jarvis_asked_question=self.conv_state.jarvis_asked_question,
         )
+        if direct is not None:
+            suppress_ack = True   # no text to build an ack from; the LLM stream acks itself
 
         # --- Fire contextual ack generation in background (4B, ~600ms) ---
         # Runs in parallel with routing. If ready by the time the 1.5s timer
@@ -1438,7 +1638,10 @@ class Coordinator:
             ack_timer.daemon = True
             ack_timer.start()
 
-        result = self.router.route(command, in_conversation=in_conversation)
+        if direct is not None:
+            result = self._direct_route_result(direct)
+        else:
+            result = self.router.route(command, in_conversation=in_conversation)
         self._current_latency.mark("router_done")
 
         # Cancel ack timer if skill returned before it fired
@@ -1479,8 +1682,33 @@ class Coordinator:
             elif result.open_window is not None:
                 self.listener.open_conversation_window(result.open_window)
         else:
+            # Explicit expert wish / escalation: ALWAYS through the handover, never a direct
+            # role='expert' stream while the primary may be resident on the GPU.
+            if (getattr(result, "model_role", "primary") == "expert"
+                    or getattr(result, "expert_requested", False)):
+                if self._expert_available():
+                    self._run_expert_turn(self._expert_request_from_route(command, result),
+                                          in_conversation=in_conversation, route=result)
+                    if self._turn_cancelled.is_set():
+                        self._finish_cancelled_turn()
+                        return
+                    self.listener.resume_listening()
+                    self.state = PipelineState.IDLE
+                    self._last_command_end_ts = self._last_idle_ts = time.monotonic()
+                    return
+                self.logger.warning("Expert requested but handover/expert not available; primary answers")
+                self._speak_and_wait("Der Experte ist derzeit nicht verfügbar. Ich antworte selbst.")
             # LLM fallback (streaming)
             print("🤖 Thinking...")
+            if direct is None:
+                unavailable = self._await_primary()
+                if unavailable:
+                    self._speak_and_wait(unavailable)
+                    self.conversation.add_message("assistant", unavailable, client_id="voice")
+                    self.listener.resume_listening()
+                    self.state = PipelineState.IDLE
+                    self._last_command_end_ts = self._last_idle_ts = time.monotonic()
+                    return
             response = self._stream_llm_response(
                 result.llm_command, result.llm_history,
                 memory_context=result.memory_context,
@@ -1493,12 +1721,19 @@ class Coordinator:
                 synthesis_temperature=result.synthesis_temperature,
                 synthesis_category=result.synthesis_category,
                 force_web_search=result.force_web_search,
+                force_tool_call=result.force_tool_call,
+                token_source_override=(direct.turn.stream(decision_timeout=15.0)
+                                       if direct is not None else None),
+                role=None,   # primary only; the expert is reached exclusively via the handover
             )
             if self._turn_cancelled.is_set():
                 self._finish_cancelled_turn()
                 return
             if not response:
-                response = "I'm sorry, I'm having trouble processing that right now."
+                if direct is not None and direct.failure:
+                    response = "Das Sprachmodell ist noch nicht bereit. Bitte gleich noch einmal."
+                else:
+                    response = "Entschuldigung, ich kann das gerade nicht verarbeiten."
 
         # Post-process: strip metric conversions Qwen sneaks in, then filler for history
         response = self.llm.strip_metric(response, command) if response else response
@@ -1523,6 +1758,12 @@ class Coordinator:
         # Record metrics for ALL interactions (skills, CAL-L0, LLM, etc.)
         used_llm = not result.handled or result.used_llm
         self._record_metrics(result, used_llm)
+
+        # The primary called delegate_to_expert during this turn: run the handover now that
+        # the primary's own answer is finished (the expert answer goes straight to TTS).
+        pending_expert, self._pending_expert = getattr(self, "_pending_expert", None), None
+        if pending_expert is not None and not self._turn_cancelled.is_set():
+            self._run_expert_turn(pending_expert, in_conversation=in_conversation)
 
         # Follow-up window — handled results with explicit window instructions
         # skip the default window management
@@ -1612,7 +1853,7 @@ class Coordinator:
 
         plan = self.task_planner.active_plan
         if not plan:
-            return "I'm sorry, the plan was lost before I could execute it."
+            return "Entschuldigung, der Plan ging verloren, bevor ich ihn ausführen konnte."
 
         def progress_callback(description: str):
             """Speak progress between steps."""
@@ -1666,8 +1907,16 @@ class Coordinator:
                               tool_presence_penalty: float = None,
                               synthesis_temperature: float = None,
                               synthesis_category: str = None,
-                              force_web_search: bool = False) -> str:
+                              force_web_search: bool = False,
+                              force_tool_call: str = None,
+                              token_source_override=None,
+                              role: str = None,
+                              audio_data: str = None) -> str:
         """Stream LLM response with first-chunk quality gating and tool calling.
+
+        token_source_override: pre-started (possibly speculative) item stream,
+            e.g. SpeculativeTurn.stream(); replaces the llm.stream* call.
+        role: 'primary' (default) or 'expert' (Qwen, explicit delegation only).
 
         Streams tokens from Qwen, accumulates into sentence chunks,
         and speaks each chunk via a persistent aplay process for
@@ -1690,6 +1939,11 @@ class Coordinator:
         """
         if raw_command is None:
             raw_command = command
+        if role is not None and str(role).lower() == "expert":
+            # Direct role='expert' streams are only legal inside the handover's call_expert
+            # (primary stopped, expert running). Here the primary may be resident.
+            self.logger.warning("role='expert' stream refused outside the handover; using primary")
+            role = None
         guest_mode = getattr(self.conversation, 'current_user', None) == '__guest__'
         if guest_mode:
             memory_context = None
@@ -1729,7 +1983,7 @@ class Coordinator:
             tool_call_request = None
 
             # --- Phase A: stream from LLM (may yield ToolCallRequest) ---
-            token_source = (
+            token_source = token_source_override if token_source_override is not None else (
                 self.llm.stream_with_tools(
                     user_message=command,
                     conversation_history=history,
@@ -1740,7 +1994,9 @@ class Coordinator:
                     tool_temperature=tool_temperature,
                     tool_presence_penalty=tool_presence_penalty,
                     force_web_search=force_web_search,
+                    force_tool_call=force_tool_call,
                     guest_mode=guest_mode,
+                    role=role, audio_data=audio_data,
                 ) if _enable_tools else
                 self.llm.stream(
                     user_message=command,
@@ -1748,6 +2004,7 @@ class Coordinator:
                     memory_context=memory_context,
                     conversation_messages=conversation_messages,
                     guest_mode=guest_mode,
+                    role=role, audio_data=audio_data,
                 )
             )
 
@@ -2027,6 +2284,7 @@ class Coordinator:
                     synthesis_temperature=synthesis_temperature,
                     synthesis_category=synthesis_category,
                     guest_mode=guest_mode,
+                    role=role,
                 ):
                     if self._turn_cancelled.is_set():
                         break
@@ -2314,7 +2572,7 @@ class Coordinator:
             if self._turn_cancelled.is_set():
                 return False
             words = re.findall(r"[\w']+", text.lower())
-            stop_only = len(words) == 1 and words[0] in {"stopp", "stop", "halt"}
+            stop_words = {"stopp", "stop", "halt"}
             aliases = {
                 "jarvis", "jarwis", "jarwiss", "charvis", "charwis",
                 "chauvis", "chauwis", "scharvis", "djarvis", "dscharvis",
@@ -2323,6 +2581,11 @@ class Coordinator:
             wake_index = next((i for i, word in enumerate(words)
                                if max(SequenceMatcher(None, alias, word).ratio()
                                       for alias in aliases) >= 0.80), None)
+            remaining = [word for i, word in enumerate(words) if i != wake_index]
+            stop_only = bool(remaining) and all(
+                word in stop_words | {"bitte", "please"} for word in remaining
+            )
+            stop_only = stop_only or (len(words) == 1 and words[0] in stop_words)
             if not stop_only and (wake_index is None or wake_index == len(words) - 1):
                 return False
 
@@ -2372,6 +2635,484 @@ class Coordinator:
         finally:
             self._barge_in_lock.release()
 
+    # ----- direct audio (Gemma PRIMARY) -----
+
+    def _content_logging_allowed(self) -> bool:
+        try:
+            from core.privacy_gate import Capability, get_privacy_gate
+            return bool(get_privacy_gate(self.config).allow(Capability.CONTENT_LOGGING))
+        except Exception:
+            return False
+
+    def _text_fallback_available(self) -> bool:
+        """A text fallback exists only when explicitly enabled and configured."""
+        if not self.config.get("llm.primary.text_fallback", False):
+            return False
+        if not self.config.get("llm.api.enabled", False):
+            return False
+        provider = str(self.config.get("llm.api.provider") or "").strip().lower()
+        if provider not in {"openrouter", "anthropic"}:
+            return False
+        if not self.config.get("llm.api.model"):
+            return False
+        if provider == "openrouter" and not self.config.get("llm.api.endpoint"):
+            return False
+        env = self.config.get("llm.api.api_key_env")
+        if not env or not _cloud_credential_matches_provider(provider, env):
+            return False
+        gate = getattr(self, "_privacy_gate", None)
+        if gate is None:
+            return False
+        try:
+            from core.privacy_gate import Capability
+            if not gate.allow(Capability.CLOUD_LLM):
+                return False
+            key = self.config.get_env(env)
+        except Exception:
+            return False
+        return bool(key) and not str(key).lower().startswith("your_")
+
+    def _direct_audio_context(self, at, final: bool = False) -> dict:
+        """Context for a direct-audio request.
+
+        Start time (STT thread, before speaker resolution): strictly read-only,
+        history only, no router state. ``final=True`` runs on the coordinator
+        thread after the speaker was applied (only when the guest flag changed
+        and the request has to be restarted): full router context for owners.
+        Guests never get personal history/memory. Tools: ``llm.primary.audio_tools``
+        (default ``none``; ``always`` / ``all`` opt in).
+        """
+        guest = getattr(self.conversation, "current_user", None) == "__guest__"
+        ctx = {"guest_mode": guest, "history": "", "memory_context": None,
+               "conversation_messages": None, "tools": None}
+        if not guest:
+            try:
+                if final:
+                    prepared = self.router._prepare_llm_context(
+                        at.placeholder, in_conversation=bool(at.in_conversation))
+                    ctx["history"] = prepared.llm_history
+                    ctx["memory_context"] = prepared.memory_context
+                    ctx["conversation_messages"] = prepared.context_messages
+                else:
+                    ctx["history"] = self.conversation.format_history_for_llm(
+                        include_system_prompt=False)
+            except Exception as exc:
+                self.logger.debug("direct audio context fallback: %s", type(exc).__name__)
+        mode = str(self.config.get("llm.primary.audio_tools", "none") or "none").lower()
+        if mode in ("always", "all"):
+            try:
+                from core.tool_registry import ALL_TOOLS, ALWAYS_INCLUDED_TOOLS
+                source = ALWAYS_INCLUDED_TOOLS if mode == "always" else ALL_TOOLS
+                tools = list(source.values())
+                try:
+                    from core.tools.delegate_to_expert import is_available as _expert_ok
+                    if not _expert_ok():
+                        tools = [t for t in tools
+                                 if t["function"]["name"] != "delegate_to_expert"]
+                except Exception:
+                    tools = [t for t in tools
+                             if t["function"]["name"] != "delegate_to_expert"]
+                if guest:
+                    tools = [t for t in tools
+                             if t["function"]["name"] in {"get_weather", "web_search"}]
+                ctx["tools"] = tools or None
+            except Exception:
+                ctx["tools"] = None
+        return ctx
+
+    def _direct_route_result(self, direct) -> RouteResult:
+        ctx = direct.context or {}
+        from core.direct_audio import AUDIO_TURN_PROMPT
+        return RouteResult(
+            handled=False, intent="direct_audio", used_llm=True,
+            llm_command=AUDIO_TURN_PROMPT,
+            llm_history=ctx.get("history") or "",
+            memory_context=ctx.get("memory_context"),
+            context_messages=ctx.get("conversation_messages"),
+            use_tools=ctx.get("tools"),
+            tool_temperature=0.0,
+            match_info={"layer": "direct_audio", "skill_name": "primary"},
+        )
+
+    def start_direct_audio_turn(self, audio, generation=None):
+        """STTWorker hook: start the primary-model request for this audio now."""
+        at = self.direct_audio.start_turn(
+            audio, generation,
+            in_conversation=bool(self.listener.conversation_window_active),
+        )
+        if at is not None and at.mode == "wait":
+            self.logger.warning("Primary LLM %s - turn queued, no fallback configured",
+                                self.direct_audio.status)
+            print("⏳ Primärmodell startet (STARTING) - Anfrage wartet")
+        return at
+
+    def reject_audio_turn(self, turn_id, reason: str = "") -> bool:
+        """No wake evidence / stale / noise: cancel the speculative request and
+        discard its buffer. Ignored for turns without a gate (conversation window)."""
+        if turn_id is None:
+            return False
+        at = self.direct_audio.get(turn_id)
+        if at is None or not at.gate_required:
+            return False
+        rejected = at.turn.reject()
+        if rejected:
+            self.direct_audio.pop(turn_id)
+            self.logger.info("Speculative direct-audio turn rejected (%s)", reason or "no wake")
+        return rejected
+
+    def cancel_audio_turn(self, turn_id, reason: str = "") -> bool:
+        """STTWorker hook (privacy/stale): cancel a turn of ANY gate, running or queued."""
+        if turn_id is None:
+            return False
+        cancelled = self.direct_audio.cancel_turn(turn_id)
+        if cancelled:
+            self.logger.info("Direct-audio turn cancelled (%s)", reason or "cancel")
+        return cancelled
+
+    # ----- direct-audio verdict (STT transcript as parallel helper) -----
+
+    def _direct_turn_decision(self, at, raw_text):
+        """Pure decision from the STT transcript: (action, command, reason).
+
+        action: direct (Gemma answers), text (skill/tool/canned -> text pipeline),
+        greeting (bare wake word) or reject (blank/annotation/garbage/noise).
+        Never routes, never executes anything, never mutates router state.
+        """
+        text = (raw_text or "").strip()
+        low = text.lower()
+        if not low:
+            return "reject", "", "blank"
+        if (low.startswith('(') and low.endswith(')')) or \
+           (low.startswith('[') and low.endswith(']')):
+            return "reject", "", "noise"
+        if is_garbage_transcription(low):
+            return "reject", "", "garbage"
+        low = self._apply_transcription_corrections(low)
+        if not at.gate_required and self._is_conversation_noise(low):
+            return "reject", "", "conversation_noise"
+        from core.conversation_router import classify_text_path
+        path, command, reason = classify_text_path(
+            low, router=getattr(self, "router", None), in_conversation=bool(at.in_conversation),
+            wake_word=self.wake_word)
+        return path, command, reason
+
+    def resolve_ungated_audio_turn(self, at, text, reason: str = "") -> None:
+        """STTWorker hook (STT thread): verdict for a held conversation-window turn.
+
+        text=None: no transcript. blank/stale/stop -> reject (no answer);
+        an STT error releases the direct answer (STT is only a helper)."""
+        if at is None or not at.hold_for_verdict or at.gate_required:
+            return
+        if text is None:
+            if reason in ("blank", "stale", "stop"):
+                self.direct_audio.set_verdict(at, "reject", "", reason)
+            else:
+                self.direct_audio.set_verdict(at, "direct", "", reason or "no_transcript")
+            return
+        self.direct_audio.note_transcript(at.turn_id, text)   # asr_hint (content gate inside)
+        action, command, why = self._direct_turn_decision(at, text)
+        if action == "reject":
+            self.logger.info("Direct-audio turn rejected by STT verdict (%s)", why)
+        self.direct_audio.set_verdict(at, action, command, why)
+
+    def _divert_audio_turn_to_text(self, at, command: str, reason: str) -> None:
+        """Gated turn whose transcript needs the text pipeline / is a bare wake:
+        drop the (never released) speculative request and run the text path."""
+        at.turn.reject()
+        self.direct_audio.pop(at.turn_id)
+        self.logger.info("Direct-audio turn diverted to text path (%s)", reason)
+        self.event_queue.put(Event(
+            EventType.COMMAND_DETECTED,
+            data=command or "jarvis_only",
+            source="coordinator",
+        ))
+
+    def _resolve_direct_turn_from_transcript(self, turn_id, text: str) -> bool:
+        """Apply the parallel STT result to a direct-audio turn.
+
+        Returns True when the transcript was fully consumed (caller returns).
+        """
+        at = self.direct_audio.get(turn_id)
+        if at is None:
+            return False
+        self.direct_audio.note_transcript(turn_id, text)   # asr_hint metadata only
+        if not at.gate_required:
+            return True     # command already dispatched by the STT worker
+        wake_match = find_wake_word(text, self.wake_word)
+        if not wake_match:
+            self.logger.info("No wake word detected (%d chars)", len(text))
+            print("❌ No wake word (ignored)")
+            self.reject_audio_turn(turn_id, "no_wake")
+            return True
+        _, _, matched_word, similarity = wake_match
+        self.logger.info("Wake word detected (similarity: %.2f)", similarity)
+        if self._is_ambient_wake_word(text, matched_word):
+            print("🔇 Ambient mention (ignored)")
+            self.reject_audio_turn(turn_id, "ambient")
+            return True
+        action, command, why = self._direct_turn_decision(at, text)
+        if action == "reject":
+            self.reject_audio_turn(turn_id, why)
+            return True
+        if action in ("greeting", "text"):
+            # A bare wake word never goes to Gemma; tool/skill turns use the text path.
+            self._divert_audio_turn_to_text(at, command, why)
+            return True
+        if at.turn.confirm_wake():
+            self.event_queue.put(Event(
+                EventType.COMMAND_DETECTED,
+                data={"direct_audio_turn": turn_id},
+                source="coordinator",
+            ))
+        return True
+
+    def _await_direct_verdict(self, direct):
+        """Consumer side of the verdict: ('direct'|'text'|'abort', command)."""
+        if direct.hold_for_verdict and not direct.verdict_event.is_set():
+            budget = self.direct_audio.verdict_timeout_s + 2.0
+            if not direct.verdict_event.wait(timeout=budget):
+                self.direct_audio.set_verdict(direct, "direct", "", "wait_timeout")
+        if direct.turn.is_rejected and not direct.superseded:
+            return "abort", ""
+        if direct.superseded:
+            return "text", direct.verdict_command or "jarvis_only"
+        return "direct", ""
+
+    def _finalize_direct_context(self, direct) -> None:
+        """Coordinator thread, after the speaker was applied: the request context
+        must match the CURRENT speaker (guest vs. owner), never the previous one."""
+        if direct.speaker_resolved:
+            self._apply_speaker_context(direct.speaker_id, direct.speaker_confidence)
+        guest = getattr(self.conversation, "current_user", None) == "__guest__"
+        if guest == bool((direct.context or {}).get("guest_mode", False)):
+            return
+        ctx = self._direct_audio_context(direct, final=True)
+        if self.direct_audio.restart_turn(direct, ctx):
+            self.logger.info("Direct-audio request restarted for the identified speaker")
+
+    def _privacy_flush_direct_audio(self):
+        """Privacy flush: cancel open AND running turns, buffers, audio and hints."""
+        try:
+            dropped = self.direct_audio.discard_all()
+            if dropped:
+                self.logger.info("Privacy flush discarded %d direct-audio turn(s)", dropped)
+                if getattr(self, "state", None) == PipelineState.PROCESSING_COMMAND:
+                    self._turn_cancelled.set()
+                    self._llm_responded = True
+                cancel_stream = getattr(self.llm, "cancel_active_stream", None)
+                if callable(cancel_stream):
+                    cancel_stream()
+        except Exception:
+            self.logger.debug("direct audio flush failed", exc_info=True)
+
+    # ----- Primary <-> Expert handover wiring -----
+
+    def attach_handover(self, handover) -> None:
+        """Register the handover and the ``delegate_to_expert`` delegator (None clears it)."""
+        self.handover = handover
+        from core.tools.delegate_to_expert import set_expert_delegator
+        if handover is None:
+            set_expert_delegator(None)
+            return
+        set_expert_delegator(self._delegate_expert, available=self._expert_available)
+
+    def _expert_available(self) -> bool:
+        if getattr(self, "handover", None) is None:
+            return False
+        try:
+            self.llm.resolve_role("expert")   # raises ValueError without llm.expert.endpoint
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
+    def _expert_request_from_route(command: str, result):
+        from core.tools.delegate_to_expert import ExpertRequest
+        return ExpertRequest(
+            reason="explicit_user_request",
+            task=(getattr(result, "llm_command", None) or command),
+            original_user_intent=command,
+        )
+
+    def _delegate_expert(self, request) -> dict:
+        """delegate_to_expert tool: the handover runs once the primary's turn is over."""
+        if not self._expert_available():
+            return {"accepted": False, "message": "Der Experte ist derzeit nicht verfügbar."}
+        self._pending_expert = request
+        return {"accepted": True,
+                "message": "Ich befrage den Experten; das dauert einen Moment."}
+
+    def _snapshot_conversation_state(self) -> dict:
+        import copy
+        return {"conv_state": copy.copy(self.conv_state),
+                "history": list(getattr(self.conversation, "session_history", []) or [])}
+
+    def _restore_conversation_state(self, snapshot) -> None:
+        """Runs after the primary is back. The process kept the state, so this only repairs
+        loss; the expert answer stored in the meantime is never overwritten."""
+        if not snapshot:
+            return
+        history = getattr(self.conversation, "session_history", None)
+        saved = snapshot.get("history") or []
+        if history is not None and len(history) < len(saved):
+            history[:] = saved + [m for m in history if m not in saved]
+        if getattr(self, "conv_state", None) is None:
+            self.conv_state = snapshot["conv_state"]
+
+    def _run_expert_turn(self, request, in_conversation: bool = False, route=None) -> str:
+        """One expert turn: handover -> expert answers under the JARVIS system prompt ->
+        answer goes DIRECTLY to output/TTS (no primary pass) -> primary restores in background."""
+        handover = getattr(self, "handover", None)
+        if handover is None:
+            msg = "Der Experte ist derzeit nicht verfügbar."
+            self._speak_and_wait(msg)
+            return msg
+        guest = getattr(self.conversation, "current_user", None) == "__guest__"
+
+        def call_expert(req):
+            history = getattr(route, "llm_history", None) if route is not None else None
+            if history is None:
+                history = self.conversation.format_history_for_llm(include_system_prompt=False)
+            return self.llm.chat(
+                user_message=req.task, conversation_history=history or "",
+                memory_context=(getattr(route, "memory_context", None) if route is not None else None),
+                conversation_messages=(getattr(route, "context_messages", None)
+                                       if route is not None else None),
+                guest_mode=guest, role="expert")
+
+        self._speak_and_wait("Einen Moment, ich hole den Experten.")
+        res = handover.run_expert(request, call_expert,
+                                  save_state=self._snapshot_conversation_state,
+                                  restore_state=self._restore_conversation_state)
+        answer = res.answer if res.ok else None
+        if isinstance(answer, str) and answer.strip():
+            return self.deliver_expert_answer(answer, {
+                "command": getattr(request, "original_user_intent", "") or request.task,
+                "in_conversation": in_conversation})
+        self.logger.warning("Expert turn failed: %s", res.error)
+        if self._turn_cancelled.is_set():
+            return ""
+        msg = "Der Experte konnte nicht antworten. Das Hauptmodell wird wieder gestartet."
+        self._speak_and_wait(msg)
+        self.conversation.add_message("assistant", msg, client_id="voice")
+        return msg
+
+    def _await_primary(self):
+        """Before a normal primary LLM call: honest STARTING + queue while the primary reloads.
+
+        Returns None to proceed (primary READY, or a real configured fallback), or a short
+        message when the primary stayed unavailable for the whole queue window."""
+        handover = getattr(self, "handover", None)
+        if handover is None:
+            return None
+        if not handover.is_swapping and handover.primary_ready:
+            return None
+        timeout = float(self.config.get("handover.queue_wait_s", 120) or 0)
+        now = time.monotonic()
+        if now - getattr(self, "_starting_notice_ts", 0.0) > 30.0:
+            self._starting_notice_ts = now
+            self.logger.warning("Primary LLM not READY (%s) - request queued", handover.lifecycle_state())
+            print("⏳ Primärmodell startet (STARTING) - Anfrage wartet")
+            self._speak_and_wait("Das Sprachmodell wird gerade geladen. Ich antworte gleich.")
+        decision = handover.resolve_provider(timeout)
+        if decision.provider in ("primary", "fallback"):
+            return None
+        return "Das Sprachmodell ist noch nicht bereit. Bitte gleich noch einmal."
+
+    # ----- stop fast path (outside TTS) -----
+
+    _STOP_WORDS = {"stopp", "stop", "halt"}
+
+    def _is_stop_only_transcript(self, text: str) -> bool:
+        words = re.findall(r"[\w']+", (text or "").lower())
+        if not words:
+            return False
+        aliases = {"jarvis", "jarwis", "jarwiss", "charvis", "charwis", "chauvis", "chauwis",
+                   "scharvis", "djarvis", "dscharvis", "tscharvis", self.wake_word}
+        wake_index = next((i for i, w in enumerate(words)
+                           if max(SequenceMatcher(None, a, w).ratio() for a in aliases) >= 0.80), None)
+        remaining = [w for i, w in enumerate(words) if i != wake_index]
+        return bool(remaining) and all(w in self._STOP_WORDS | {"bitte", "please"} for w in remaining)
+
+    def handle_stop_only(self, text: str, audio_turn=None) -> bool:
+        """STTWorker hook for transcripts outside TTS. A stop-only command cancels any
+        running/speculative primary turn, drops held aggregated audio and creates NO new
+        LLM turn; TTS is interrupted as in the barge-in path. Returns True when consumed."""
+        if not self._is_stop_only_transcript(text):
+            return False
+        speaking = getattr(self.listener, "_speaking_event", None)
+        if speaking is not None and speaking.is_set():
+            return False   # during TTS handle_barge_in owns the stop
+        direct_audio = getattr(self, "direct_audio", None)
+        # No ambient 'stop': only with the wake word, inside an active conversation
+        # window or while a turn of ours is actually running/queued.
+        own_id = getattr(audio_turn, "turn_id", None)
+        other_turns = False
+        if direct_audio is not None:
+            try:
+                with direct_audio._lock:
+                    other_turns = any(tid != own_id for tid in
+                                      list(direct_audio._turns) + list(direct_audio._active))
+            except Exception:
+                other_turns = False
+        running = (getattr(self, "state", None) == PipelineState.PROCESSING_COMMAND
+                   or bool(getattr(self, "_streaming_active", False)) or other_turns)
+        if not (find_wake_word(text, self.wake_word)
+                or getattr(self.listener, "conversation_window_active", False)
+                or running):
+            return False
+        if direct_audio is not None:
+            direct_audio.discard_all()          # cancels speculative + running direct turns
+        if getattr(self, "state", None) == PipelineState.PROCESSING_COMMAND:
+            self._turn_cancelled.set()
+            self._llm_responded = True
+            self._stop_only_interrupt = True
+            pipeline = getattr(self, "_active_audio_pipeline", None)
+            if pipeline is not None:
+                pipeline.cancel()
+        if hasattr(self.tts, "interrupt_active"):
+            self.tts.interrupt_active()
+        elif hasattr(self.tts, "kill_active"):
+            self.tts.kill_active()
+        cancel_stream = getattr(self.llm, "cancel_active_stream", None)
+        if callable(cancel_stream):
+            cancel_stream()
+        discard = getattr(self.listener, "discard_held_turn", None)
+        if callable(discard):
+            discard()
+        self.logger.info("Stop-only command outside TTS: turn cancelled, no new LLM turn")
+        return True
+
+    def deliver_expert_answer(self, text: str, turn_ctx: dict = None) -> str:
+        """Deliver an EXPERT (Qwen) answer through the normal output path.
+
+        Called by expert delegation (core/model_handover.py) with the answer the
+        expert generated under the JARVIS system prompt (llm.chat/stream with
+        role='expert'). There is NO second primary pass: the text is stored in
+        the conversation state and pushed into the existing TTS/output path.
+
+        turn_ctx (all optional): {"command": str, "in_conversation": bool,
+                                  "audio_turn_id": str, "spoken": bool}
+        """
+        turn_ctx = turn_ctx or {}
+        text = (text or "").strip()
+        if not text:
+            return ""
+        command = turn_ctx.get("command") or ""
+        stored = self.llm.strip_filler(self.llm.strip_metric(text, command))
+        self.conversation.add_message("assistant", stored, client_id="voice")
+        print(f"💬 Jarvis (Experte): {stored}")
+        if not turn_ctx.get("spoken") and not self._turn_cancelled.is_set():
+            self._speak_and_wait(stored)
+        self.conv_state.update(command=command, response_text=stored,
+                               response_type="expert")
+        try:
+            self._manage_conversation_window(
+                stored, bool(turn_ctx.get("in_conversation", False)))
+        except Exception:
+            self.logger.debug("expert answer window management failed", exc_info=True)
+        return stored
+
     def _finish_cancelled_turn(self):
         """Restore turn state after its queued barge-in transcript is safe."""
         pipeline = self._active_audio_pipeline
@@ -2382,6 +3123,7 @@ class Coordinator:
         self._active_audio_pipeline = None
         self._active_response_text = ""
         self._streaming_active = False
+        self._pending_expert = None
         self.listener.resume_listening()
         if getattr(self, "_stop_only_interrupt", False):
             self.listener.open_conversation_window(self.listener._extended_duration)
@@ -2636,25 +3378,8 @@ class Coordinator:
 
     def _extract_command(self, full_text: str) -> str:
         """Extract command text from transcription (remove wake word)."""
-        import string
-        text_lower = full_text.lower()
-        wake_pos = text_lower.find(self.wake_word)
-
-        if wake_pos == -1:
-            return full_text.strip()
-
-        before = full_text[:wake_pos].strip()
-        after = full_text[wake_pos + len(self.wake_word):].strip()
-
-        before = before.strip(string.punctuation + ' ')
-        after = after.strip(string.punctuation + ' ')
-
-        if after:
-            return after
-        elif before:
-            return before
-        else:
-            return "jarvis_only"
+        command = strip_wake_word(full_text, self.wake_word)
+        return command or "jarvis_only"
 
     # ----- noise / correction helpers (from continuous_listener) -----
 
@@ -2733,6 +3458,11 @@ class Coordinator:
         if word_idx is None:
             return False  # Can't determine — let it through
 
+        # A comma-delimited middle vocative is an explicit invocation.
+        if ((word_idx > 0 and words[word_idx - 1].endswith(","))
+                or words[word_idx].endswith(",")):
+            return False
+
         # --- Signal 1: Position ---
         # Real commands have "jarvis" at the start (first 2-3 words with
         # prefixes like "hey"/"good morning") OR at the end (trailing
@@ -2786,26 +3516,33 @@ class Coordinator:
 
     def _apply_speaker_context(self, speaker_id: Optional[str], confidence: float):
         """Set honorific and conversation user based on speaker identification."""
-        self._last_speaker_confidence = confidence
+        primary_user_id = self.config.get("user_profiles.primary_user_id", "primary_user")
+        single_user = self.config.get("user_profiles.single_user_mode", False)
+        single_user_fallback = single_user and speaker_id in (None, "__guest__")
+        if single_user_fallback:
+            # Configured local mic context, not acoustic speaker verification.
+            speaker_id = primary_user_id
+            confidence = 0.0
 
-        # Rapid speaker-switch detection
+        self._last_speaker_confidence = confidence
+        effective_speaker_id = speaker_id or "__guest__"
         now = time.time()
-        if (speaker_id and self._last_speaker_id
-                and speaker_id != self._last_speaker_id
+        if (effective_speaker_id != "__guest__" and self._last_speaker_id
+                and effective_speaker_id != self._last_speaker_id
                 and self._last_speaker_id != "__guest__"
                 and now - self._last_switch_time < 60):
             self._rapid_switch_count += 1
             self.logger.info(
                 f"Speaker switch #{self._rapid_switch_count}: "
-                f"{self._last_speaker_id} → {speaker_id}"
+                f"{self._last_speaker_id} → {effective_speaker_id}"
             )
-        elif speaker_id != self._last_speaker_id:
-            # First switch or timeout — reset counter
-            self._rapid_switch_count = 1 if (speaker_id and self._last_speaker_id) else 0
+        elif effective_speaker_id != self._last_speaker_id:
+            self._rapid_switch_count = (
+                1 if (effective_speaker_id != "__guest__" and self._last_speaker_id
+                      and self._last_speaker_id != "__guest__") else 0
+            )
         self._last_switch_time = now
-        self._last_speaker_id = speaker_id or self._last_speaker_id
-
-        primary_user_id = self.config.get("user_profiles.primary_user_id", "primary_user")
+        self._last_speaker_id = effective_speaker_id
         if speaker_id == primary_user_id and self.profile_manager:
             honorific = self.profile_manager.get_honorific_for(speaker_id)
             formal = self.profile_manager.get_formal_address_for(speaker_id)
@@ -2813,10 +3550,26 @@ class Coordinator:
             self.conversation.current_user = speaker_id
             if self.context_window:
                 self.context_window.set_user(speaker_id)
-            self.logger.info(
-                f"Speaker identified: {speaker_id} (confidence={confidence:.3f}, "
-                f"honorific={honorific}, formal={formal})"
-            )
+            if single_user_fallback:
+                self.logger.info(
+                    "Primary local context: %s "
+                    "(speaker_verification=not_performed, confidence=%.3f)",
+                    speaker_id, confidence,
+                )
+            else:
+                self.logger.info(
+                    "Speaker profile matched: %s (confidence=%.3f)",
+                    speaker_id, confidence,
+                )
+        elif (speaker_id and speaker_id != "__guest__" and self.profile_manager
+              and self.profile_manager.get_profile(speaker_id)):
+            honorific = self.profile_manager.get_honorific_for(speaker_id)
+            formal = self.profile_manager.get_formal_address_for(speaker_id)
+            set_honorific(honorific, formal)
+            self.conversation.current_user = speaker_id
+            if self.context_window:
+                self.context_window.set_user(speaker_id)
+            self.logger.info("Recognized profile context: %s", speaker_id)
         elif self.profile_manager:
             set_honorific("Gast")
             self.conversation.current_user = "__guest__"

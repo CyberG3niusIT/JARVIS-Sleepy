@@ -186,7 +186,7 @@ Every request — voice, console, or web — enters `ConversationRouter.route()`
 - **Pre-P4** — Compound detection (22 regex patterns) → task planner → LLM plan generation → sequential execution with voice interrupts.
 - **P4-LLM** — Semantic pruner selects top 4 tools → 35B decides → tool executes → 4B synthesizes → 17-domain classifier → domain-specific anti-hallucination prompt.
 - **P4-Skill** — Stateful skills via 5-layer semantic intent matching.
-- **Fallback** — Pure 35B streaming with quality gating → Claude API last resort.
+- **Fallback** — Local models first; optional cloud fallback uses the explicitly configured provider (OpenRouter preferred) and requires cloud enablement, credentials, and PrivacyGate approval.
 
 ---
 
@@ -246,13 +246,13 @@ Every request — voice, console, or web — enters `ConversationRouter.route()`
 
 ## Design Principles
 
-1. **Local first** — Claude API is a quality fallback that fires <1% of the time. Everything else runs on-box.
+1. **Local first** — Cloud fallback is optional, disabled until configured, and must pass the PrivacyGate. OpenRouter is the preferred provider; Anthropic remains an explicit option.
 2. **Two models cooperate** — The 35B reasons, the 4B synthesizes. Each does what it's best at.
 3. **Face ID is authoritative** — Speaker ID confirms but never overrides. The more accurate system wins.
 4. **Stream everything** — LLM tokens → sentence chunker → Kokoro → aplay. No buffering full responses.
 5. **One router, three frontends** — Voice, console, web share the same 18-layer priority chain.
 6. **One file, one tool** — Drop a `.py` in `core/tools/` and it's live. No wiring needed.
-7. **Degrade gracefully** — 4B fails → 35B. GPU fails → CPU. Kokoro fails → Piper. Qwen fails → Claude.
+7. **Degrade gracefully** — 4B fails → 35B. GPU fails → CPU. Kokoro fails → Piper. A local quality failure may use the configured cloud provider when enabled and permitted.
 8. **The butler model** — Greet, brief, then be quiet. Silence IS a valid response when there's nothing to say.
 9. **Prompt examples are output** — Qwen treats every word in a prompt example as a candidate for generation. Design prompts accordingly.
 
@@ -271,7 +271,7 @@ systemctl --user start jarvis
 
 # Web UI
 python3 jarvis_web.py
-# Open http://127.0.0.1:8088
+# Open http://127.0.0.1:8091
 ```
 
 ---

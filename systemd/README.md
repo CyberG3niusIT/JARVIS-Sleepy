@@ -181,3 +181,14 @@ never wired in, a real gap beyond just documentation:
 - `jarvis_aliases.sh` gained `llamalogs`/`chatterboxlogs`/
   `restartllama`/`restartchatterbox` for bouncing a model service
   directly without going through `start.sh`'s full sequence.
+
+## Update 2026-09-25: Primary/Expert-Units (User-Scope)
+
+**Der Abschnitt "Install strategy: MIXED" oben ist für die LLM-Server veraltet.** Er beschreibt `llama-server.service` als System-Unit; der neue Handover (`core/model_handover`, siehe `docs/RUNTIME_SUPERVISOR.md`) arbeitet ausschließlich mit `systemctl --user`. System-Scope-`sudo` ist nur noch im stalen `core/gpu_swap.py` (FLUX) vorhanden.
+
+Neue Vorlagen im Repo (beide **User-Scope**, nicht installiert, nicht auf Hardware verifiziert):
+
+- `systemd/llama-server-primary.service`: Gemma 4 12B mit mmproj, Port 8080 (`llm.primary`).
+- `systemd/llama-server-expert.service`: Qwen3.5-35B-A3B, Port 8082 (`llm.expert`), GPU-exklusiv.
+
+**NEEDS HW VERIFY:** Gemma-/mmproj-Dateinamen und Port 8082 sind Platzhalter. Der Nutzer muss die Units selbst nach `~/.config/systemd/user/` installieren und `daemon-reload` ausführen. Die tatsächlich laufende Unit liegt außerhalb des Repos; die Vorlagen ersetzen sie nicht automatisch. Vor der Installation prüfen, dass keine alte System-Unit `llama-server.service` denselben Port 8080 belegt (Doppelbelegung).

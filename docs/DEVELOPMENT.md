@@ -80,7 +80,7 @@ python3 tests/components/test_voice_pipeline.py --verbose
 |---------|------|-------|
 | `python3 jarvis_continuous.py` | Voice | Wake word + mic, systemd service |
 | `python3 jarvis_console.py` | Console | Text input, `--hybrid` for voice output |
-| `python3 jarvis_web.py` | Web | Browser chat on port 8088/8443, systemd service |
+| `python3 jarvis_web.py` | Web | Browser chat on port 8091/8443, systemd service |
 
 ## Why Multiple Repos?
 

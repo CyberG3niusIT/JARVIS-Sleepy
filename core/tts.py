@@ -571,6 +571,7 @@ class TextToSpeech:
         if not self._chatterbox_available():
             return None, None
 
+        started = time.monotonic()
         try:
             response = self._chatterbox_session.post(
                 self.chatterbox_endpoint,
@@ -582,6 +583,12 @@ class TextToSpeech:
 
             if not wav_bytes.startswith(b"RIFF"):
                 self.logger.error("Chatterbox returned invalid WAV data")
+                self._emit_chatterbox_synthesis_event(
+                    status="error",
+                    text_length=len(text),
+                    generation_time_s=time.monotonic() - started,
+                    error_type="InvalidWav",
+                )
                 self._chatterbox_record_failure()
                 return None, None
 
@@ -589,16 +596,82 @@ class TextToSpeech:
                 sample_rate = wf.getframerate()
                 if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getcomptype() != "NONE":
                     self.logger.error("Unsupported Chatterbox PCM format")
+                    self._emit_chatterbox_synthesis_event(
+                        status="error",
+                        text_length=len(text),
+                        generation_time_s=time.monotonic() - started,
+                        error_type="UnsupportedPcmFormat",
+                    )
                     self._chatterbox_record_failure()
                     return None, None
                 pcm = wf.readframes(wf.getnframes())
             self._chatterbox_record_success()
+            generation_time_s = time.monotonic() - started
+            self._emit_chatterbox_synthesis_event(
+                status="success",
+                text_length=len(text),
+                generation_time_s=generation_time_s,
+                audio_duration_s=len(pcm) / (sample_rate * 2) if sample_rate else 0.0,
+            )
             return pcm, sample_rate
 
         except Exception as e:
+            self._emit_chatterbox_synthesis_event(
+                status="error",
+                text_length=len(text),
+                generation_time_s=time.monotonic() - started,
+                audio_duration_s=None,
+                error_type=type(e).__name__,
+            )
             self.logger.error(f"Chatterbox generate failed: {e}")
             self._chatterbox_record_failure()
             return None, None
+
+    @staticmethod
+    def _emit_chatterbox_synthesis_event(
+        *, status: str, text_length: int, generation_time_s: float,
+        audio_duration_s: Optional[float] = None, error_type: Optional[str] = None,
+    ) -> None:
+        """Emit content-free per-Chatterbox-request metrics for the UI aggregates."""
+        try:
+            from core.event_logger import get_event_logger
+
+            event_logger = get_event_logger()
+            if not event_logger:
+                return
+            rtf = (
+                audio_duration_s / generation_time_s
+                if audio_duration_s is not None and generation_time_s > 0
+                else None
+            )
+            event_logger.emit(
+                category="inference",
+                event="tts_synthesis",
+                message=(
+                    f"Chatterbox {status}: {audio_duration_s:.1f}s audio in {generation_time_s:.3f}s"
+                    if audio_duration_s is not None
+                    else f"Chatterbox {status}: {text_length} chars"
+                ),
+                severity="error" if status == "error" else "info",
+                source="tts",
+                stage="tts",
+                status=status,
+                latency_ms=round(generation_time_s * 1000, 1),
+                duration_ms=round(generation_time_s * 1000, 1),
+                model="chatterbox",
+                metadata={
+                    "engine": "chatterbox",
+                    "text_length": text_length,
+                    "generation_time_s": round(generation_time_s, 3),
+                    "audio_duration_s": (
+                        round(audio_duration_s, 2) if audio_duration_s is not None else None
+                    ),
+                    "rtf": round(rtf, 2) if rtf is not None else None,
+                    **({"error_type": error_type} if error_type else {}),
+                },
+            )
+        except Exception:
+            pass  # Observability must never break TTS.
 
     def _resample_pcm(self, pcm_bytes: bytes, src_rate: int, dst_rate: int) -> bytes:
         """Resample 16-bit mono PCM via ffmpeg.

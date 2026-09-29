@@ -92,28 +92,30 @@ def compare_contract(actual: dict, expected: dict) -> list[str]:
     return errors
 
 
-def validate_once(env_file: Path) -> tuple[bool, list[str]]:
-    errors: list[str] = []
+def _validate(env_file: Path) -> list[tuple[str, str]]:
+    """Returns (code, message) pairs; codes are the stable machine-readable part."""
+    errors: list[tuple[str, str]] = []
 
     if not env_file.is_file():
-        return False, [f"Runtime-Konfiguration fehlt: {env_file}"]
+        return [("env_missing", f"Runtime-Konfiguration fehlt: {env_file}")]
 
     try:
         env = parse_env_file(env_file)
         expected = expected_contract(env)
     except Exception as exc:
-        return False, [f"Runtime-Konfiguration ungültig: {exc}"]
+        return [("env_invalid", f"Runtime-Konfiguration ungültig: {exc}")]
 
     anchor = Path(expected["audio_prompt_path"])
     if not anchor.is_file():
-        errors.append(f"Voice-Anker fehlt: {anchor}")
+        errors.append(("anchor_missing", f"Voice-Anker fehlt: {anchor}"))
     else:
         actual_sha = file_sha256(anchor)
         if actual_sha != expected["audio_prompt_sha256"]:
-            errors.append(
+            errors.append((
+                "anchor_sha",
                 "Voice-Anker SHA256 stimmt nicht: "
-                f"erwartet {expected['audio_prompt_sha256']}, ist {actual_sha}"
-            )
+                f"erwartet {expected['audio_prompt_sha256']}, ist {actual_sha}",
+            ))
 
     port = env.get("CHATTERBOX_PORT", "8765")
     base = f"http://127.0.0.1:{port}"
@@ -121,18 +123,29 @@ def validate_once(env_file: Path) -> tuple[bool, list[str]]:
     try:
         health = http_json(f"{base}/health")
         if health.get("status") != "ok":
-            errors.append(f"/health meldet {health!r}")
+            errors.append(("health_not_ok", f"/health meldet {health!r}"))
     except Exception as exc:
-        errors.append(f"{base}/health nicht erreichbar: {exc}")
-        return False, errors
+        errors.append(("health_unreachable", f"{base}/health nicht erreichbar: {exc}"))
+        return errors
 
     try:
         actual = http_json(f"{base}/config")
-        errors.extend(compare_contract(actual, expected))
+        errors.extend(("config_mismatch", message) for message in compare_contract(actual, expected))
     except Exception as exc:
-        errors.append(f"{base}/config nicht erreichbar/ungültig: {exc}")
+        errors.append(("config_unreachable", f"{base}/config nicht erreichbar/ungültig: {exc}"))
 
+    return errors
+
+
+def validate_once(env_file: Path) -> tuple[bool, list[str]]:
+    errors = [message for _, message in _validate(env_file)]
     return not errors, errors
+
+
+def diagnose(env_file: Path = DEFAULT_ENV_FILE) -> tuple[bool, list[str]]:
+    """Machine-readable variant for the runtime supervisor: (ok, unique error codes)."""
+    codes = list(dict.fromkeys(code for code, _ in _validate(env_file)))
+    return not codes, codes
 
 
 def main(argv: list[str] | None = None) -> int:

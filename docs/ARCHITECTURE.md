@@ -231,7 +231,7 @@ entry points, all sharing `core/pipeline.py` as the conversation engine:
 |---|---|
 | `jarvis_continuous.py` | Primary runtime — always-on mic, wake word, VAD, full voice loop |
 | `jarvis_console.py` | Text/hybrid console for development and debugging |
-| `jarvis_web.py` | Web UI (dashboard, WebSocket chat, mobile) on port 8088/8443 |
+| `jarvis_web.py` | Web UI (dashboard, WebSocket chat, mobile) on port 8091/8443 (8088 = VVS API) |
 
 `core/pipeline.py`'s `Pipeline` class (event-driven, coordinator + worker
 threads — `pipeline.event_mode: true` in config.yaml) is the shared brain:
@@ -249,7 +249,7 @@ voice runtime's.
 | Wake word | Porcupine ("aura") | `core/wake_word.py` |
 | LLM (main) | Qwen3.5-35B-A3B-abliterated, llama.cpp, GGUF Q3_K_M | local, `core/llm_router.py` |
 | LLM (small) | local endpoint :8081 | used for quality gating / fast paths |
-| LLM (cloud) | Claude (Anthropic API) | opt-in, `llm.api` |
+| LLM (cloud) | Configured provider, OpenRouter preferred | disabled until `llm.api.enabled`, provider, model, endpoint, and credential are configured; Anthropic is optional and explicit only |
 | TTS | **Chatterbox Multilingual V3** | active engine — see §3, own GPU process |
 | TTS (alt) | Kokoro-82M (in-process, CPU) | supported, currently unused (`tts.engine: chatterbox`) |
 | TTS (fallback) | Piper (subprocess) | last-resort if primary engine fails |
@@ -1352,7 +1352,7 @@ research this session ran first — not assumed):
 | `webcam_manager.start()` | `WEBCAM_CAPTURE` | Raises `PermissionError` before the `ffmpeg` capture process is ever launched |
 | `debug_logger.ConversationDebugLogger._write()` | `CONTENT_LOGGING` | No JSONL line written (single chokepoint every `log_*` method funnels through) |
 | `llm_router._generate_api()` | `CLOUD_LLM` | Returns `""`, no request sent |
-| `claude_consultation._call_claude()` | `CLOUD_LLM` | Raises `PermissionError` before the `anthropic` client is even constructed |
+| `claude_consultation._call_claude()` | explicit Anthropic provider + `CLOUD_LLM` | Requires `llm.api.provider: anthropic`, enabled cloud config, model, and credential; privacy denial raises before the client is constructed |
 
 **Audit logging**: `enter()`/`exit()` log only `mode`, `actor`,
 `timestamp`, `duration` via `core/logger.py` — never the `reason` text
@@ -1835,3 +1835,17 @@ Watchdog background-worker visibility.
     `event_logger` already do vs. what a unified Event → Policy →
     Severity/Urgency → Channel path would add is still the prerequisite
     step, not built in parallel with it.
+
+## 15. Presence face backend: CPU / Intel NPU (2026-09-25)
+
+Status: **NPU path implemented and proven on file input; live camera not available; identity threshold not calibrated.**
+
+- **Seam.** `core/presence_detector.py::_get_face_app()` returns either the CPU `insightface.FaceAnalysis` (default) or `core/npu_face_backend.py::NpuFaceBackend`. Both expose `.get(frame_bgr) -> [face]` with `bbox` / `normed_embedding`. Matching, state machine, greetings and enrollment are unchanged.
+- **Config** (`vision.presence`): `backend: cpu | npu | auto` (code default `cpu`; `config.yaml` sets `auto` since 2026-09-25), `npu.windows_python`, `npu.model_dir`, `npu.fallback_to_cpu`, `npu.request_timeout`. `windows_python` may also come from env `JARVIS_NPU_WINDOWS_PYTHON`; empty means the NPU is unavailable. Permanent Windows environment: `C:\Users\Alex\AppData\Local\JARVIS\npu-venv` (Python 3.14.7, `openvino` 2026.4.0, `numpy` 2.5.3, `openvino-telemetry` 2025.2.0; only these packages, global Python untouched).
+- **Why a Windows worker.** WSL2 cannot use the NPU (no `/dev/accel`; dxg escape calls are rejected by the host, microsoft/WSL#40445). `NpuWorkerClient` starts `tools/openvino_npu_worker.py` under a Windows Python through the same WSL->Windows interop the audio bridge uses (stdin/stdout, length-prefixed JSON + raw tensors). No port, no firewall rule, no second control plane. If `WSLInterop` is missing the backend reports `interop_unavailable`.
+- **Work split.** WSL does SCRFD pre/post-processing and ArcFace alignment (`insightface.utils.face_align.norm_crop`, the same code as the CPU path). The worker compiles `det_10g.onnx` at `[1,3,640,640]` and `w600k_r50.onnx` at `[1,3,112,112]` on `NPU` (in-memory input reshape only) and runs tensors. It refuses a model whose `EXECUTION_DEVICES` does not contain `NPU`.
+- **Models.** `<system.storage_path>/models/insightface/buffalo_l/{det_10g.onnx,w600k_r50.onnx}` (official `buffalo_l.zip`, model-zoo release; SHA-256 pinned in `core/npu_face_backend.py`, verified by the worker before compiling). Not modified.
+- **Fallback.** NPU init failure -> visible warning, `get_status()['backend'] = {requested, active, reason}` and CPU InsightFace (unless `fallback_to_cpu: false`, then nothing runs on CPU and the reason stays in the status). A worker failure at runtime switches to CPU once, visibly. Sticky until restart. The CPU path downloads `buffalo_l` to `~/.insightface` on first use if it is not there.
+- **Camera.** The detector is constructed even without `/dev/video0` (`jarvis_continuous.py` only catches `FileNotFoundError` from `webcam_mgr.start()`); `get_status()['camera']` is `UNAVAILABLE`, polling idles, no frames are faked. A camera plugged in later needs a JARVIS restart (the webcam event loop is only wired at start). A Windows webcam (e.g. Smart Connect) is **not** a supported capture path; a real V4L2 webcam in WSL (usbipd) is the precondition for live presence.
+- **Identity threshold.** `face_confidence_threshold: 0.6` is a configured value, **not calibrated**. Measured only: same-person cosine 0.555-0.958 over 13 photos of one person; no impostor data. `get_status()['matching']` and `PresenceDetector.last_matches` expose similarity, threshold and `threshold_validated: false`. Do not use it as sole authorisation. Calibration needs impostor data and is a separate step.
+- **Tests.** `tests/unit/test_presence_npu_backend.py` (decoding, selection/fallback/states with a fake backend; `test_real_npu_smoke` runs the real worker on the NPU when `JARVIS_NPU_WINDOWS_PYTHON`, `JARVIS_NPU_SMOKE_PHOTOS` and the models exist).

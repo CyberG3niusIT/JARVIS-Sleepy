@@ -45,6 +45,13 @@ def skill_manager(tmp_path, monkeypatch):
     config.set("system.storage_path", str(tmp_path))
     config.set("embeddings.voice_device", "cpu")
 
+    monkeypatch.setattr(
+        "sentence_transformers.SentenceTransformer",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("embedding model disabled in unit test")
+        ),
+    )
+
     conversation = SimpleNamespace(current_user="test_user")
     manager = SkillManager(config, conversation, _FakeTTS(), _FakeResponses(), llm=None)
     return manager
@@ -93,7 +100,7 @@ def test_school_mobility_intent_overlap(skill_manager, question, expected):
 @pytest.mark.parametrize("question", [
     "Erinnere mich daran, TestkindAlpha heute abzuholen",
     "Wie ist das Wetter heute?",
-    "Wann fährt der Bus?",
+    "Wann fÃ¤hrt der Bus?",
 ])
 def test_other_intents_do_not_execute_school_or_mobility(skill_manager, question):
     root = Path(__file__).resolve().parents[2]

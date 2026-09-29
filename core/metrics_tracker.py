@@ -195,7 +195,8 @@ class MetricsTracker:
             total = row["total"] or 0
             fallback_count = row["fallback_count"] or 0
 
-            # Claude cost estimate (Sonnet pricing: $3/$15 per MTok)
+            # Legacy Claude cost estimate (fixed Sonnet pricing: $3/$15 per MTok).
+            # Retained for API compatibility; it is not a generic cloud cost.
             claude_row = conn.execute("""
                 SELECT
                     SUM(COALESCE(prompt_tokens, 0)) as input_tok,
@@ -267,7 +268,11 @@ class MetricsTracker:
                     0 as estimated_tok,  -- column dead; real data in prompt/completion_tokens
                     AVG(latency_ms) as avg_latency,
                     SUM(CASE WHEN provider = 'qwen' THEN 1 ELSE 0 END) as qwen_count,
-                    SUM(CASE WHEN provider = 'claude' THEN 1 ELSE 0 END) as claude_count
+                    SUM(CASE WHEN provider = 'claude' THEN 1 ELSE 0 END) as claude_count,
+                    SUM(CASE WHEN provider IN ('qwen', 'qwen-small', 'gemma')
+                             THEN 1 ELSE 0 END) as local_model_count,
+                    SUM(CASE WHEN provider IN ('openrouter', 'anthropic', 'claude')
+                             THEN 1 ELSE 0 END) as cloud_count
                 FROM llm_interactions
                 WHERE timestamp >= ?
                 GROUP BY bucket_start
@@ -684,7 +689,7 @@ class MetricsTracker:
             conn.close()
 
     def get_model_dispatch(self, hours: float = 24) -> dict:
-        """Model dispatch distribution (4B vs 35B vs Claude).
+        """Model dispatch distribution across local and configured cloud models.
 
         Returns dict mapping model -> {count, percentage, avg_latency_ms}.
         """

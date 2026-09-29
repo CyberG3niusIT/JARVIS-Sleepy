@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>J.A.R.V.I.S. — E-Mail</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/dashboard_mail.css">
+</head>
+<body>
+  <header>
+    <div class="header-left"><h1>J.A.R.V.I.S. <span class="header-sub">E-MAIL</span></h1></div>
+    <nav class="header-right" aria-label="Dashboard-Navigation">
+      <a href="/dashboard" class="back-link">Übersicht</a>
+      <a href="/dashboard/pipeline" class="back-link">Pipeline</a>
+      <a href="/dashboard/health" class="back-link">System</a>
+      <a href="/dashboard/governance" class="back-link">Governance</a>
+      <a href="/dashboard/mail" class="back-link active-nav" aria-current="page">E-Mail</a>
+      <a href="/memory" class="back-link">Memory</a>
+      <a href="/" class="back-link">Chat</a>
+    </nav>
+  </header>
+  <main class="mail-shell">
+    <div class="mail-intro">
+      <div><span class="eyebrow">KOMMUNIKATION / MAILCOW</span>
+        <h2>Alle Postfächer im Blick.</h2>
+        <p>Neue Nachrichten erkennen, sicher einordnen und Antworten vor dem Versand prüfen.</p></div>
+      <span class="mail-state" id="mailState">Nicht verbunden</span>
+    </div>
+    <section class="mail-access" aria-label="Mailzugang">
+      <div class="mail-access-copy"><strong>Geschützter Zugriff</strong><span>Der Webzugang bleibt nur in dieser geöffneten Seite im Speicher.</span></div>
+      <label class="token-field" for="token">Webzugang <input id="token" type="password" autocomplete="off" placeholder="JARVIS-Zugang eingeben"></label>
+      <button id="load" class="mail-button primary">Postfächer laden</button>
+    </section>
+    <p id="result" class="mail-feedback" role="status" aria-live="polite">Maildaten werden erst nach Anmeldung geladen.</p>
+    <section class="mail-metrics" aria-label="Mailstatus">
+      <div class="card"><div class="card-label">Aktive Postfächer</div><div class="card-value" id="valAccounts">–</div></div>
+      <div class="card"><div class="card-label">Ungelesen im Posteingang</div><div class="card-value" id="valUnread">–</div></div>
+      <div class="card"><div class="card-label">Neu seit 24 Stunden</div><div class="card-value" id="valNotices">–</div></div>
+      <div class="card"><div class="card-label">Zur Entscheidung</div><div class="card-value" id="valSuggestions">–</div></div>
+    </section>
+    <div class="mail-grid">
+      <section class="mail-panel">
+        <div class="panel-head"><div><span class="eyebrow">BESTAND</span><h3>Postfächer</h3></div><span class="panel-note">Alle aktiven Konten</span></div>
+        <div id="accounts" class="mail-list"><p class="empty-state">Nach Anmeldung verfügbar</p></div>
+      </section>
+      <section class="mail-panel">
+        <div class="panel-head"><div><span class="eyebrow">EINGANG</span><h3>Neue Nachrichten</h3></div><span class="panel-note">Ohne Lesestatusänderung</span></div>
+        <div id="notices" class="mail-list"><p class="empty-state">Noch keine Meldungen</p></div>
+      </section>
+      <section class="mail-panel">
+        <div class="panel-head"><div><span class="eyebrow">ENTSCHEIDUNGEN</span><h3>Sortiervorschläge</h3></div><span class="panel-note">Unbekannte Absender bleiben im Eingang</span></div>
+        <div id="suggestions" class="mail-list"><p class="empty-state">Keine offenen Vorschläge</p></div>
+      </section>
+      <section class="mail-panel">
+        <div class="panel-head"><div><span class="eyebrow">NACHRICHT</span><h3>Gezielt lesen</h3></div></div>
+        <div class="field-grid">
+          <label>Postfach <input id="readAccount" type="email" placeholder="name@domain.de"></label>
+          <label>Ordner <input id="readFolder" value="INBOX"></label>
+          <label>Nachrichtenkennung <input id="readUid" type="number" min="1" placeholder="UID"></label>
+        </div>
+        <button id="readMessage" class="mail-button">Nachricht laden</button>
+        <button id="replyMessage" class="mail-button" hidden>Antwort vorbereiten</button>
+        <pre id="messageText" class="mail-message"></pre>
+      </section>
+    </div>
+    <div class="section-heading"><span class="eyebrow">REGELN &amp; ORDNUNG</span><h2>Einordnen mit Kontrolle</h2><p>Automatisch verschoben wird nur nach bestätigter Absenderregel und passendem Inhalt.</p></div>
+    <div class="mail-grid">
+      <section class="mail-panel">
+        <div class="panel-head"><h3>Absenderregel freigeben</h3></div>
+        <p class="panel-description">Für alex@wiesenmaier.org und info@wima-edv.de. Der Zielordner muss existieren.</p>
+        <label>Postfach <select id="ruleAccount"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <label>Genaue Absenderadresse <input id="ruleSender" type="email" placeholder="kontakt@beispiel.de"></label>
+        <label>Zielordner <input id="ruleFolder" type="text" placeholder="Rechtsanwalt"></label>
+        <button id="saveRule" class="mail-button">Regel freigeben</button>
+      </section>
+      <section class="mail-panel">
+        <div class="panel-head"><h3>Zielordner anlegen</h3></div>
+        <p class="panel-description">Jeder neue Ordner braucht eine eigene Freigabe.</p>
+        <label>Postfach <select id="folderAccount"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <label>Ordnername <input id="folderName" type="text" placeholder="Jugendamt"></label>
+        <button id="createFolder" class="mail-button">Ordner anlegen</button>
+      </section>
+    </div>
+    <section class="mail-panel full-panel">
+      <div class="panel-head"><div><span class="eyebrow">EINMALIGE AKTION</span><h3>Vorhandene Nachrichten</h3></div></div>
+      <p class="panel-description">Zuerst konkrete Treffer prüfen. Nur ausgewählte Nachrichten werden verschoben.</p>
+      <div class="field-grid preview-controls">
+        <label>Postfach <select id="previewAccount"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <label>Zielordner <input id="previewTarget" type="text" placeholder="Rechtsanwalt"></label>
+      </div>
+      <button id="preview" class="mail-button">Vorschau berechnen</button>
+      <div id="previewItems" class="mail-list"></div>
+      <button id="approvePreview" class="mail-button primary" hidden>Ausgewählte Nachrichten verschieben</button>
+      <div id="movedItems" class="mail-list"></div>
+    </section>
+    <section class="mail-panel full-panel">
+      <div class="panel-head"><div><span class="eyebrow">VERLAUF</span><h3>Verschiebungen &amp; Rücknahme</h3></div></div>
+      <div id="moveHistory" class="mail-list"><p class="empty-state">Nach Anmeldung verfügbar</p></div>
+    </section>
+    <div class="section-heading"><span class="eyebrow">VERSAND</span><h2>Vorbereiten. Prüfen. Freigeben.</h2><p>Antworten und neue Nachrichten nur von den zwei erlaubten Postfächern.</p></div>
+    <section class="mail-panel full-panel compose-panel">
+      <div class="field-grid">
+        <label>Absender <select id="from"><option>alex@wiesenmaier.org</option><option>info@wima-edv.de</option></select></label>
+        <label>Empfänger <input id="to" type="text" placeholder="name@domain.de, …"></label>
+        <label>Cc <input id="cc" type="text" placeholder="Optional"></label>
+        <label>Bcc <input id="bcc" type="text" placeholder="Optional"></label>
+      </div>
+      <label>Betreff <input id="subject" type="text" placeholder="Betreff"></label>
+      <label>Nachricht <textarea id="body" rows="10" placeholder="Nachricht schreiben …"></textarea></label>
+      <label>Anhänge <input id="attachments" type="file" multiple></label>
+      <button id="createDraft" class="mail-button">Zur Sichtprüfung vorbereiten</button>
+      <div id="review" class="review-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">VERBINDLICHE SICHTPRÜFUNG</span><h3>Genau dieser Entwurf</h3></div></div>
+        <pre id="reviewText"></pre>
+        <div class="review-actions">
+          <button id="send" class="mail-button primary">Genau diese Nachricht senden</button>
+          <button id="thunderbird" class="mail-button">Als Thunderbird-Entwurf ablegen</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <dialog id="confirmDialog" class="mail-dialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+    <span class="eyebrow">SICHTPRÜFUNG</span>
+    <h2 id="confirmTitle">Aktion freigeben</h2>
+    <p id="confirmBody"></p>
+    <div class="review-actions">
+      <button id="confirmCancel" class="mail-button">Abbrechen</button>
+      <button id="confirmAccept" class="mail-button primary">Freigeben</button>
+    </div>
+  </dialog>
+  <script src="/dashboard_mail.js"></script>
+</body>
+</html>

@@ -16,8 +16,10 @@ pvporcupine>=3.0.0
 # Text-to-Speech (Piper)
 # Note: Piper is used via binary, not Python package
 
-# LLM Integration
-anthropic>=0.40.0  # For Claude API
+# Optional provider dependency is intentionally not installed by default.
+# For an explicitly configured Anthropic provider only, install:
+#   pip install -r requirements-anthropic.txt
+# OpenRouter uses the existing requests dependency.
 
 # Voice Recognition
 speechbrain>=0.5.16

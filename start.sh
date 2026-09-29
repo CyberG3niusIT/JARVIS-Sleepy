@@ -5,7 +5,15 @@ JARVIS_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_PYTHON="${JARVIS_RUNTIME_PYTHON:-/home/alex/jarvis-venv/bin/python3}"
 PROC_ROOT="${JARVIS_PROC_ROOT:-/proc}"
 [[ -x "$RUNTIME_PYTHON" ]] || { echo "ERROR: JARVIS Python-Runtime fehlt."; exit 1; }
+# Primary/Expert units come from config (handover.units.*, llm.primary.unit; JARVIS_LLM_UNIT
+# overrides). The legacy llama-server.service is only the explicit compatibility fallback.
+llm_unit="$(cd "$JARVIS_ROOT" && "$RUNTIME_PYTHON" scripts/check_runtime_dependencies.py --llm-unit)"
+[[ "$llm_unit" =~ ^[A-Za-z0-9_.@:-]+\.service$ ]] || { echo "ERROR: Primary-LLM-Unit konnte nicht aus der Konfiguration bestimmt werden."; exit 1; }
+expert_llm_unit="$(cd "$JARVIS_ROOT" && "$RUNTIME_PYTHON" scripts/check_runtime_dependencies.py --expert-unit)"
 llm_port="$(cd "$JARVIS_ROOT" && "$RUNTIME_PYTHON" scripts/check_runtime_dependencies.py --llm-port)"
+# LLM wait budget follows handover.primary_start_timeout_s (max 300 s); 180 s if it cannot be read.
+llm_wait="$(cd "$JARVIS_ROOT" && "$RUNTIME_PYTHON" scripts/check_runtime_dependencies.py --llm-wait 2>/dev/null || true)"
+[[ "$llm_wait" =~ ^[1-9][0-9]*$ ]] && (( llm_wait <= 300 )) || llm_wait=180
 STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/jarvis-runtime"
 mkdir -p "$STATE_DIR"
 exec 9>"$STATE_DIR/control.lock"
@@ -18,16 +26,27 @@ started_llm=0
 started_chatterbox=0
 started_jarvis=0
 degraded=0
+
+# Lifecycle record for the runtime supervisor (scripts/runtime_status.py reads it).
+# Best effort: recording must never change the outcome of a start.
+export JARVIS_RUNTIME_STATE_DIR="$STATE_DIR"
+record_lifecycle() {
+    "$RUNTIME_PYTHON" "$JARVIS_ROOT/core/runtime_state.py" \
+        "${JARVIS_LIFECYCLE_ACTION:-start}" "$@" --pid "$$" >/dev/null 2>&1 || true
+}
+record_lifecycle running
+
 state=STARTING
 echo "$state"
 
 fail() {
     code=$?
     trap - ERR
+    record_lifecycle finished --result ERROR --message "Start fehlgeschlagen (exit $code); neu gestartete Dienste wurden bereinigt."
     if (( started_jarvis )); then systemctl --user stop jarvis.service >/dev/null 2>&1 || true; fi
     if (( started_chatterbox == 1 )); then systemctl --user stop jarvis-chatterbox.service >/dev/null 2>&1 || true; fi
     if (( started_chatterbox == 2 )); then sudo -n systemctl stop chatterbox.service >/dev/null 2>&1 || true; fi
-    if (( started_llm )); then systemctl --user stop llama-server.service >/dev/null 2>&1 || true; fi
+    if (( started_llm )); then systemctl --user stop $llm_unit >/dev/null 2>&1 || true; fi
     echo "ERROR: Start fehlgeschlagen (exit $code); neu gestartete JARVIS-Dienste wurden bereinigt."
     exit "$code"
 }
@@ -35,21 +54,23 @@ trap fail ERR
 
 unit_field() { systemctl --user show "$1" --property="$2" --value 2>/dev/null || true; }
 require_matching_llm_unit() {
-    local state fragment execstart pid owner llm_exe
-    state="$(unit_field llama-server.service LoadState)"
-    fragment="$(unit_field llama-server.service FragmentPath)"
-    execstart="$(unit_field llama-server.service ExecStart)"
-    [[ "$state" == loaded && "$fragment" == /home/alex/.config/systemd/user/llama-server.service ]] || {
+    local state fragment execstart pid owner llm_exe host_re port_re
+    state="$(unit_field $llm_unit LoadState)"
+    fragment="$(unit_field $llm_unit FragmentPath)"
+    execstart="$(unit_field $llm_unit ExecStart)"
+    [[ "$state" == loaded && "$fragment" == /home/alex/.config/systemd/user/$llm_unit ]] || {
         echo "LLM-User-Unit fehlt oder ist nicht die bestätigte Sleepy-Unit."
         return 1
     }
+    # Exact option match (word boundary): "--port 8080" must not match "--port 80801" or "--host 127.0.0.10".
+    local host_re="(^|[[:space:]])--host[=[:space:]]127[.]0[.]0[.]1([[:space:]]|;|$)"
+    local port_re="(^|[[:space:]])--port[=[:space:]]${llm_port}([[:space:]]|;|$)"
     [[ "$execstart" == *"/home/alex/llama.cpp/build/bin/llama-server"* \
-        && ( "$execstart" == *"--host 127.0.0.1"* || "$execstart" == *"--host=127.0.0.1"* ) \
-        && ( "$execstart" == *"--port $llm_port"* || "$execstart" == *"--port=$llm_port"* ) ]] || {
+        && "$execstart" =~ $host_re && "$execstart" =~ $port_re ]] || {
         echo "LLM-Unit entspricht nicht der bestätigten Binary, Loopback-Adresse und Config-Port."
         return 1
     }
-    pid="$(unit_field llama-server.service MainPID)"
+    pid="$(unit_field $llm_unit MainPID)"
     sockets="$(ss -ltnp "sport = :$llm_port" 2>/dev/null || true)"
     listening="$(sed -n '2,$p' <<<"$sockets")"
     owner="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' <<<"$sockets" | sort -u)"
@@ -58,7 +79,7 @@ require_matching_llm_unit() {
         return 1
     fi
     if [[ -n "$owner" ]]; then
-        [[ "$(unit_field llama-server.service ActiveState)" == active && "$owner" == "$pid" ]] || {
+        [[ "$(unit_field $llm_unit ActiveState)" == active && "$owner" == "$pid" ]] || {
             echo "Konfigurierter LLM-Port ist durch einen nicht zugeordneten Prozess belegt (PID $owner)."
             return 1
         }
@@ -67,7 +88,7 @@ require_matching_llm_unit() {
             echo "Der LLM-Service-Prozess stimmt nicht mit der bestätigten Binary überein."
             return 1
         }
-    elif [[ "$(unit_field llama-server.service ActiveState)" == active ]]; then
+    elif [[ "$(unit_field $llm_unit ActiveState)" == active ]]; then
         [[ "$pid" =~ ^[1-9][0-9]*$ ]] || {
             echo "LLM-Unit ist aktiv, meldet aber keinen laufenden Prozess."
             return 1
@@ -96,15 +117,31 @@ require_loopback_llm_listener() {
     }
 }
 
+# Never two large models on the GPU: a resident Expert blocks the start (it is not stopped here;
+# expert lifecycle belongs to core/model_handover.py).
+require_no_resident_expert() {
+    [[ -n "$expert_llm_unit" && "$expert_llm_unit" != "$llm_unit" ]] || return 0
+    case "$(unit_field $expert_llm_unit ActiveState)" in
+        active|activating|reloading)
+            echo "Expert-LLM-Unit $expert_llm_unit ist aktiv; Primary würde parallel auf der GPU geladen. Start abgebrochen."
+            return 1 ;;
+    esac
+}
+
+require_no_resident_expert
 require_matching_llm_unit
-if [[ "$(unit_field llama-server.service ActiveState)" != active ]]; then
-    started_llm=1
-    systemctl --user start llama-server.service
-fi
+case "$(unit_field $llm_unit ActiveState)" in
+    active) ;;
+    activating|reloading) ;;   # someone else is already starting it: wait, but it is not ours to clean up
+    *)
+        started_llm=1
+        systemctl --user start $llm_unit
+        ;;
+esac
 llm_ready=0
-for _ in {1..180}; do
-    if [[ "$(unit_field llama-server.service ActiveState)" == active ]]; then
-        llm_pid="$(unit_field llama-server.service MainPID)"
+for ((llm_try = 0; llm_try < llm_wait; llm_try++)); do
+    if [[ "$(unit_field $llm_unit ActiveState)" == active ]]; then
+        llm_pid="$(unit_field $llm_unit MainPID)"
         [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] || {
             echo "LLM-Unit ist aktiv, meldet aber keinen laufenden Prozess."
             false
@@ -134,7 +171,7 @@ for _ in {1..180}; do
     fi
     sleep 1
 done
-(( llm_ready )) || { echo "Lokaler LLM-Service hat innerhalb von 180 Sekunden keine Bereitschaft erreicht."; false; }
+(( llm_ready )) || { echo "Lokaler LLM-Service hat innerhalb von $llm_wait Sekunden keine Bereitschaft erreicht."; false; }
 
 unit_field_for_scope() {
     local scope="$1" unit="$2" property="$3"
@@ -442,4 +479,5 @@ else
     state=READY
     echo "$state: Backend, lokales LLM, kanonische Chatterbox und Listener sind bereit."
 fi
+record_lifecycle finished --result "$state"
 trap - ERR

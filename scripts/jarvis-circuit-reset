@@ -67,7 +67,7 @@ fi
 
 # Call the web service API to reset
 RESPONSE=$(curl -s -o /tmp/jarvis_reset_response.json -w "%{http_code}" \
-    -X POST "http://127.0.0.1:8088/api/governance/circuit-breaker/reset" \
+    -X POST "http://127.0.0.1:8091/api/governance/circuit-breaker/reset" \
     -H "Content-Type: application/json" \
     -d "{\"password_hash\": \"$COMPUTED_HASH\"}")
 

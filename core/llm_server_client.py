@@ -6,7 +6,15 @@ from core.logger import get_logger
 class LLMServerClient:
     """Client for llama-server REST API"""
 
-    def __init__(self, base_url="http://127.0.0.1:8080"):
+    def __init__(self, base_url=None):
+        if base_url is None:
+            # llm.primary.endpoint (was hardcoded :8080); fall back to the default if no config is loadable.
+            try:
+                from core.config import get_config
+                from core.runtime_state import primary_base_url
+                base_url = primary_base_url(get_config())
+            except Exception:
+                base_url = "http://127.0.0.1:8080"
         self.base_url = base_url
         self.endpoint = f"{base_url}/v1/chat/completions"
         self.logger = get_logger(__name__)

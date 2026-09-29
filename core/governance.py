@@ -439,7 +439,7 @@ class Governance:
 
         JARVIS can read this file. JARVIS cannot write to it.
         The commandments are used as constitutional context in LLM prompts
-        and Claude API consultations.
+        and optional cloud consultations.
         """
         if self._commandments_path.exists():
             try:

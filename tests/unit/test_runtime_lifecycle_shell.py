@@ -41,7 +41,12 @@ def prop(unit, key):
         return {"LoadState":"not-found", "FragmentPath":"", "ExecStart":"", "ActiveState":"inactive", "User":"", "MainPID":"0", "ControlGroup":""}[key]
     if unit == "jarvis-chatterbox.service":
         return {"LoadState":"loaded" if s["chat_started"] else "not-found", "FragmentPath":"/run/user/1002/systemd/transient/jarvis-chatterbox.service", "ExecStart":"path=/bin/bash ; argv[]=/bin/bash "+os.path.join(os.environ["FAKE_ROOT"],"start_chatterbox.sh"), "ActiveState":"active" if s["chat_started"] else "inactive", "MainPID":s.get("chat_main_pid", "420"), "ControlGroup":"/user.slice/user-1002.slice/user@1002.service/app.slice/jarvis-chatterbox.service", "WorkingDirectory":os.environ["FAKE_ROOT"]}[key]
-    return {"LoadState":"loaded", "FragmentPath":"/home/alex/.config/systemd/user/llama-server.service", "ExecStart":os.environ.get("FAKE_LLM_EXECSTART", "path=/home/alex/llama.cpp/build/bin/llama-server --host 127.0.0.1 --port 8080"), "ActiveState":"active" if s["llm_active"] else "inactive", "MainPID":"410"}[key]
+    llm_unit = os.environ.get("FAKE_LLM_UNIT", "llama-server.service")
+    if unit == os.environ.get("FAKE_EXPERT_UNIT", "-"):
+        return {"LoadState":"loaded", "FragmentPath":"/home/alex/.config/systemd/user/"+unit, "ExecStart":"path=/home/alex/llama.cpp/build/bin/llama-server --host 127.0.0.1 --port 8082", "ActiveState":"active" if os.environ.get("FAKE_EXPERT_ACTIVE") == "1" else "inactive", "MainPID":"0"}[key]
+    if unit != llm_unit:
+        return {"LoadState":"loaded", "FragmentPath":"/home/alex/.config/systemd/user/"+unit, "ExecStart":"", "ActiveState":"inactive", "MainPID":"0"}[key]
+    return {"LoadState":"loaded", "FragmentPath":"/home/alex/.config/systemd/user/"+llm_unit, "ExecStart":os.environ.get("FAKE_LLM_EXECSTART", "path=/home/alex/llama.cpp/build/bin/llama-server --host 127.0.0.1 --port 8080"), "ActiveState":os.environ.get("FAKE_LLM_ACTIVE_STATE") or ("active" if s["llm_active"] else "inactive"), "MainPID":"410"}[key]
 if cmd == "show":
     unit = a[1]; key = next(x.split("=",1)[1] for x in a if x.startswith("--property="))
     print(prop(unit, key)); sys.exit(0)
@@ -55,7 +60,7 @@ if cmd in ("start", "stop", "restart"):
             s["invocation"] = "run-"+str(len(s["calls"]))
             with open(os.path.join(os.environ["FAKE_PROC_ROOT"], "430", "environ"), "wb") as f:
                 f.write(("PATH=" + s["manager_path"] + "\0WSL_INTEROP=" + s.get("manager_interop", "") + "\0").encode())
-    elif unit == "llama-server.service": s["llm_active"] = cmd == "start"
+    elif unit == os.environ.get("FAKE_LLM_UNIT", "llama-server.service"): s["llm_active"] = cmd == "start"
     elif unit == "jarvis-chatterbox.service": s["chat_started"] = cmd == "start"
     save(); sys.exit(0)
 if cmd == "is-active":
@@ -129,7 +134,13 @@ if os.environ.get("FAKE_CHAT_GPU_ERROR") == "1" and "jarvis-chatterbox.service" 
         "python-runtime": r'''#!/usr/bin/env python3
 import os, sys
 args=" ".join(sys.argv[1:])
+if "runtime_state.py" in args:
+    # Delegate lifecycle recording to the real stdlib-only writer from the repository under test.
+    rest = sys.argv[1 + next(i for i, a in enumerate(sys.argv[1:]) if a.endswith("runtime_state.py")) + 1:]
+    os.execv(sys.executable, [sys.executable, os.path.join(os.environ["FAKE_REPO"], "core", "runtime_state.py"), *rest])
 if "--llm-port" in args: print("8080"); sys.exit(0)
+if "--llm-unit" in args: print(os.environ.get("FAKE_LLM_UNIT", "llama-server.service")); sys.exit(0)
+if "--expert-unit" in args: print(os.environ.get("FAKE_EXPERT_UNIT", "")); sys.exit(0)
 if "check_chatterbox_runtime.py" in args:
     if os.environ.get("FAKE_CHAT_HEALTH", "1") == "1": print("OK"); sys.exit(0)
     print("/health not ready"); sys.exit(1)
@@ -213,6 +224,7 @@ def _sandbox(tmp_path):
     env.update({
         "PATH": str(bindir) + os.pathsep + env["PATH"],
         "FAKE_ROOT": str(root),
+        "FAKE_REPO": str(REPO),
         "FAKE_STATE_FILE": str(state_file),
         "FAKE_PROC_ROOT": str(proc_root),
         "JARVIS_PROC_ROOT": str(proc_root),
@@ -470,6 +482,51 @@ def test_active_llm_delayed_bind_is_waited_for_without_duplicate_start(tmp_path)
     assert _state(state_file)["calls"] == ["start:jarvis.service"]
 
 
+def test_running_gemma_primary_unit_is_accepted_and_left_untouched(tmp_path):
+    # Regression: Primary llama-server-primary.service already active on 8080, the legacy
+    # llama-server.service is inactive. start.sh must use the configured unit, not the legacy one.
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_LLM_UNIT"] = "llama-server-primary.service"
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "nicht zugeordneten Prozess" not in result.stdout
+    assert "READY:" in result.stdout
+    calls = _state(state_file)["calls"]
+    assert calls == ["start:jarvis.service"]  # primary neither started, stopped nor restarted
+    assert not any("llama-server.service" in c for c in calls)  # legacy unit never touched
+
+
+def test_primary_unit_foreign_port_owner_is_still_rejected(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_LLM_UNIT"] = "llama-server-primary.service"
+    env["FAKE_LLM_PID"] = "999"
+    result = _invoke(root, env)
+    assert result.returncode != 0
+    assert "nicht zugeordneten Prozess" in result.stdout
+    assert not [c for c in _state(state_file)["calls"] if c.startswith(("start:llama", "stop:llama"))]
+
+
+def test_resident_expert_blocks_start_without_stopping_it(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_LLM_UNIT"] = "llama-server-primary.service"
+    env["FAKE_EXPERT_UNIT"] = "llama-server-expert.service"
+    env["FAKE_EXPERT_ACTIVE"] = "1"
+    result = _invoke(root, env)
+    assert result.returncode != 0
+    assert "parallel" in result.stdout
+    calls = _state(state_file)["calls"]
+    assert not any("llama-server" in c for c in calls)  # nothing started, nothing stopped
+
+
+def test_inactive_expert_does_not_block_primary_start(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_LLM_UNIT"] = "llama-server-primary.service"
+    env["FAKE_EXPERT_UNIT"] = "llama-server-expert.service"
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert not any("expert" in c for c in _state(state_file)["calls"])
+
+
 def test_foreign_llm_port_owner_is_not_replaced_or_killed(tmp_path):
     root, state_file, env = _sandbox(tmp_path)
     env["FAKE_LLM_PID"] = "999"
@@ -495,3 +552,136 @@ def test_llm_listener_on_all_interfaces_is_rejected(tmp_path):
     assert result.returncode != 0
     assert "Loopback-Adresse" in result.stdout
     assert _state(state_file)["calls"] == []
+
+
+# --- lifecycle record read by the runtime supervisor (scripts/runtime_status.py) -----------
+
+def _record(tmp_path):
+    path = tmp_path / "runtime" / "jarvis-runtime" / "lifecycle.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def test_start_records_running_then_ready(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    record = _record(tmp_path)
+    assert (record["action"], record["phase"], record["result"]) == ("start", "finished", "READY")
+    assert record["pid"] > 0 and record["schema"] == 1
+
+
+def test_start_with_optional_degradation_records_degraded(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_DEGRADED"] = "1"
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert _record(tmp_path)["result"] == "DEGRADED"
+
+
+def test_failed_start_records_error_and_keeps_failing(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_REQUIRED_FAIL"] = "1"
+    result = _invoke(root, env)
+    assert result.returncode != 0
+    record = _record(tmp_path)
+    assert (record["action"], record["phase"], record["result"]) == ("start", "finished", "ERROR")
+    assert "fehlgeschlagen" in record["message"]
+
+
+def test_stop_records_stopped(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state["jarvis_active"] = True
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    result = _invoke(root, env, "stop")
+    assert result.returncode == 0, result.stderr + result.stdout
+    record = _record(tmp_path)
+    assert (record["action"], record["phase"], record["result"]) == ("stop", "finished", "STOPPED")
+
+
+def test_restart_keeps_one_restart_record_from_stop_through_start(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state["jarvis_active"] = True
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    result = _invoke(root, env, "restart")
+    assert result.returncode == 0, result.stderr + result.stdout
+    record = _record(tmp_path)
+    # stop.sh must not publish STOPPED in the middle of a restart.
+    assert (record["action"], record["phase"], record["result"]) == ("restart", "finished", "READY")
+
+
+def test_restart_failure_in_start_records_error_for_restart(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state["jarvis_active"] = True
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    env["FAKE_REQUIRED_FAIL"] = "1"
+    result = _invoke(root, env, "restart")
+    assert result.returncode != 0
+    record = _record(tmp_path)
+    assert (record["action"], record["phase"], record["result"]) == ("restart", "finished", "ERROR")
+
+
+def test_unwritable_lifecycle_record_never_changes_the_start_outcome(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_REPO"] = str(tmp_path / "does-not-exist")  # recorder cannot run at all
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "READY:" in result.stdout
+    assert _record(tmp_path) is None
+
+
+def _live_handover(tmp_path, pid=None):
+    """A handover record written by the REAL writer (heartbeat now, owner pid alive unless given)."""
+    import sys
+    sys.path.insert(0, str(REPO))
+    from core import runtime_state
+    state = {"state": "EXPERT_RUNNING", "is_swapping": True}
+    if pid is not None:
+        state["pid"] = pid
+    runtime_state.write_handover(state, tmp_path / "runtime" / "jarvis-runtime")
+
+
+def test_stop_and_restart_refuse_during_a_live_handover(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state["jarvis_active"] = True
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    _live_handover(tmp_path)
+    env["JARVIS_HANDOVER_WAIT_S"] = "2"      # the fake sleep is instant: keep the polling loop short
+    for action in ("stop", "restart"):
+        result = _invoke(root, env, action)
+        assert result.returncode != 0, action
+        assert "Modellwechsel" in result.stdout and "nichts gestoppt" in result.stdout
+    assert _state(state_file)["calls"] == []                     # daemon untouched
+    assert not (tmp_path / "runtime" / "jarvis-runtime" / "lifecycle.json").exists()   # no record was started
+
+
+def test_stop_ignores_a_handover_record_of_a_dead_process(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    _live_handover(tmp_path, pid=2 ** 22 + 4321)                  # crashed owner
+    result = _invoke(root, env, "stop")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "STOPPED:" in result.stdout
+
+
+def test_llm_option_match_is_exact_not_a_prefix(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_LLM_EXECSTART"] = "path=/home/alex/llama.cpp/build/bin/llama-server --host 127.0.0.1 --port 80801"
+    result = _invoke(root, env)
+    assert result.returncode != 0 and "Config-Port" in result.stdout
+    env["FAKE_LLM_EXECSTART"] = "path=/home/alex/llama.cpp/build/bin/llama-server --host 127.0.0.10 --port 8080"
+    assert _invoke(root, env).returncode != 0
+    env["FAKE_LLM_EXECSTART"] = "path=/home/alex/llama.cpp/build/bin/llama-server ; argv[]=/x/llama-server --host=127.0.0.1 --port=8080 ; ignore_errors=no"
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_activating_llm_not_started_by_this_run_is_never_stopped_on_failure(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_LLM_ACTIVE_STATE"] = "activating"                   # somebody else is loading the model
+    result = _invoke(root, env)
+    assert result.returncode != 0
+    calls = _state(state_file)["calls"]
+    assert not [c for c in calls if "llama-server" in c]          # neither started nor cleaned up by us

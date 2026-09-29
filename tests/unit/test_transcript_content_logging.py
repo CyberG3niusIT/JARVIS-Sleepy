@@ -72,7 +72,7 @@ def test_continuous_listener_does_not_log_or_print_transcript(caplog, monkeypatc
     with caplog.at_level(logging.INFO, logger="test.voice.transcript_privacy"):
         listener._transcribe_and_check(np.zeros(8, dtype=np.float32))
 
-    assert delivered == [phrase]
+    assert delivered == ["private-secret-phrase"]
     assert "private-secret-phrase" not in caplog.text
 
 
@@ -90,5 +90,5 @@ def test_coordinator_does_not_log_or_print_transcript(caplog, monkeypatch):
         coordinator._handle_transcription(SimpleNamespace(data=phrase))
 
     queued_event = coordinator.event_queue.put.call_args.args[0]
-    assert queued_event.data == phrase
+    assert queued_event.data == "private-secret-phrase"
     assert "private-secret-phrase" not in caplog.text

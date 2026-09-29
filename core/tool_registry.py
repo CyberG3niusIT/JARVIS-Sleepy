@@ -54,7 +54,54 @@ for _path in sorted(_tools_dir.glob("*.py")):
 
 TOOL_HANDLERS = {}        # tool_name -> handler function
 SKILL_TOOLS = {}          # tool_name -> schema (skill-gated, for semantic pruning)
-ALWAYS_INCLUDED_TOOLS = {}  # tool_name -> schema (always in every tool call)
+class _AvailabilityDict(dict):
+    """dict whose read views hide tools whose module ``is_available()`` returns False.
+
+    A tool module may define ``is_available() -> bool`` (e.g. delegate_to_expert only
+    when a handover delegator is registered). Readers (conversation_router, tests)
+    keep using the plain dict API; unavailable tools are simply not visible."""
+
+    def __init__(self):
+        super().__init__()
+        self._avail = {}
+
+    def _visible(self, name) -> bool:
+        pred = self._avail.get(name)
+        if pred is None:
+            return True
+        try:
+            return bool(pred())
+        except Exception:
+            return False
+
+    def __iter__(self):
+        return iter([k for k in dict.keys(self) if self._visible(k)])
+
+    def keys(self):
+        return list(iter(self))
+
+    def values(self):
+        return [dict.__getitem__(self, k) for k in self]
+
+    def items(self):
+        return [(k, dict.__getitem__(self, k)) for k in self]
+
+    def __len__(self):
+        return len(list(iter(self)))
+
+    def __contains__(self, key):
+        return dict.__contains__(self, key) and self._visible(key)
+
+    def __getitem__(self, key):
+        if not self._visible(key):
+            raise KeyError(key)
+        return dict.__getitem__(self, key)
+
+    def get(self, key, default=None):
+        return dict.get(self, key, default) if self._visible(key) else default
+
+
+ALWAYS_INCLUDED_TOOLS = _AvailabilityDict()  # tool_name -> schema (always in every tool call)
 ALL_TOOLS = {}            # tool_name -> schema (all tools)
 TOOL_SKILL_MAP = {}       # skill_name -> list[str] of tool_names (for conversation_router pruner)
 _external_prompt_rules = {}  # tool_name -> system prompt rule string (MCP tools)
@@ -72,6 +119,9 @@ for _mod in _tool_modules:
 
     if _always:
         ALWAYS_INCLUDED_TOOLS[_name] = _mod.SCHEMA
+        _avail_fn = getattr(_mod, 'is_available', None)
+        if callable(_avail_fn):
+            ALWAYS_INCLUDED_TOOLS._avail[_name] = _avail_fn
 
     if _skill is not None:
         SKILL_TOOLS[_name] = _mod.SCHEMA

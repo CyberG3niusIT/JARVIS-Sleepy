@@ -57,7 +57,7 @@ Pre-P4c:  Pending skill confirmations
 P4-LLM:   ★ TOOL CALLING — semantic pruning → LLM with 11 tools (PRIMARY PATH)
 P4:       Skill routing — stateful skills (app_launcher, file_editor, social_intros)
 P5:       News continuation
-Fallback:  LLM streaming with tools (Qwen3.5-35B → quality gate → Claude API)
+Fallback:  LLM streaming with tools (local model → quality gate → configured cloud provider, if enabled and permitted)
 ```
 
 **Dual-Model Architecture:** Qwen3.5-35B-A3B (port 8080) handles tool calling and complex queries. Qwen3.5-4B (port 8081) handles synthesis, contextual acknowledgments, and briefing composition — lower latency for lightweight tasks.

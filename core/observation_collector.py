@@ -402,7 +402,7 @@ class ObservationCollector:
                         len(findings), len(DETECTORS),
                     )
                     self._store_findings(findings)
-                    # Auto-consult: send high/medium findings to Claude
+                    # Optional auto-consult is disabled in the shipped config.
                     if self.auto_consult:
                         significant = [f for f in findings
                                        if f.severity in ("critical", "high", "medium")]
@@ -490,12 +490,12 @@ class ObservationCollector:
             self._findings_history = self._findings_history[-50:]
 
     def _consult_claude(self, findings: list):
-        """Send significant findings to Claude for analysis."""
+        """Attempt optional consultation; its provider and privacy gates fail closed."""
         try:
             from core.claude_consultation import get_claude_consultation
             cc = get_claude_consultation(self.config)
             if not cc:
-                logger.warning("Claude consultation not available")
+                logger.warning("Cloud consultation not available")
                 return
             result = cc.consult_and_propose(findings)
             proposals = result.get("proposals", [])

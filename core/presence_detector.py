@@ -9,6 +9,7 @@ reminder_manager background thread + EventTTSProxy pattern.
 """
 
 import asyncio
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ import numpy as np
 
 from core.logger import get_logger
 from core.honorific import set_honorific
+from core.npu_face_backend import NpuFaceBackend, NpuUnavailable
+from core.vision_gate import VisionGate
 
 
 # Singleton
@@ -90,8 +93,30 @@ class PresenceDetector:
         self._face_cache: dict[str, np.ndarray] = {}  # person_id -> 512-dim encoding
         self._face_user_map: dict[str, str] = {}      # person_id -> user_id (for identity propagation)
 
-        # InsightFace app (lazy-loaded)
+        # InsightFace app (lazy-loaded). Backend: "cpu" (default, InsightFace on
+        # onnxruntime), "npu" (Intel NPU via the Windows OpenVINO worker) or
+        # "auto" (NPU if usable, else CPU). See core/npu_face_backend.py.
         self._face_app = None
+        self._backend_requested = str(presence_cfg.get("backend", "cpu")).lower()
+        if self._backend_requested not in ("cpu", "npu", "auto"):
+            self.logger.warning(
+                f"Unknown vision.presence.backend '{self._backend_requested}' — using cpu"
+            )
+            self._backend_requested = "cpu"
+        self._npu_cfg = presence_cfg.get("npu", {}) or {}
+        self._npu_fallback_to_cpu = bool(self._npu_cfg.get("fallback_to_cpu", True))
+        self._npu_disabled = False  # set after an NPU init/runtime failure
+        self._backend_info: dict = {"requested": self._backend_requested, "active": None, "reason": None}
+        # Similarities of the most recent identification pass (transparency only)
+        self.last_matches: list[dict] = []
+        self._camera_idle_logged = False
+        self._privacy_skip_logged = False
+        self._last_npu_sensor: Optional[tuple] = None
+        # Optional LLM vision gate (default OFF; see core/vision_gate.py)
+        self._vision_gate = VisionGate(config)
+        self._event_frame = None          # frame of the current poll, RAM only, cleared after use
+        self._vision_thread: Optional[threading.Thread] = None
+        self.last_vision_note: Optional[str] = None
 
         # Callbacks (set by jarvis_continuous.py)
         self._pause_listener_callback: Optional[Callable] = None
@@ -119,19 +144,102 @@ class PresenceDetector:
     # ------------------------------------------------------------------
 
     def _get_face_app(self):
-        """Lazy-load the InsightFace application (RetinaFace + ArcFace)."""
+        """Lazy-load the face pipeline (NPU backend or CPU InsightFace).
+
+        Both expose ``.get(frame_bgr) -> [face]`` with ``bbox`` and
+        ``normed_embedding``.
+        """
         if self._face_app is None:
-            self.logger.info("Loading InsightFace buffalo_l...")
-            import warnings
-            warnings.filterwarnings("ignore", message=".*estimate.*is deprecated.*")
-            from insightface.app import FaceAnalysis
-            self._face_app = FaceAnalysis(
-                name="buffalo_l",
-                providers=["CPUExecutionProvider"],
-            )
-            self._face_app.prepare(ctx_id=-1, det_size=(640, 640))
-            self.logger.info("InsightFace loaded")
+            self._face_app = self._create_face_app()
         return self._face_app
+
+    def _create_face_app(self):
+        """Pick the backend. The NPU path never falls back silently: a failure
+        is logged, recorded in ``get_status()['backend']`` and (unless
+        ``vision.presence.npu.fallback_to_cpu`` is false) the CPU path is used."""
+        if self._npu_disabled and self._backend_requested == "npu" and not self._npu_fallback_to_cpu:
+            # Sticky until restart: never slip into CPU when the operator forbade it
+            raise NpuUnavailable(self._backend_info.get("reason") or "npu_disabled")
+        if self._backend_requested in ("npu", "auto") and not self._npu_disabled:
+            try:
+                backend = self._create_npu_backend()
+                info = backend.initialize()
+                self._backend_info = {
+                    "requested": self._backend_requested, "active": "npu", "reason": None,
+                    "execution_devices": info.get("execution_devices"),
+                    "npu_name": info.get("npu_name"), "openvino": info.get("openvino"),
+                }
+                self.logger.info(f"Presence backend: NPU {info.get('execution_devices')}")
+                return backend
+            except NpuUnavailable as e:
+                self._npu_disabled = True
+                self._backend_info = {
+                    "requested": self._backend_requested, "active": None,
+                    "reason": e.code, "detail": e.detail[:300],
+                }
+                if self._backend_requested == "npu" and not self._npu_fallback_to_cpu:
+                    self.logger.error(f"NPU presence backend unavailable ({e.code}); CPU fallback disabled")
+                    raise
+                log = self.logger.warning if self._backend_requested == "npu" else self.logger.info
+                log(f"NPU presence backend unavailable ({e.code}) — falling back to CPU InsightFace")
+        app = self._create_cpu_face_app()
+        self._backend_info = dict(self._backend_info, requested=self._backend_requested, active="cpu")
+        return app
+
+    def _create_npu_backend(self) -> NpuFaceBackend:
+        storage = self.config.get("system.storage_path", "/home/alex/jarvis-data")
+        model_dir = self._npu_cfg.get("model_dir") or str(
+            Path(storage) / "models" / "insightface" / "buffalo_l"
+        )
+        windows_python = os.environ.get("JARVIS_NPU_WINDOWS_PYTHON") or self._npu_cfg.get("windows_python", "")
+        return NpuFaceBackend(
+            model_dir=model_dir,
+            windows_python=windows_python,
+            timeout=float(self._npu_cfg.get("request_timeout", 30)),
+            logger=self.logger,
+        )
+
+    def _create_cpu_face_app(self):
+        self.logger.info("Loading InsightFace buffalo_l...")
+        import warnings
+        warnings.filterwarnings("ignore", message=".*estimate.*is deprecated.*")
+        from insightface.app import FaceAnalysis
+        app = FaceAnalysis(
+            name="buffalo_l",
+            providers=["CPUExecutionProvider"],
+        )
+        app.prepare(ctx_id=-1, det_size=(640, 640))
+        self.logger.info("InsightFace loaded")
+        return app
+
+    def _analyse(self, frame):
+        """``app.get(frame)`` with a visible fallback if the NPU worker dies mid-run."""
+        try:
+            app = self._get_face_app()
+        except NpuUnavailable:
+            return []  # backend: npu with fallback_to_cpu=false — state is in get_status()['backend']
+        try:
+            return app.get(frame)
+        except NpuUnavailable as e:
+            self.logger.warning(f"NPU presence backend failed at runtime ({e.code})")
+            self._npu_disabled = True
+            self._backend_info = {
+                "requested": self._backend_requested, "active": None,
+                "reason": e.code, "detail": e.detail[:300],
+            }
+            try:
+                app.close()
+            except Exception:
+                pass
+            self._face_app = None
+            if self._backend_requested == "npu" and not self._npu_fallback_to_cpu:
+                return []
+            return self._get_face_app().get(frame)
+
+    def ensure_backend(self) -> dict:
+        """Initialise the face backend now (no camera needed) and return its status."""
+        self._get_face_app()
+        return dict(self._backend_info)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -153,6 +261,9 @@ class PresenceDetector:
         self._running = False
         if self._poll_thread:
             self._poll_thread.join(timeout=10)
+        if isinstance(self._face_app, NpuFaceBackend):
+            self._face_app.close()  # ends the Windows worker process
+            self._face_app = None
         self.logger.info("Presence detection stopped")
 
     def set_listener_callbacks(self, pause: Callable, resume: Callable):
@@ -188,6 +299,7 @@ class PresenceDetector:
         while self._running:
             try:
                 if self._should_skip():
+                    self._publish_npu_sensor()
                     time.sleep(self._interval)
                     continue
 
@@ -196,6 +308,7 @@ class PresenceDetector:
             except Exception as e:
                 self.logger.error(f"Presence poll error: {e}", exc_info=True)
 
+            self._publish_npu_sensor()  # heartbeat for the runtime probe (skip/no-camera cycles too)
             time.sleep(self._interval)
 
     def _should_skip(self) -> bool:
@@ -207,9 +320,13 @@ class PresenceDetector:
 
         # Skip if no webcam available
         if not self._webcam_available():
-            self.logger.info("Presence poll: webcam not available, skipping")
+            # Logged once per outage (the detector idles indefinitely without a camera)
+            log = self.logger.debug if self._camera_idle_logged else self.logger.info
+            log("Presence poll: webcam not available, skipping")
+            self._camera_idle_logged = True
             return True
 
+        self._camera_idle_logged = False
         return False
 
     def _webcam_available(self) -> bool:
@@ -240,8 +357,15 @@ class PresenceDetector:
             # Decode JPEG to numpy BGR array
             arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
             frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            self._privacy_skip_logged = False
             return frame
 
+        except PermissionError as e:
+            # Webcam privacy gate: a quiet skip, logged once per privacy period
+            if not self._privacy_skip_logged:
+                self.logger.debug(f"Frame grab skipped (privacy gate): {e}")
+                self._privacy_skip_logged = True
+            return None
         except (TimeoutError, RuntimeError, FileNotFoundError) as e:
             self.logger.debug(f"Frame grab failed: {e}")
             return None
@@ -259,8 +383,8 @@ class PresenceDetector:
         Returns list of (person_id, confidence) tuples.
         person_id is None for unknown faces.
         """
-        app = self._get_face_app()
-        faces = app.get(frame)
+        faces = self._analyse(frame)
+        self.last_matches = []
 
         if not faces:
             return []
@@ -292,6 +416,17 @@ class PresenceDetector:
                     best_score = score
                     best_match = person_id
 
+            # Transparency: similarity and the threshold actually applied.
+            # The threshold is a configured value, NOT a calibrated identity
+            # threshold (see docs); never authorise anything on it alone.
+            self.last_matches.append({
+                "person_id": best_match,
+                "similarity": best_score,
+                "threshold": self._confidence_threshold,
+                "threshold_validated": False,
+                "matched": best_score >= self._confidence_threshold,
+            })
+
             if best_score >= self._confidence_threshold:
                 results.append((best_match, best_score))
             else:
@@ -307,11 +442,21 @@ class PresenceDetector:
         """Main detection cycle: grab frame → detect+identify → greet."""
         frame = self._grab_frame()
         if frame is None:
-            self.logger.info("Presence poll: no frame (webcam unavailable)")
+            if not self._privacy_skip_logged:
+                self.logger.info("Presence poll: no frame (webcam unavailable)")
+            self._publish_npu_sensor()
             return
 
         # Single-pass detection + identification
         face_results = self._detect_and_identify(frame)
+        self._event_frame = frame  # only for the gated DETECTED hook below
+        try:
+            self._check_presence_results(face_results)
+        finally:
+            self._event_frame = None
+            self._publish_npu_sensor()
+
+    def _check_presence_results(self, face_results):
 
         if not face_results:
             if getattr(self, '_last_face_count', 0) > 0:
@@ -371,6 +516,7 @@ class PresenceDetector:
             self.logger.info(
                 f"Person {person_id} detected (confidence={confidence:.2f})"
             )
+            self._maybe_vision_gate("DETECTED", now)
 
             # Precompute awareness items while greeting TTS plays
             user_id = self._face_user_map.get(person_id, "primary_user")
@@ -400,6 +546,24 @@ class PresenceDetector:
             state.state = PresenceState.PRESENT
 
         # PRESENT stays PRESENT until they leave
+
+    def _maybe_vision_gate(self, event: str, now: float):
+        """Forward ONE frame to the primary LLM if the (default-off) vision gate allows it."""
+        frame = self._event_frame
+        if frame is None or not self._vision_gate.enabled:
+            return
+        conv_active = bool(getattr(self.conversation, "conversation_active", False))
+        ok, _reason = self._vision_gate.should_forward(event, conv_active, now)
+        if not ok or self._llm_router is None:
+            return
+        snapshot = frame.copy()
+
+        def _run():
+            self.last_vision_note = self._vision_gate.forward(
+                snapshot, event, self._llm_router, conv_active, now)
+
+        self._vision_thread = threading.Thread(target=_run, daemon=True, name="presence-vision-gate")
+        self._vision_thread.start()
 
     def _check_ambient_awareness(self, seen_ids: set, now: float):
         """CAL Phase 6: Ambient awareness — speak critical items unprompted.
@@ -625,14 +789,12 @@ class PresenceDetector:
 
         Returns numpy array on success, or error string on failure.
         """
-        app = self._get_face_app()
-
         arr = np.frombuffer(frame_bytes, dtype=np.uint8)
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if frame is None:
             return "Could not decode the camera frame."
 
-        faces = app.get(frame)
+        faces = self._analyse(frame)
         if not faces:
             return "No face detected in the frame."
 
@@ -697,10 +859,64 @@ class PresenceDetector:
     # Status / introspection
     # ------------------------------------------------------------------
 
+    def npu_sensor_status(self) -> dict:
+        """Honest NPU sensor component state, derived only from real backend/camera state."""
+        info = self._backend_info
+        camera_ok = self._webcam_available()
+        if not self._running and info.get("active") is None and not info.get("reason"):
+            state, reason = "STOPPED", "presence detector not running / backend not initialised"
+        elif info.get("active") == "npu":
+            if camera_ok:
+                state, reason = "READY", None
+            else:
+                state, reason = "DEGRADED", "camera_unavailable"
+        elif info.get("active") == "cpu":
+            state, reason = "DEGRADED", f"cpu_fallback: {info.get('reason') or 'npu_not_requested'}"
+        elif info.get("reason"):
+            state, reason = "DEGRADED", str(info.get("reason"))
+        else:
+            state, reason = "STOPPED", "backend not initialised"
+        # Face pipeline may run on the NPU per frame, but wake signal and a continuous
+        # live camera->NPU stream are not built: never claimed.
+        return {"state": state, "reason": reason, "active": info.get("active"),
+                "enabled": bool(self.config.get("vision.presence.enabled", True)) if hasattr(self.config, "get") else True,
+                "wake_signal": "NOT_IMPLEMENTED", "live_camera_npu": "NOT_IMPLEMENTED"}
+
+    def _publish_npu_sensor(self):
+        """Report the sensor through the shared schema (core/runtime_state.write_npu_sensor).
+
+        Written on change and republished every NPU_SENSOR_REPUBLISH_S even when unchanged, so
+        the probe's freshness check never mistakes a steady sensor for a dead one (best effort).
+        """
+        try:
+            from core import runtime_state
+            sensor = self.npu_sensor_status()
+            key = (sensor["state"], sensor["reason"], sensor["active"], sensor["enabled"])
+            now = time.monotonic()
+            last_at = getattr(self, "_last_npu_publish_at", None)
+            if key == self._last_npu_sensor and last_at is not None \
+                    and now - last_at < runtime_state.NPU_SENSOR_REPUBLISH_S:
+                return
+            self._last_npu_sensor = key
+            self._last_npu_publish_at = now
+            runtime_state.write_npu_sensor(sensor)
+        except Exception:
+            pass
+
     def get_status(self) -> dict:
         """Return current presence detection status for health check."""
         return {
+            "npu_sensor": self.npu_sensor_status(),
+            "vision_gate": self._vision_gate.status(),
             "running": self._running,
+            "camera": "AVAILABLE" if self._webcam_available() else "UNAVAILABLE",
+            "backend": dict(self._backend_info),
+            "matching": {
+                "metric": "cosine similarity of L2-normalised ArcFace embeddings",
+                "threshold": self._confidence_threshold,
+                "threshold_validated": False,
+                "note": "configured value, not calibrated; do not use as sole authorisation",
+            },
             "enrolled_faces": len(self._face_cache),
             "tracked_people": len(self._person_states),
             "interval": self._interval,

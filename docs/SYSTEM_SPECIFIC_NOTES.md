@@ -61,7 +61,7 @@ Fallback base model (CPU only):
 - Handles synthesis, contextual acknowledgments, and briefing composition
 - Lower latency for lightweight tasks that don't need the full 35B model
 
-**Fallback:** Claude API (Anthropic) — used when local quality gate fails
+**Fallback:** Optional configured cloud provider (OpenRouter preferred; Anthropic only when explicitly selected), gated by cloud enablement, credentials, and PrivacyGate
 
 ## Other System-Specific Paths
 

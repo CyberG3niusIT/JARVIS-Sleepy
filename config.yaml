@@ -25,10 +25,44 @@ vad:
   silence_frames_threshold: 25
   buffer_duration: 1.0
 llm:
-  local:
+  response_language: de
+  # Gemma 4 12B = PRIMARY (audio + vision via llama.cpp + mmproj). Unit/port: see handover.units.
+  primary:
+    provider: gemma
     endpoint: "http://127.0.0.1:8080/v1/chat/completions"
+    model_path: /home/alex/jarvis-data/models/llm/gemma-4-12b-heretic-Q6_K.gguf
+    mmproj_path: /home/alex/jarvis-data/models/llm/gemma-4-12b-mmproj-f16.gguf
+    context_size: 8192
+    gpu_layers: 999
+    temperature: 0.7
+    top_p: 0.95
+    top_k: 64
+    tool_calling: true
+    audio_direct: true
+    audio_tools: none            # Direct-Audio ohne Tools (Gemma versteht Audio mit vielen Tools schlecht); 'always'/'all' = opt-in
+    stt_verdict_timeout_s: 3.0   # max. Wartezeit auf das parallele STT-Urteil (Konversationsfenster), danach Direct-Antwort freigeben
+    text_fallback: false         # kein Text-Fallback; nur mit echtem konfigurierten Provider aktivieren
+    enable_thinking: false   # Gemma 4: reasoning would fill reasoning_content and leave content empty
+    # Antwortsprache fest Deutsch (llm.response_language: de haengt eine verbindliche Sprachregel an den System-Prompt)
+    health_ttl_s: 2.0
+    ready_wait_s: 120
+  # Qwen3.5-35B-A3B = EXPERT, loaded only by the GPU handover (never resident with the primary).
+  expert:
+    provider: qwen
+    endpoint: "http://127.0.0.1:8082/v1/chat/completions"
     model_path: /home/alex/jarvis-data/models/llm/Qwen3.5-35B-A3B-abliterated-Q3_K_M.gguf
     context_size: 32768
+    gpu_layers: 999
+    temperature: 0.6
+    top_p: 0.8
+    top_k: 20
+    enable_thinking: false
+    tool_calling: false          # Expert antwortet als reine Textantwort (Handover-Aufgabe); Tools nur nach Bedarf aktivieren
+  # Compatibility alias: resolves to the primary.
+  local:
+    endpoint: "http://127.0.0.1:8080/v1/chat/completions"
+    model_path: /home/alex/jarvis-data/models/llm/gemma-4-12b-heretic-Q6_K.gguf
+    context_size: 8192
     gpu_layers: 999
     batch_size: 512
     ubatch_size: 128
@@ -40,15 +74,18 @@ llm:
     llama_completion: ~/llama.cpp/build/bin/llama-cli
   small:
     endpoint: "http://127.0.0.1:8081/v1/chat/completions"
-    enabled: true
+    enabled: false               # Audit: auf :8081 laeuft kein Server; enabled=true erzeugte nur Fehlversuche/Fallbacks. Nur aktivieren, wenn dort wirklich ein Modell serviert wird.
     temperature: 0.4
     max_tokens: 400
   api:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
-    api_key_env: ANTHROPIC_API_KEY
+    enabled: false               # Explicit opt-in; set true only after choosing a model and credential
+    provider: openrouter         # Preferred cloud provider; no implicit provider is selected
+    model: null                  # Required before cloud fallback can run
+    endpoint: https://openrouter.ai/api/v1/chat/completions
+    api_key_env: OPENROUTER_API_KEY
 stt:
   backend: qwen3
+  wake_compat: true   # STT stays a parallel wake helper until NPU wake is real
   model_path: /home/alex/jarvis-data/models/whisper/ggml-base.bin
   whisper_bin: ~/whisper.cpp/build/bin/whisper-cli
   language: de
@@ -114,6 +151,7 @@ user_profiles:
   primary_user_id: primary_user
   primary_user_name: Alex
   primary_honorific: sir
+  single_user_mode: true
   voice_recognition: true
   similarity_threshold: 0.30
   auto_enroll: false
@@ -176,6 +214,18 @@ image_generation:
   default_steps: 20
   swap_timeout: 90
 
+# Primary <-> Expert GPU handover (core/model_handover.py). Disabled until units are verified on hardware.
+handover:
+  enabled: false
+  units:
+    primary: llama-server-primary.service
+    expert: llama-server-expert.service
+  stop_timeout_s: 60
+  vram_release_wait_s: 3
+  primary_start_timeout_s: 300
+  expert_start_timeout_s: 300
+  poll_interval_s: 1
+  queue_wait_s: 120
 semantic_matching:
   enabled: true
   model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
@@ -466,10 +516,20 @@ vision:
     min_face_size: 80                 # Minimum face pixel size to detect
     greet_unknown: false              # Don't greet unknown faces
     absence_threshold: 30             # Seconds absent before return greeting triggers
+    backend: auto                     # cpu | npu | auto (NPU: OpenVINO worker on Windows)
+    npu:
+      windows_python: C:\Users\Alex\AppData\Local\JARVIS\npu-venv\Scripts\python.exe
+      model_dir: ''
+      fallback_to_cpu: true
+      request_timeout: 30
+    # NPU event -> ONE in-RAM frame to the primary. Default OFF. NPU wake word: NOT_IMPLEMENTED.
+    llm_gate:
+      enabled: false
+      cooldown_s: 120
 
 # Web UI settings
 web:
-  port: 8088
+  port: 8091
   host: "0.0.0.0"
   auth_token: ${JARVIS_WEB_AUTH_TOKEN}
   tls:
@@ -487,7 +547,7 @@ stt_finetuned:
 
 # Self-evolution — autonomous self-improvement pipeline
 self_evolution:
-  auto_consult: true              # Send observation findings to Claude API for analysis
+  auto_consult: false             # Manual consultation only; never send findings automatically
 
 # External MCP servers (inbound bridge — consumed as native JARVIS tools)
 # Each entry spawns a subprocess, discovers its tools, and registers them
@@ -512,3 +572,13 @@ self_evolution:
 #     system_prompt_rule: >
 #       For email operations (read, send, search, manage folders),
 #       call the appropriate email tool. Always confirm before sending.
+
+# Natural utterance aggregation (core/turn_assembler.py)
+turn:
+  enabled: true
+  grace_ms: 1200
+  max_turn_s: 20
+  max_segments: 8
+  min_segment_ms: 0
+  fast_stop_max_s: 1.6      # short segments that open a turn bypass grace (stop fast path); measured on pure speech (no pre-roll / trailing silence)
+  gap_s: 0.15               # silence inserted between merged segments (pre-roll of 2nd+ segments is trimmed to the real gap)

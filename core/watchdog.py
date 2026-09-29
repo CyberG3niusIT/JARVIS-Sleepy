@@ -76,6 +76,9 @@ class Watchdog(threading.Thread):
         # many multiples of its OWN poll_interval is considered stuck —
         # generous, so a slow-but-fine iteration (e.g. a slow RSS feed)
         # never false-positives.
+        self._listener_recent_speech_grace = float(
+            config.get("watchdog.listener_recent_speech_grace_s", 10) or 0)
+        self._listener_idle_s = 0.0
         self._poll_stuck_multiplier = config.get("watchdog.poll_stuck_multiplier", 3)
 
         # Internal state
@@ -103,12 +106,14 @@ class Watchdog(threading.Thread):
             self._check_interval, self._listener_stuck_threshold,
             self._command_hung_threshold,
         )
+        self._write_heartbeat()
         while not self._stop_event.is_set():
             self._stop_event.wait(timeout=self._check_interval)
             if self._stop_event.is_set():
                 break
             if not self._coordinator.running:
                 break
+            self._write_heartbeat()
             try:
                 self._run_checks()
             except Exception as e:
@@ -117,6 +122,22 @@ class Watchdog(threading.Thread):
 
     def stop(self):
         self._stop_event.set()
+
+    def _write_heartbeat(self):
+        """Liveness evidence for the runtime supervisor (best effort).
+
+        Written once per cycle from inside the daemon; the supervisor treats a
+        missing, stale or foreign heartbeat as "not verified", never as READY.
+        """
+        try:
+            from core.runtime_state import write_heartbeat
+            write_heartbeat(
+                interval_seconds=self._check_interval,
+                pipeline_state=getattr(self._coordinator.state, "name", str(self._coordinator.state)),
+                listener_running=bool(self._listener.running),
+            )
+        except Exception as e:
+            self.logger.warning("Runtime heartbeat write failed: %s", e)
 
     # ------------------------------------------------------------------
     # Check dispatch
@@ -195,6 +216,13 @@ class Watchdog(threading.Thread):
             return False
         if self._listener.speaking or self._listener._speaking_event.is_set():
             return False
+        # Never reset while a speech segment is being collected, an audio item is
+        # queued for STT, or a direct-audio turn is in flight: a soft reset would
+        # invalidate exactly that turn (capture generation bump -> "stale").
+        if getattr(self._listener, "collecting_speech", False) is True:
+            return False
+        if self._pending_audio_work():
+            return False
         # Only consider "stuck" if VAD has detected speech activity since the
         # last transcription — otherwise it's just silence (nobody talking),
         # which is normal and doesn't need recovery.
@@ -202,21 +230,43 @@ class Watchdog(threading.Thread):
         last_tx = self._coordinator._last_transcription_ts
         if last_vad <= last_tx:
             return False  # No VAD activity since last transcription — just silence
+        now = time.monotonic()
+        # Recent speech activity is never "stuck" (grace window).
+        if now - last_vad < self._listener_recent_speech_grace:
+            return False
         # Don't fire if listening recently resumed after TTS playback.
-        # The last_tx timestamp may be stale from before a long TTS sequence
-        # (greeting → briefing → rundown). Measure from the later of
-        # last_tx or last_idle to avoid false "stuck" triggers.
+        # Idle time is measured from the LATEST of transcription, idle
+        # transition and speech activity - not from the last transcription.
         last_idle = self._coordinator._last_idle_ts
-        baseline = max(last_tx, last_idle)
-        idle_duration = time.monotonic() - baseline
-        return idle_duration > self._listener_stuck_threshold
+        baseline = max(last_tx, last_idle, last_vad)
+        self._listener_idle_s = now - baseline
+        return self._listener_idle_s > self._listener_stuck_threshold
+
+    def _pending_audio_work(self) -> bool:
+        """True while an audio_queue item or a direct-audio turn is pending."""
+        queue_obj = getattr(self._listener, "audio_queue", None)
+        try:
+            size = queue_obj.qsize() if queue_obj is not None else 0
+            if isinstance(size, int) and size > 0:
+                return True
+        except Exception:
+            pass
+        direct = getattr(self._coordinator, "direct_audio", None)
+        for attr in ("_turns", "_active"):      # queued AND currently consumed turns
+            turns = getattr(direct, attr, None)
+            try:
+                if isinstance(turns, dict) and turns:
+                    return True
+            except Exception:
+                pass
+        return False
 
     def _recover_listener_stuck(self):
         if not self._can_recover("listener_stuck"):
             return
         self.logger.warning(
             "Listener appears stuck (no transcription for %.0fs) — attempting soft reset",
-            time.monotonic() - self._coordinator._last_transcription_ts,
+            getattr(self, "_listener_idle_s", 0.0),
         )
         # Soft reset: clear any stuck state flags
         self._listener.speaking = False
@@ -231,7 +281,7 @@ class Watchdog(threading.Thread):
         self._record_recovery("listener_stuck")
         self.logger.info("Listener soft reset complete")
         self._emit_recovery("listener_stuck", "Listener soft reset — no transcription for too long", metadata={
-            "idle_duration_s": round(time.monotonic() - self._coordinator._last_transcription_ts, 1),
+            "idle_duration_s": round(getattr(self, "_listener_idle_s", 0.0), 1),
         })
 
     # ------------------------------------------------------------------
@@ -301,6 +351,20 @@ class Watchdog(threading.Thread):
             return
         self._last_llm_check_ts = now
 
+        # Respect a controlled Primary<->Expert model handover (core/model_handover.py):
+        # the primary is down on purpose; no offline alarm and no recovery attempt.
+        try:
+            from core import runtime_state
+            handover = runtime_state.handover_in_progress()
+            if handover:
+                if self._llm_status != "handover":
+                    self.logger.info("LLM offline — model handover in progress (%s)", handover.get("state"))
+                self._llm_status = "handover"
+                self._llm_unhealthy_count = 0
+                return
+        except Exception:
+            pass  # runtime state unavailable: fall through to the normal checks
+
         # Respect GPU swap — expected downtime
         try:
             from core.gpu_swap import get_gpu_swap_manager
@@ -352,7 +416,7 @@ class Watchdog(threading.Thread):
                 data = r.json() if "json" in r.headers.get("content-type", "") else {}
                 status = data.get("status", "ok")
                 if status == "ok":
-                    if self._llm_status and self._llm_status not in ("swapping", "gpu_swapped"):
+                    if self._llm_status and self._llm_status not in ("swapping", "gpu_swapped", "handover"):
                         self.logger.info("LLM back online (was: %s)", self._llm_status)
                     self._llm_status = None
                     self._llm_unhealthy_count = 0

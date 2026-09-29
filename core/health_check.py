@@ -20,6 +20,7 @@ Usage:
 
 import os
 import re
+import shlex
 import time
 import sqlite3
 import subprocess
@@ -342,7 +343,7 @@ def check_bare_metal(config=None):
 # Layer 2 — Services & Processes
 # ---------------------------------------------------------------------------
 
-def check_services():
+def check_services(config=None):
     """JARVIS service, llama-server, recent errors."""
     results = []
 
@@ -399,14 +400,18 @@ def check_services():
         results.append(_check("jarvis.service", "red", f"Error: {e}"))
 
     # --- llama-server (retry on boot — 16GB model from HDD takes ~15-20s) ---
+    # A running Primary<->Expert handover is a controlled swap, not an outage: report it as such.
+    from core import runtime_state
+    swapping = runtime_state.handover_in_progress()
     llama_ok = False
     llama_detail = ""
     llama_latency_ms = 0
-    max_retries = 8  # up to ~24s total wait
+    max_retries = 1 if swapping else 8  # up to ~24s total wait
+    health_url = runtime_state.primary_base_url(config) + "/health"  # llm.primary.endpoint, not a fixed port
     for attempt in range(max_retries):
         try:
             _t0 = time.time()
-            ok, health_out = _run("curl -s --max-time 3 http://localhost:8080/health")
+            ok, health_out = _run(f"curl -s --max-time 3 {shlex.quote(health_url)}")
             llama_latency_ms = (time.time() - _t0) * 1000
             if ok and "ok" in health_out.lower():
                 llama_ok = True
@@ -420,12 +425,19 @@ def check_services():
             llama_detail = f"Error: {e}"
         if attempt < max_retries - 1:
             time.sleep(3)
-    if not llama_ok and "loading" in llama_detail.lower():
-        llama_detail = "Model failed to load within timeout"
-    results.append(_check(
-        "llama-server", "green" if llama_ok else "red", llama_detail,
-        f"healthy={1 if llama_ok else 0} latency_ms={llama_latency_ms:.0f}",
-    ))
+    if swapping and not llama_ok:
+        results.append(_check(
+            "llama-server", "yellow",
+            f"Swapping: Expert-Handover läuft ({swapping.get('state', '?')})",
+            f"swapping=1 state={swapping.get('state', '?')}",
+        ))
+    else:
+        if not llama_ok and "loading" in llama_detail.lower():
+            llama_detail = "Model failed to load within timeout"
+        results.append(_check(
+            "llama-server", "green" if llama_ok else "red", llama_detail,
+            f"healthy={1 if llama_ok else 0} latency_ms={llama_latency_ms:.0f}",
+        ))
 
     # --- Recent errors ---
     try:
@@ -753,7 +765,7 @@ def get_full_health(config) -> dict:
     """Run all 5 layers. Returns structured results keyed by layer name."""
     return {
         'bare_metal': check_bare_metal(config),
-        'services': check_services(),
+        'services': check_services(config),
         'internals': check_internals(),
         'data_stores': check_data_stores(config),
         'self_assessment': check_self_assessment(),
@@ -850,8 +862,10 @@ def format_voice_summary(health: dict) -> str:
     # Services
     services = health.get('services', [])
     for check in services:
-        if check['name'] == 'llama-server' and check['status'] != 'green':
-            parts.append("Qwen's language server is not responding.")
+        if check['name'] == 'llama-server' and check['status'] == 'yellow' and 'Swapping' in check['summary']:
+            parts.append("The language model is being swapped and will be back shortly.")
+        elif check['name'] == 'llama-server' and check['status'] != 'green':
+            parts.append("The language model server is not responding.")
         if check['name'] == 'jarvis.service':
             m = re.search(r'uptime:\s*(.+?)\)', check['summary'])
             if m:

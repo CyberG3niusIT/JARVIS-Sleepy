@@ -7,6 +7,7 @@ The model is loaded once when JARVIS starts.
 Whisper remains available as fallback through core/stt.py.
 """
 
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -195,6 +196,8 @@ class Qwen3SpeechToText:
         the existing Whisper STT backend.
         """
 
+        started = time.monotonic()
+        audio_duration_s = len(audio_data) / sample_rate if sample_rate else 0.0
         try:
             audio = self._prepare_audio(
                 audio_data,
@@ -202,6 +205,12 @@ class Qwen3SpeechToText:
             )
 
             if len(audio) < 1600:
+                self._emit_transcription_event(
+                    status="empty",
+                    text_length=0,
+                    audio_duration_s=audio_duration_s,
+                    latency_ms=(time.monotonic() - started) * 1000,
+                )
                 return ""
 
             stream = self.recognizer.create_stream()
@@ -222,17 +231,67 @@ class Qwen3SpeechToText:
                 else ""
             )
 
-            self.logger.info(
-                "Qwen3-ASR transcription: %s",
-                text,
+            # Speech content is private; retain only a length-based diagnostic.
+            self.logger.info("Qwen3-ASR transcription completed (text_len=%d)", len(text))
+            self._emit_transcription_event(
+                status="success" if text else "empty",
+                text_length=len(text),
+                audio_duration_s=audio_duration_s,
+                latency_ms=(time.monotonic() - started) * 1000,
             )
 
             return text
 
         except Exception as e:
+            self._emit_transcription_event(
+                status="error",
+                text_length=0,
+                audio_duration_s=audio_duration_s,
+                latency_ms=(time.monotonic() - started) * 1000,
+                error_type=type(e).__name__,
+            )
             self.logger.error(
                 "Qwen3-ASR transcription failed: %s",
                 e,
                 exc_info=True,
             )
             return ""
+
+    @staticmethod
+    def _emit_transcription_event(
+        *, status: str, text_length: int, audio_duration_s: float, latency_ms: float,
+        error_type: Optional[str] = None,
+    ) -> None:
+        """Emit content-free Qwen3 usage metrics without affecting transcription."""
+        try:
+            from core.event_logger import get_event_logger
+
+            event_logger = get_event_logger()
+            if event_logger:
+                event_logger.emit(
+                    category="inference",
+                    event="stt_transcription",
+                    message=f"Qwen3-ASR {status}: {text_length} chars in {latency_ms:.0f}ms",
+                    severity=(
+                        "error"
+                        if status == "error"
+                        else "info"
+                        if status == "success"
+                        else "debug"
+                    ),
+                    source="stt",
+                    stage="stt",
+                    status=status,
+                    latency_ms=round(latency_ms, 1),
+                    duration_ms=round(latency_ms, 1),
+                    model="qwen3-asr",
+                    metadata={
+                        "engine": "qwen3-asr",
+                        "text_length": text_length,
+                        "audio_duration_s": round(audio_duration_s, 2),
+                        "stt_latency_ms": round(latency_ms, 1),
+                        **({"error_type": error_type} if error_type else {}),
+                    },
+                )
+        except Exception:
+            pass  # Observability must never break STT.

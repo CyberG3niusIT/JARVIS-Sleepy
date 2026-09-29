@@ -1,3 +1,7 @@
+# STALE (2026-09): this module targets the legacy system-scope llama-server.service via sudo and
+# only serves FLUX image generation (core/tools/generate_image.py, /api/gpu-status). It is NOT the
+# basis for the Primary<->Expert LLM handover: see core/model_handover.py (user-scope systemctl,
+# port-owner verification, lifecycle records). Do not extend this file for LLM model swaps.
 """GPU Swap Manager — orchestrates exclusive VRAM access between services.
 
 The RX 7900 XT (20GB) can only hold one large model at a time.
