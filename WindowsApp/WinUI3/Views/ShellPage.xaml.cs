@@ -12,21 +12,22 @@ namespace Jarvis.ControlHub.WinUI.Views;
 
 public sealed partial class ShellPage : Page
 {
-    private static readonly IReadOnlyDictionary<string, (string Title, string Description)> Sections =
-        new Dictionary<string, (string, string)>
+    // Titel, Untertitel und Icon je Bereich wie Page in Lovable pages.tsx; das Icon entspricht dem Navigationseintrag.
+    private static readonly IReadOnlyDictionary<string, (string Title, string Description, string Icon)> Sections =
+        new Dictionary<string, (string, string, string)>
         {
-            ["Home"] = ("Home", "Persönliche Runtime-Übersicht"),
-            ["Chat"] = ("Chat", "Lokaler Dialog. Kontextgesteuerte Verarbeitung."),
-            ["Memory"] = ("Memory", "Kontext, Gedächtnis und Herkunft."),
-            ["ModelsRuntime"] = ("Models & Runtime", "Modelle, Runtime und Lifecycle."),
-            ["VoiceAudio"] = ("Voice & Audio", "Sprachpipeline, Audio und Listener."),
-            ["Tools"] = ("Tools & Integrations", "Verfügbare Fähigkeiten und Integrationen."),
-            ["Automations"] = ("Automations", "Regeln, Tasks und Trigger."),
-            ["Vision"] = ("Vision & Presence", "Vision, Präsenz und Sensorstatus."),
-            ["Mobility"] = ("Mobility / VVS", "Mobilitätsdaten und VVS-Verbindung."),
-            ["Mobile"] = ("Mobile Connection", "Native App-Verbindung und Pairing."),
-            ["Observability"] = ("Observability", "Echte Runtime-Ereignisse und Diagnose."),
-            ["Settings"] = ("Settings", "Native Desktop-Konfiguration."),
+            ["Home"] = ("Home", "Persönliche Runtime-Übersicht", "Home"),
+            ["Chat"] = ("Chat", "Lokaler Dialog. Kontextgesteuerte Verarbeitung.", "BotMessageSquare"),
+            ["Memory"] = ("Memory", "Langzeitgedächtnis. Retrieval. Herkunft.", "BrainCircuit"),
+            ["ModelsRuntime"] = ("Models & Runtime", "Lokale Modelle. Lifecycle. Routing.", "Cpu"),
+            ["VoiceAudio"] = ("Voice & Audio", "Sprachpipeline. Geräte. Diagnose.", "AudioLines"),
+            ["Tools"] = ("Tools & Integrations", "Werkzeuge. Skills. MCP. Berechtigungen.", "SlidersHorizontal"),
+            ["Automations"] = ("Automations", "Trigger. Aktionen. Zeitpläne.", "Workflow"),
+            ["Vision"] = ("Vision & Presence", "Kamera. Präsenz. Bewegung.", "Eye"),
+            ["Mobility"] = ("Mobility / VVS", "Verkehr. Verbindungen. Fahrplankontext.", "Route"),
+            ["Mobile"] = ("Mobile Connection", "Geräte- und App-Verbindung. Getrennt von Mobility / VVS.", "Smartphone"),
+            ["Observability"] = ("Observability", "Zustand. Ereignisse. Logs. Diagnose.", "Activity"),
+            ["Settings"] = ("Settings", "Native Desktop-Konfiguration.", "Settings"),
         };
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
@@ -148,7 +149,9 @@ public sealed partial class ShellPage : Page
         if (!Sections.TryGetValue(section, out var page)) return;
         SectionTitle.Text = page.Title;
         SectionDescription.Text = page.Description;
-        SectionHeader.Visibility = section == "Home" ? Visibility.Collapsed : Visibility.Visible;
+        SectionIcon.Kind = page.Icon;
+        // Home hat keinen Seitenkopf; Settings trägt den Kopf im Detailbereich (Lovable .jx-settings, .jx-set-head).
+        SectionHeader.Visibility = section is "Home" or "Settings" ? Visibility.Collapsed : Visibility.Visible;
         PageBody.Children.Clear();
         PageBody.Children.Add(section switch
         {
@@ -215,7 +218,7 @@ public sealed partial class ShellPage : Page
         var memory = stats.IsReady && statsInfo?.MemoryVectors is { } vectors ? $"{vectors} Vektoren" : "UNAVAILABLE";
         var tools = stats.IsReady && statsInfo?.SkillsLoaded is { } skills ? $"{skills} Skills" : "UNAVAILABLE";
 
-        var grid = NewGrid(2, 1, 14, 0);
+        var grid = NewGrid(2, 1, 12, 0);
         grid.Height = 610;
         grid.ColumnDefinitions[0].Width = new GridLength(270);
         grid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
@@ -223,17 +226,17 @@ public sealed partial class ShellPage : Page
             ? Vertical(StateValue("Sitzungen", Field(sessions, sessions.As<SessionsInfo>()?.Total)), Caption("Nur die Anzahl aus dem Backend. Kein Verlauf geladen."))
             : StatusEmpty(sessions);
         Place(grid, Vertical(
-            Panel("SESSIONS", sessions.IsReady ? "READY" : StateText(sessions), sessionsBody),
-            Panel("PROCESSING CONTEXT", StateText(stats), Vertical(
-                StateValue("Model", model), StateValue("Memory", memory), StateValue("Tools", tools),
+            Panel("History", "SITZUNGEN", sessions.IsReady ? "READY" : StateText(sessions), sessionsBody),
+            Panel("GitBranch", "VERARBEITUNGSKONTEXT", StateText(stats), Vertical(
+                StateValue("Modell", model), StateValue("Memory", memory), StateValue("Tools", tools),
                 Divider(), Caption("Kontext wird nur vom Backend zusammengestellt.")))), 0, 0);
 
         var conversation = new Grid { RowSpacing = 0 };
         conversation.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         conversation.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         conversation.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        conversation.Children.Add(Panel("J.A.R.V.I.S WORKSPACE", "NOT_IMPLEMENTED", Horizontal(
-            StateValue("MODEL", model), StateValue("MEMORY", memory), StateValue("TOOLS", tools))));
+        conversation.Children.Add(Panel("MessageSquare", "J.A.R.V.I.S ARBEITSFLÄCHE", "NOT_IMPLEMENTED", Horizontal(
+            StateValue("Modell", model), StateValue("Memory", memory), StateValue("Tools", tools))));
         var empty = new Border
         {
             Margin = new Thickness(0, 12, 0, 12),
@@ -241,11 +244,11 @@ public sealed partial class ShellPage : Page
             BorderBrush = Brush("JarvisBorderBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
-            Child = CenteredEmpty("CHAT NOT_IMPLEMENTED", "Kein vom Supervisor verwalteter Chat-Endpunkt. Der einzige Chat-Pfad (/ws in jarvis_web.py) gehört zu einem separaten, nicht überwachten Web-Prozess und ist von hier nicht verifiziert."),
+            Child = CenteredEmpty("NOT_IMPLEMENTED", "Arbeitsfläche ohne Sitzung", "Kein vom Supervisor verwalteter Chat-Endpunkt. Der einzige Chat-Pfad (/ws in jarvis_web.py) gehört zu einem separaten, nicht überwachten Web-Prozess und ist von hier nicht verifiziert."),
         };
         Grid.SetRow(empty, 1);
         conversation.Children.Add(empty);
-        var composer = CommandSurface("Nachricht an J.A.R.V.I.S", "Eingabe und Senden deaktiviert: Chat ist NOT_IMPLEMENTED.");
+        var composer = BuildCommand("Nachricht an J.A.R.V.I.S …", "Eingabe und Senden deaktiviert: Chat ist NOT_IMPLEMENTED.", inset: false);
         Grid.SetRow((FrameworkElement)composer, 2);
         conversation.Children.Add(composer);
         Place(grid, conversation, 1, 0);
@@ -269,8 +272,9 @@ public sealed partial class ShellPage : Page
         var memoryBrainImage = new Image { Source = new BitmapImage(new Uri("ms-appx:///Resources/jarvis-brain-idle.jpg")), Stretch = Stretch.Uniform, Opacity = 0.92, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
         AutomationProperties.SetName(memoryBrainImage, "Statisches Brain-Asset im Ruhezustand");
         stage.Children.Add(memoryBrainImage);
-        stage.Children.Add(new Border { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(12), Padding = new Thickness(10), MaxWidth = 260, Background = new SolidColorBrush(Color.FromArgb(232, 8, 16, 24)), BorderBrush = Brush("JarvisBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Child = Vertical(SectionLabel("IDLE · NO LIVE DATA"), Caption("Aktivierung nur bei echten Retrieval-Ereignissen. Keine Gedanken oder Chain-of-Thought.")) });
-        Place(grid, Panel("MEMORY GRAPH", "NO LIVE DATA", Vertical(stage, SearchSurface("Memory durchsuchen", false), Caption("Suche deaktiviert: kein Such-Endpunkt im Desktop-Vertrag."))), 0, 0);
+        // Hinweisfläche wie auf Home (.jx-overlay .jx-idle): gleicher Rand, gleiche Deckung, gleiche Typografie.
+        stage.Children.Add(Overlay(new StackPanel { Children = { OverlayTitle("IDLE · NO LIVE DATA"), OverlayNote("Aktivierung nur bei echten Retrieval-Ereignissen. Keine Gedanken oder Chain-of-Thought.") } }, HorizontalAlignment.Right, 240));
+        Place(grid, Panel("BrainCircuit", "MEMORY GRAPH", "NO LIVE DATA", Vertical(stage, SearchSurface("Memory durchsuchen", false), Caption("Suche deaktiviert: kein Such-Endpunkt im Desktop-Vertrag."))), 0, 0);
 
         var storeRows = new List<UIElement>
         {
@@ -283,16 +287,16 @@ public sealed partial class ShellPage : Page
         };
         if (memory?.PartialError is { } partial) storeRows.Add(Caption($"Backend meldet Teilfehler in: {partial}."));
         if (!summary.IsReady) storeRows.Add(Caption(Note(summary)));
-        Place(grid, Panel("MEMORY STORE", StateText(summary), Compact(storeRows.ToArray())), 0, 1);
+        Place(grid, Panel("HeartPulse", "MEMORY-ZUSTAND", StateText(summary), Compact(storeRows.ToArray())), 0, 1);
 
         UIElement categories = !summary.IsReady
             ? StatusEmpty(summary)
             : memory is { FactsByCategory.Count: > 0 }
                 ? Compact(memory.FactsByCategory.Take(10).Select(item => StateValue(item.Key, item.Value.ToString(CultureInfo.CurrentCulture))).ToArray())
                 : Empty("Keine Fakten in der Datenbank.");
-        Place(grid, Panel("FACTS BY CATEGORY", StateText(summary), categories), 1, 0);
+        Place(grid, Panel("Layers", "FAKTEN NACH KATEGORIE", StateText(summary), categories), 1, 0);
 
-        Place(grid, Panel("PRIVACY & CONTROL", "BACKEND OWNED", Compact(
+        Place(grid, Panel("Shield", "PRIVACY & CONTROL", "BACKEND OWNED", Compact(
             StateValue("Aufnahme-Gate", "UNAVAILABLE"),
             StateValue("Konversations-Memory", Field(desktop, config?.MemoryEnabled)),
             StateValue("Proaktives Surfacing", Field(desktop, config?.MemoryProactive)),
@@ -319,32 +323,32 @@ public sealed partial class ShellPage : Page
         grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[2].Width = new GridLength(0.85, GridUnitType.Star);
-        Place(grid, Panel("PRIMARY MODEL", primary.Text, Compact(
+        Place(grid, Panel("Cpu", "PRIMÄRMODELL", primary.Text, Compact(
             LargeState("PRIMARY", primary.Text), Divider(),
             StateValue("Modell", Field(stats, statsInfo?.Model)),
-            StateValue("Endpoint", Field(desktop, config?.LlmEndpoint)),
+            StateValue("Endpunkt", Field(desktop, config?.LlmEndpoint)),
             StateValue("Kontextgröße", Field(desktop, config?.LlmContextSize)),
             Caption(primary.Detail.Length > 0 ? primary.Detail : "Dauerhafte Rolle. Modellname und Endpoint nur aus dem Backend."))), 0, 0);
-        Place(grid, Panel("EXPERT MODEL", expert.Text, Compact(
+        Place(grid, Panel("Sparkles", "EXPERTENMODELL", expert.Text, Compact(
             LargeState("EXPERT", expert.Text), Divider(),
             StateValue("Modell", "UNAVAILABLE"),
             Caption(expert.Detail.Length > 0 ? expert.Detail : "On-demand. STOPPED ist ein gültiger Zustand."))), 1, 0);
-        Place(grid, Panel("VOICE MODELS", "READ ONLY", Compact(
+        Place(grid, Panel("AudioLines", "SPRACHMODELLE", "READ ONLY", Compact(
             StateValue("STT", stt.Text),
             StateValue("STT-Modell", Field(desktop, config?.SttModel)),
             StateValue("TTS", tts.Text),
             StateValue("Small-LLM", small.Text),
             Divider(),
             Caption(stt.Detail.Length > 0 ? stt.Detail : "Zustände vom Runtime Supervisor."))), 2, 0);
-        var lifecycle = Panel("RUNTIME LIFECYCLE", "SUPERVISOR CONTROLLED", Vertical(
+        var lifecycle = Panel("RefreshCw", "RUNTIME LIFECYCLE", "SUPERVISOR CONTROLLED", Vertical(
             RuntimeStateView(),
-            FlowStrip(("01", "STARTING", "wird angefordert"), ("02", "READY", "Backend bestätigt"), ("03", "DEGRADED", "Teilfunktion fehlt"), ("04", "STOPPED", "bewusst beendet")),
+            FlowStrip(("Timer", "STARTING", "Wird angefordert"), ("Gauge", "READY", "Backend bestätigt"), ("TriangleAlert", "DEGRADED", "Teilfunktion fehlt"), ("Play", "STOPPED", "Bewusst beendet")),
             Horizontal(ActionButton("Starten", _snapshot?.CanStart == true, OnStartClick), ActionButton("Stoppen", _snapshot?.CanStop == true, OnStopClick), ActionButton("Neu starten", _snapshot?.CanRestart == true, OnRestartClick)),
             Caption("Aktionen sind nur bei freigegebener Supervisor-Capability aktiv.")));
         Grid.SetColumnSpan(lifecycle, 2);
         Place(grid, lifecycle, 0, 1);
         var sources = Compact(RuntimeComponents.Distinct(_snapshot).Select(item => StateValue(item.Name, RuntimeStateText.ToDisplayText(RuntimeComponents.ParseState(item.State)))).ToArray());
-        Place(grid, Panel("RUNTIME SOURCES", _snapshot?.State ?? "UNAVAILABLE", _snapshot is null ? StatusEmpty("UNAVAILABLE", "Runtime Supervisor nicht verbunden.") : sources), 2, 1);
+        Place(grid, Panel("Server", "RUNTIME-DIENSTE", _snapshot?.State ?? "UNAVAILABLE", _snapshot is null ? StatusEmpty("UNAVAILABLE", "Runtime Supervisor nicht verbunden.") : sources), 2, 1);
         return grid;
     }
 
@@ -363,22 +367,22 @@ public sealed partial class ShellPage : Page
         grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[2].Width = new GridLength(0.9, GridUnitType.Star);
-        var pipeline = Panel("VOICE PIPELINE", "NO LIVE DATA", Vertical(
-            FlowStrip(("01", "Mikrofon", "Input"), ("02", "Wake Word", "oder Direct Audio"), ("03", "STT", "Transkription"), ("04", "Modell", "Antwort"), ("05", "TTS", "Sprachausgabe"), ("06", "Output", "Audio")),
+        var pipeline = Panel("Workflow", "VOICE PIPELINE", "NO LIVE DATA", Vertical(
+            FlowStrip(("Mic", "Mikrofon", "Eingang"), ("Ear", "Wake Word", "Oder Direct Audio"), ("FileText", "STT", "Spracherkennung"), ("Cpu", "Modell", "Antwort"), ("Volume2", "TTS", "Sprachausgabe"), ("Speaker", "Ausgabe", "Lautsprecher")),
             Divider(), Caption("Ablaufdarstellung. Keine Pegel, Aufnahmen oder aktiven Schritte ohne Audio-Backend.")));
         Grid.SetColumnSpan(pipeline, 3);
         Place(grid, pipeline, 0, 0);
-        Place(grid, Panel("INPUT", daemon.Text, Compact(
+        Place(grid, Panel("Mic", "EINGABE", daemon.Text, Compact(
             StateValue("Listener", daemon.Text),
-            StateValue("Wake word", Field(desktop, config?.WakeKeyword)),
-            StateValue("Input device", Field(desktop, config?.InputDevice)),
+            StateValue("Wake Word", Field(desktop, config?.WakeKeyword)),
+            StateValue("Eingabegerät", Field(desktop, config?.InputDevice)),
             StateValue("STT-Backend", Field(desktop, config?.SttBackend)),
             SearchSurface("Eingabegerät wählen", false),
             Caption(daemon.Detail.Length > 0 ? daemon.Detail : "Gerätewahl nur über die Backend-Konfiguration (lesend)."))), 0, 1);
-        Place(grid, Panel("OUTPUT", tts.Text, Compact(
-            StateValue("Voice", Field(desktop, config?.TtsEngine)),
+        Place(grid, Panel("Speaker", "AUSGABE", tts.Text, Compact(
+            StateValue("Stimme", Field(desktop, config?.TtsEngine)),
             StateValue("TTS", tts.Text),
-            StateValue("Output backend", Field(desktop, config?.OutputBackend)),
+            StateValue("Ausgabe-Backend", Field(desktop, config?.OutputBackend)),
             StateValue("Audio-Brücke", bridge.Text),
             SearchSurface("Ausgabegerät wählen", false),
             Caption(bridge.Detail.Length > 0 ? bridge.Detail : tts.Detail.Length > 0 ? tts.Detail : "Keine lokale Geräteliste angezeigt."))), 1, 1);
@@ -386,8 +390,8 @@ public sealed partial class ShellPage : Page
         UIElement eventBody = voiceEvents is { Count: > 0 }
             ? Compact(voiceEvents.Select(EventLine).ToArray())
             : events.IsReady ? Empty("Keine Audio-Ereignisse in den letzten 24 Stunden.") : StatusEmpty(events);
-        Place(grid, Panel("PRIVACY & DIAGNOSTICS", "BACKEND OWNED", Compact(
-            StateValue("Microphone gate", "UNAVAILABLE"), StateValue("Recording", "UNAVAILABLE"), Divider(),
+        Place(grid, Panel("Shield", "PRIVACY & DIAGNOSE", "BACKEND OWNED", Compact(
+            StateValue("Mikrofon-Gate", "UNAVAILABLE"), StateValue("Aufnahme", "UNAVAILABLE"), Divider(),
             eventBody, ActionButton("Pipeline testen", false, OnRefreshClick))), 2, 1);
         return grid;
     }
@@ -419,16 +423,16 @@ public sealed partial class ShellPage : Page
                 rows.Children.Add(TableRow(tool.Id, tool.Skill ?? "kein Skill", tool.Registered ? "REGISTERED" : "NO HANDLER"));
             }
 
-            inventory = Vertical(TableHeader("TOOL", "SKILL", "HANDLER"), Divider(), Scrollable(rows, 470));
+            inventory = Vertical(TableHeader("Werkzeug", "Skill", "Handler"), Divider(), Scrollable(rows, 470));
             inventoryBadge = $"{config.Tools.Count} TOOLS";
         }
         else
         {
-            inventory = CenteredEmpty("NO INVENTORY", "Das Backend meldet keine registrierten Tools.");
+            inventory = CenteredEmpty("NO LIVE DATA", "Kein Inventar", "Das Backend meldet keine registrierten Tools.");
             inventoryBadge = "NO LIVE DATA";
         }
 
-        Place(grid, Panel("TOOL INVENTORY", inventoryBadge, inventory), 0, 0);
+        Place(grid, Panel("Wrench", "WERKZEUGINVENTAR", inventoryBadge, inventory), 0, 0);
 
         var capabilityRows = new List<UIElement>();
         if (config is not null)
@@ -452,12 +456,12 @@ public sealed partial class ShellPage : Page
         }
 
         capabilityRows.Add(Caption("Nur Initialisierungsstatus aus dem Backend, keine Berechtigungen angenommen."));
-        Place(grid, Panel("CAPABILITIES", StateText(desktop), Compact(capabilityRows.ToArray())), 1, 0);
-        Place(grid, Panel("INTEGRATIONS", StateText(desktop), Compact(
-            StateValue("Local API", StateText(desktop)), StateValue("MCP", "UNAVAILABLE"), StateValue("Cloud", "UNAVAILABLE"),
+        Place(grid, Panel("Puzzle", "CAPABILITIES", StateText(desktop), Compact(capabilityRows.ToArray())), 1, 0);
+        Place(grid, Panel("Plug", "INTEGRATIONEN", StateText(desktop), Compact(
+            StateValue("Lokale API", StateText(desktop)), StateValue("MCP", "UNAVAILABLE"), StateValue("Cloud", "UNAVAILABLE"),
             Caption(desktop.IsReady ? "Keine weitere Integration vom Backend gemeldet." : Note(desktop)))), 2, 0);
-        var path = Panel("EXECUTION PATH", "BACKEND GATED", FlowStrip(
-            ("01", "Request", "Chat oder Automation"), ("02", "Permission", "Backend policy"), ("03", "Execution", "lokal oder remote"), ("04", "Result", "authoritative event")));
+        var path = Panel("GitBranch", "AUSFÜHRUNGSWEG", "BACKEND GATED", FlowStrip(
+            ("MessageSquare", "Anfrage", "Aus Chat oder Automation"), ("ShieldCheck", "Berechtigung", "Gate im Backend"), ("Wrench", "Ausführung", "Lokal oder remote"), ("ListChecks", "Ergebnis", "Autoritatives Ereignis")));
         Grid.SetColumnSpan(path, 3);
         Place(grid, path, 0, 1);
         return grid;
@@ -481,7 +485,7 @@ public sealed partial class ShellPage : Page
         string tableBadge;
         if (!automations.IsReady)
         {
-            table = Vertical(TableHeader("NAME", "TRIGGER", "SCHEDULE", "LAST RUN", "STATE"), Divider(), StatusEmpty(automations));
+            table = Vertical(TableHeader("Name", "Trigger", "Zeitplan", "Letzter Lauf", "Zustand"), Divider(), StatusEmpty(automations));
             tableBadge = StateText(automations);
         }
         else if (info is { Schedulers.Count: > 0 })
@@ -493,20 +497,20 @@ public sealed partial class ShellPage : Page
                 rows.Children.Add(TableRow(scheduler.Id, trigger, scheduler.Schedule, LastRunText(scheduler.LastRunAt), scheduler.State));
             }
 
-            table = Vertical(TableHeader("NAME", "TRIGGER", "SCHEDULE", "LAST RUN", "STATE"), Divider(), rows,
+            table = Vertical(TableHeader("Name", "Trigger", "Zeitplan", "Letzter Lauf", "Zustand"), Divider(), rows,
                 Caption("System-eigene Scheduler des Backends. Es gibt keine nutzerdefinierten Regeln. BACKEND OWNED = gehört dem Voice-Daemon, sein Zustand ist hier nicht bekannt; das ist nicht 'disabled'."));
             tableBadge = $"{info.Schedulers.Count} SCHEDULER";
         }
         else
         {
-            table = CenteredEmpty("NO RULES", "Das Backend meldet keine Scheduler.");
+            table = CenteredEmpty("NO LIVE DATA", "Keine Scheduler", "Das Backend meldet keine Scheduler.");
             tableBadge = "NO LIVE DATA";
         }
 
-        Place(grid, Panel("AUTOMATIONS", tableBadge, table), 0, 0);
-        Place(grid, Panel("SELECTED RULE", "NOT_IMPLEMENTED", Vertical(
-            LargeState("RULE DETAIL", "NOT_IMPLEMENTED"), StateValue("Enabled", "UNAVAILABLE"), StateValue("Trigger", "UNAVAILABLE"),
-            StateValue("Action", "UNAVAILABLE"), Divider(), Caption("Keine Regel-Engine im Backend."), ActionButton("Jetzt ausführen", false, OnRefreshClick))), 1, 0);
+        Place(grid, Panel("AlarmClock", "AUTOMATIONEN", tableBadge, table), 0, 0);
+        Place(grid, Panel("FileText", "DETAIL", "NOT_IMPLEMENTED", Vertical(
+            LargeState("REGELDETAIL", "NOT_IMPLEMENTED"), StateValue("Aktiviert", "UNAVAILABLE"), StateValue("Trigger", "UNAVAILABLE"),
+            StateValue("Aktion", "UNAVAILABLE"), Divider(), Caption("Keine Regel-Engine im Backend."), ActionButton("Jetzt ausführen", false, OnRefreshClick))), 1, 0);
         var plannerOwned = agents.IsReady && planner is { Available: false } && planner.State == "BACKEND OWNED";
         UIElement plannerBody = plannerOwned
             ? StatusEmpty("BACKEND OWNED", "Der Planner gehört dem Voice-Daemon. Der Desktop-Web-Prozess hat keinen Planner-Status; ein lokaler Leerlauf wird nicht als Systemzustand gezeigt.")
@@ -519,9 +523,9 @@ public sealed partial class ShellPage : Page
                 StateValue("Fehlgeschlagen", planner.Failed.ToString(CultureInfo.CurrentCulture)),
                 StateValue("Ausstehend", planner.Pending.ToString(CultureInfo.CurrentCulture)))
             : StatusEmpty(agents);
-        Place(grid, Panel("TASK PLANNER", plannerOwned ? "BACKEND OWNED" : StateText(agents), plannerBody), 2, 0);
-        var workflow = Panel("TRIGGER TO ACTION", "CONCEPTUAL FLOW", FlowStrip(
-            ("01", "Trigger", "Zeit, Event, Befehl"), ("02", "Condition", "optional"), ("03", "Action", "Tool oder Antwort"), ("04", "Approval", "Backend policy")));
+        Place(grid, Panel("ListChecks", "TASK-PLANER", plannerOwned ? "BACKEND OWNED" : StateText(agents), plannerBody), 2, 0);
+        var workflow = Panel("Workflow", "ABLAUF EINER AUTOMATION", "CONCEPTUAL FLOW", FlowStrip(
+            ("AlarmClock", "Trigger", "Zeit, Ereignis, Befehl"), ("Filter", "Bedingung", "Optional"), ("Play", "Aktion", "Tool oder Antwort"), ("ShieldCheck", "Bestätigung", "Richtlinie im Backend")));
         Grid.SetColumnSpan(workflow, 3);
         Place(grid, workflow, 0, 1);
         return grid;
@@ -539,22 +543,22 @@ public sealed partial class ShellPage : Page
         grid.ColumnDefinitions[0].Width = new GridLength(1.5, GridUnitType.Star);
         grid.ColumnDefinitions[1].Width = new GridLength(0.9, GridUnitType.Star);
         grid.ColumnDefinitions[2].Width = new GridLength(0.8, GridUnitType.Star);
-        var viewport = Panel("VISION VIEWPORT", "UNAVAILABLE", CenteredEmpty("NO CAMERA SOURCE", "Kein Kamerabild. Die Oberfläche aktiviert die Kamera nicht und zeigt keine Frames; Freigaben bleiben beim Backend."));
+        // Viewport: ruhige Fläche mit normalem Rand. UNAVAILABLE ist kein Fehler, deshalb kein roter OFFLINE-Rand.
+        var viewport = Panel("Camera", "KAMERAFLÄCHE", "UNAVAILABLE", CenteredEmpty("UNAVAILABLE", "Keine Kameraquelle", "Kein Kamerabild. Die Oberfläche aktiviert die Kamera nicht und zeigt keine Frames; Freigaben bleiben beim Backend."));
         viewport.Background = Brush("JarvisQuietBrush");
-        viewport.BorderBrush = Brush("JarvisOfflineBrush");
         Place(grid, viewport, 0, 0);
-        Place(grid, Panel("PRESENCE", "UNAVAILABLE", Vertical(
-            LargeState("PRESENCE", "UNAVAILABLE"), StateValue("Occupancy", "UNAVAILABLE"), StateValue("Movement", "UNAVAILABLE"),
-            StateValue("Last event", "NO LIVE DATA"), Caption("Das Backend stellt keine bestätigte Belegung bereit."))), 1, 0);
+        Place(grid, Panel("Hand", "PRESENCE", "UNAVAILABLE", Vertical(
+            LargeState("PRESENCE", "UNAVAILABLE"), StateValue("Belegung", "UNAVAILABLE"), StateValue("Bewegung", "UNAVAILABLE"),
+            StateValue("Letztes Ereignis", "NO LIVE DATA"), Caption("Das Backend stellt keine bestätigte Belegung bereit."))), 1, 0);
         var frameServer = webcam.IsReady && camera is { Available: true } ? "AVAILABLE" : "UNAVAILABLE";
-        Place(grid, Panel("SENSOR SOURCES", npu.Text, Compact(
-            StateValue("Camera frame server", frameServer),
+        Place(grid, Panel("Radar", "SENSORIK", npu.Text, Compact(
+            StateValue("Kamera-Frameserver", frameServer),
             StateValue("NPU", npu.Text),
-            StateValue("Other sensors", "UNAVAILABLE"),
-            Divider(), StateValue("Privacy gate", "UNAVAILABLE"),
+            StateValue("Weitere Sensoren", "UNAVAILABLE"),
+            Divider(), StateValue("Privacy-Gate", "UNAVAILABLE"),
             Caption(npu.Detail.Length > 0 ? npu.Detail : "Geräte- und Gate-Zustand nur aus Backend."))), 2, 0);
-        var flow = Panel("LOCAL DETECTION FLOW", "CONCEPTUAL", FlowStrip(
-            ("01", "Camera", "permission gate"), ("02", "Detection", "local processing"), ("03", "Presence", "confirmed state"), ("04", "Event", "automation source")));
+        var flow = Panel("GitBranch", "ERKENNUNGSWEG", "CONCEPTUAL", FlowStrip(
+            ("Camera", "Kamera", "Gate erforderlich"), ("Cpu", "Erkennung", "Lokal"), ("Hand", "Presence", "Anwesenheit"), ("Activity", "Ereignis", "An Automations")));
         Grid.SetColumnSpan(flow, 3);
         Place(grid, flow, 0, 1);
         return grid;
@@ -564,7 +568,7 @@ public sealed partial class ShellPage : Page
     {
         var vvs = Comp(RuntimeComponents.Vvs);
         var stack = Vertical();
-        stack.Children.Add(Panel("JOURNEY SEARCH", "NOT_IMPLEMENTED", Vertical(Horizontal(
+        stack.Children.Add(Panel("Search", "VERBINDUNGSSUCHE", "NOT_IMPLEMENTED", Vertical(Horizontal(
             SearchSurface("Start", false), SearchSurface("Ziel", false), ActionButton("Verbindungen suchen", false, OnRefreshClick)),
             Caption("Keine Verbindungsabfrage über das Backend für den Desktop; nur der VVS-Dienstzustand ist angebunden."))));
         var grid = NewGrid(3, 1, 12, 0);
@@ -572,12 +576,12 @@ public sealed partial class ShellPage : Page
         grid.ColumnDefinitions[0].Width = new GridLength(1.5, GridUnitType.Star);
         grid.ColumnDefinitions[1].Width = new GridLength(0.85, GridUnitType.Star);
         grid.ColumnDefinitions[2].Width = new GridLength(0.85, GridUnitType.Star);
-        Place(grid, Panel("CONNECTIONS", "NO LIVE DATA", Vertical(
-            TableHeader("LINE", "DEPARTURE", "ARRIVAL", "NOTICE"), Divider(),
-            CenteredEmpty("NO DEPARTURES", "Keine Echtzeitdaten. Es werden keine Verbindungen oder Zeiten erfunden."))), 0, 0);
-        Place(grid, Panel("ROUTE CONTEXT", "UNAVAILABLE", CenteredEmpty("NO ROUTE", "Routen- und Standortkontext werden vom Mobility-Backend geliefert.")), 1, 0);
-        Place(grid, Panel("VVS SOURCE", vvs.Text, Vertical(
-            StateValue("Service", vvs.Text), StateValue("Updated", TimeText(_snapshot?.UpdatedAt)), StateValue("Location", "UNAVAILABLE"),
+        Place(grid, Panel("Route", "VERBINDUNGEN", "NO LIVE DATA", Vertical(
+            TableHeader("Linie", "Abfahrt", "Ankunft", "Hinweis"), Divider(),
+            CenteredEmpty("NO LIVE DATA", "Keine Abfahrten", "Keine Echtzeitdaten. Es werden keine Verbindungen oder Zeiten erfunden."))), 0, 0);
+        Place(grid, Panel("MapPin", "ROUTEN UND VERKEHRSKONTEXT", "UNAVAILABLE", CenteredEmpty("UNAVAILABLE", "Keine Route", "Routen- und Standortkontext werden vom Mobility-Backend geliefert.")), 1, 0);
+        Place(grid, Panel("Bus", "VVS-DATENQUELLE", vvs.Text, Vertical(
+            StateValue("Dienst", vvs.Text), StateValue("Aktualisiert", TimeText(_snapshot?.UpdatedAt)), StateValue("Standort", "UNAVAILABLE"),
             Divider(), Caption(vvs.Detail.Length > 0 ? vvs.Detail : vvs.Reported ? "VVS bleibt auf dieser Seite getrennt von Mobile Connection." : "Vom Supervisor nicht gemeldet (Mobility deaktiviert oder nicht konfiguriert)."))), 2, 0);
         stack.Children.Add(grid);
         return stack;
@@ -592,17 +596,17 @@ public sealed partial class ShellPage : Page
         grid.ColumnDefinitions[0].Width = new GridLength(1.2, GridUnitType.Star);
         grid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[2].Width = new GridLength(0.85, GridUnitType.Star);
-        var pairing = Panel("DEVICE PAIRING", mobile, CenteredEmpty("PAIRING UNAVAILABLE", "Kein Pairing-Vertrag im Backend. Es wird kein QR-Code, Token oder Gerätezustand erzeugt."));
+        var pairing = Panel("Link2", "PAIRING", mobile, CenteredEmpty(mobile, "Pairing nicht verfügbar", "Kein Pairing-Vertrag im Backend. Es wird kein QR-Code, Token oder Gerätezustand erzeugt."));
         pairing.BorderBrush = Brush("JarvisUnavailableBrush");
         Place(grid, pairing, 0, 0);
-        Place(grid, Panel("CONNECTED DEVICES", "NO LIVE DATA", Vertical(
-            TableHeader("DEVICE", "STATE", "LAST CONTACT"), Divider(), Empty("Es liegen keine Gerätedaten vor."))), 1, 0);
-        Place(grid, Panel("CONNECTION", mobile, Vertical(
-            LargeState("MOBILE LINK", mobile), StateValue("Pairing", mobile), StateValue("Commands", "UNAVAILABLE"),
+        Place(grid, Panel("Smartphone", "GERÄTE", "NO LIVE DATA", Vertical(
+            TableHeader("Gerät", "Zustand", "Letzter Kontakt"), Divider(), Empty("Es liegen keine Gerätedaten vor."))), 1, 0);
+        Place(grid, Panel("Send", "VERBINDUNG", mobile, Vertical(
+            LargeState("MOBILE LINK", mobile), StateValue("Pairing", mobile), StateValue("Befehle", "UNAVAILABLE"),
             StateValue("Handoff", "UNAVAILABLE"),
             Caption("Backend kennt nur einen browserbasierten Kamera-Relay (jarvis_web.py), keine native App-Verbindung."))), 2, 0);
-        var security = Panel("TRUST & PRIVACY", "NO PAIRING", FlowStrip(
-            ("01", "Discover", "local only"), ("02", "Confirm", "on device"), ("03", "Authorize", "backend-owned"), ("04", "Connect", "after confirmation")));
+        var security = Panel("GitBranch", "KOPPLUNGSABLAUF", "NO PAIRING", FlowStrip(
+            ("Search", "Gerät finden", "Nur lokal"), ("Fingerprint", "Bestätigen", "Am Gerät"), ("Lock", "Autorisieren", "Backend-owned"), ("Smartphone", "Verbinden", "Nur nach Bestätigung")));
         Grid.SetColumnSpan(security, 3);
         Place(grid, security, 0, 1);
         return grid;
@@ -623,15 +627,15 @@ public sealed partial class ShellPage : Page
         grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
-        Place(grid, Panel("RUNTIME HEALTH", _snapshot?.State ?? "UNAVAILABLE", Compact(
+        Place(grid, Panel("HeartPulse", "RUNTIME-ZUSTAND", _snapshot?.State ?? "UNAVAILABLE", Compact(
             StateValue("Supervisor", _snapshot?.State ?? "UNAVAILABLE"),
-            StateValue("Components", _snapshot?.Components.Count.ToString() ?? "UNAVAILABLE"),
+            StateValue("Komponenten", _snapshot?.Components.Count.ToString() ?? "UNAVAILABLE"),
             StateValue("Degraded-Gründe", _snapshot?.DegradedReasons.Count().ToString() ?? "UNAVAILABLE"))), 0, 0);
-        Place(grid, Panel("VOICE HEALTH", daemon.Text, Compact(
+        Place(grid, Panel("AudioLines", "VOICE-ZUSTAND", daemon.Text, Compact(
             StateValue("Listener", daemon.Text), StateValue("TTS", Comp(RuntimeComponents.Chatterbox).Text), StateValue("Audio", Comp(RuntimeComponents.AudioBridge).Text))), 1, 0);
-        Place(grid, Panel("MEMORY HEALTH", StateText(summary), Compact(
+        Place(grid, Panel("Database", "MEMORY-ZUSTAND", StateText(summary), Compact(
             StateValue("Fakten", Field(summary, memory?.FactsTotal)), StateValue("Index", Field(summary, memory?.FaissVectors)),
-            StateValue("Storage", FieldBytes(summary, memory?.FaissBytes)))), 2, 0);
+            StateValue("Speicher", FieldBytes(summary, memory?.FaissBytes)))), 2, 0);
 
         UIElement eventBody;
         string eventBadge;
@@ -644,13 +648,13 @@ public sealed partial class ShellPage : Page
             }
 
             var total = aggregate.As<EventsAggregateInfo>()?.Total;
-            eventBody = Vertical(TableHeader("TIME", "SOURCE", "EVENT", "STATE"), Divider(), rows,
+            eventBody = Vertical(TableHeader("Zeit", "Quelle", "Ereignis", "Zustand"), Divider(), rows,
                 Caption(total is { } count ? $"{count} Ereignisse in den letzten 24 Stunden (aggregiert)." : "Datenschutz-Projektion des Backends: Kategorie, Ereignisname, Schweregrad."));
             eventBadge = $"{info.Items.Count} EVENTS";
         }
         else if (events.IsReady)
         {
-            eventBody = Vertical(TableHeader("TIME", "SOURCE", "EVENT", "STATE"), Divider(), CenteredEmpty("NO EVENTS", "Keine Ereignisse in den letzten 24 Stunden."));
+            eventBody = Vertical(TableHeader("Zeit", "Quelle", "Ereignis", "Zustand"), Divider(), CenteredEmpty("NO LIVE DATA", "Keine Ereignisse", "Keine Ereignisse in den letzten 24 Stunden."));
             eventBadge = "NO LIVE DATA";
         }
         else
@@ -658,94 +662,227 @@ public sealed partial class ShellPage : Page
             UIElement hints = _snapshot is { } snapshot && snapshot.DegradedReasons.Any()
                 ? Compact(snapshot.DegradedReasons.Take(4).Select(reason => Caption("Supervisor: " + reason)).ToArray())
                 : Caption("Keine Supervisor-Hinweise vorhanden.");
-            eventBody = Vertical(TableHeader("TIME", "SOURCE", "EVENT", "STATE"), Divider(), StatusEmpty(events), hints);
+            eventBody = Vertical(TableHeader("Zeit", "Quelle", "Ereignis", "Zustand"), Divider(), StatusEmpty(events), hints);
             eventBadge = StateText(events);
         }
 
-        var eventsPanel = Panel("RUNTIME EVENTS", eventBadge, eventBody);
+        var eventsPanel = Panel("Activity", "EREIGNISSE", eventBadge, eventBody);
         Grid.SetColumnSpan(eventsPanel, 2);
         Place(grid, eventsPanel, 0, 1);
-        Place(grid, Panel("LOG STREAM", "UNAVAILABLE", Vertical(
-            Caption("Live-Ausgabe deaktiviert: weder Supervisor noch Web-API bieten einen strukturierten Log-Vertrag."),
-            Empty("NO LIVE DATA"), ActionButton("Logs öffnen", false, OnRefreshClick))), 2, 1);
+        Place(grid, Panel("ScrollText", "LOGS", "UNAVAILABLE", Vertical(
+            StatusEmpty("UNAVAILABLE", "Live-Ausgabe deaktiviert: weder Supervisor noch Web-API bieten einen strukturierten Log-Vertrag."),
+            ActionButton("Logs öffnen", false, OnRefreshClick))), 2, 1);
         return grid;
     }
+
+    // Bereiche wie Lovable settingsGroups (pages.tsx): Lucide-Icon und Bezeichnung je Eintrag der Master-Liste.
+    private static readonly (string Label, string Icon)[] SettingsGroups =
+    [
+        ("Allgemein", "Cog"), ("Darstellung", "Palette"), ("Runtime", "Server"), ("Models", "Cpu"), ("Voice", "AudioLines"),
+        ("Memory", "BrainCircuit"), ("Privacy", "Shield"), ("Cloud", "Cloud"), ("Tools", "Wrench"), ("Mobile", "Smartphone"),
+        ("Developer / Diagnostics", "Terminal"),
+    ];
 
     private UIElement BuildSettings()
     {
         var grid = NewGrid(2, 1, 12, 0);
         grid.Height = 620;
-        grid.ColumnDefinitions[0].Width = new GridLength(205);
+        grid.ColumnDefinitions[0].Width = new GridLength(224);   // .jx-settings: 14rem Master-Liste
         grid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
         _settingsNavButtons.Clear();
-        _settingsDetailHost = new Border { Style = (Style)Application.Current.Resources["JarvisPanelStyle"], Child = BuildSettingsDetail() };
-        var navContent = new StackPanel { Spacing = 2 };
-        string[] groups = ["General", "Appearance", "Runtime", "Models", "Voice", "Memory", "Privacy", "Cloud", "Tools", "Mobile", "Diagnostics"];
-        for (var i = 0; i < groups.Length; i++)
+        _settingsDetailHost = new Border
         {
-            var index = i;
-            var button = new Button { Content = groups[i], HorizontalContentAlignment = HorizontalAlignment.Left, Style = ButtonStyle(), Background = Brush(i == _selectedSettingsGroup ? "JarvisPanelRaisedBrush" : "JarvisPanelBrush"), MinHeight = 38 };
-            button.Click += (_, _) => SelectSettingsGroup(index);
+            Background = Brush("JarvisPanelBrush"),
+            BorderBrush = Brush("JarvisLineBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Child = BuildSettingsDetail(),
+        };
+        var navContent = new StackPanel { Spacing = 2, Padding = new Thickness(6.4) };
+        for (var i = 0; i < SettingsGroups.Length; i++)
+        {
+            var button = SettingsNavButton(i);
             _settingsNavButtons.Add(button);
             navContent.Children.Add(button);
         }
 
-        var nav = Panel("PREFERENCES", "READ ONLY", navContent);
+        ApplySettingsNavState();
+        // .jx-settings-nav: eigenes Modul, oben ausgerichtet (align-self: start), scrollt bei geringer Höhe.
+        var nav = new Border
+        {
+            Background = Brush("JarvisPanelBrush"),
+            BorderBrush = Brush("JarvisLineBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = new ScrollViewer { Content = navContent, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
+        };
+        AutomationProperties.SetName(nav, "Einstellungsbereiche");
         Place(grid, nav, 0, 0);
         Place(grid, _settingsDetailHost, 1, 0);
         return grid;
     }
 
+    /// <summary>.jx-menu-item: Icon 16 und Label mit 0.7rem Abstand; das Icon folgt der Textfarbe (currentColor).</summary>
+    private Button SettingsNavButton(int index)
+    {
+        var (label, icon) = SettingsGroups[index];
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 11.2 };
+        content.Children.Add(new Jarvis.ControlHub.WinUI.Icons.LucideIcon { Kind = icon, Size = 16 });
+        content.Children.Add(new TextBlock { Text = label, FontSize = 12.8, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+        var button = new Button
+        {
+            Content = content,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(10.4, 8.8, 10.4, 8.8),
+            MinHeight = 36,
+            CornerRadius = new CornerRadius(4),
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            UseSystemFocusVisuals = true,
+        };
+        AutomationProperties.SetName(button, label);
+        button.Click += (_, _) => SelectSettingsGroup(index);
+        return button;
+    }
+
+    /// <summary>Aktiver Eintrag wie .jx-menu-item[data-active]: getönte Fläche, 2-px-Signalkante links, Vordergrundtext.</summary>
+    private void ApplySettingsNavState()
+    {
+        for (var i = 0; i < _settingsNavButtons.Count; i++)
+        {
+            var active = i == _selectedSettingsGroup;
+            var button = _settingsNavButtons[i];
+            button.Background = active ? Brush("NavigationViewItemBackgroundSelected") : new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
+            button.BorderBrush = active ? Brush("JarvisSignalBrush") : new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
+            button.Foreground = Brush(active ? "JarvisTextBrush" : "JarvisSecondaryTextBrush");
+            AutomationProperties.SetItemStatus(button, active ? "Ausgewählt" : string.Empty);
+        }
+    }
+
     private void SelectSettingsGroup(int index)
     {
         _selectedSettingsGroup = index;
-        for (var i = 0; i < _settingsNavButtons.Count; i++)
-        {
-            _settingsNavButtons[i].Background = Brush(i == index ? "JarvisPanelRaisedBrush" : "JarvisPanelBrush");
-            _settingsNavButtons[i].Foreground = Brush(i == index ? "JarvisTextBrush" : "JarvisMutedTextBrush");
-        }
+        ApplySettingsNavState();
         if (_settingsDetailHost is not null) _settingsDetailHost.Child = BuildSettingsDetail();
     }
 
     private UIElement BuildSettingsDetail()
     {
-        string[] groups = ["General", "Appearance", "Runtime", "Models", "Voice", "Memory", "Privacy", "Cloud", "Tools", "Mobile", "Diagnostics"];
-        var selected = groups[Math.Clamp(_selectedSettingsGroup, 0, groups.Length - 1)];
+        const string backendValue = "Wert nur über das Backend";
+        var (group, icon) = SettingsGroups[Math.Clamp(_selectedSettingsGroup, 0, SettingsGroups.Length - 1)];
         var desktop = Web(WebEndpoint.Desktop);
         var config = desktop.As<DesktopInfo>();
         var sttText = !desktop.IsReady
             ? "UNAVAILABLE"
             : string.Join(" / ", new[] { config?.SttBackend, config?.SttModel }.Where(part => !string.IsNullOrWhiteSpace(part))) is { Length: > 0 } stt ? stt : "UNAVAILABLE";
-        var rows = selected switch
+        (string Label, string Hint, string Value)[] rows = group switch
         {
-            "General" => new[] { ("Start with Windows", "NOT_IMPLEMENTED"), ("Start minimized", "NOT_IMPLEMENTED"), ("Language", "System default") },
-            "Appearance" => new[] { ("Theme", "System"), ("Window material", "Mica"), ("Scale", "Windows managed") },
-            "Runtime" => new[] { ("Supervisor", "JARVIS-Runtime.ps1"), ("Repository", _repositoryRoot ?? "UNAVAILABLE"), ("Lifecycle actions", "Supervisor owned") },
-            "Models" => new[] { ("LLM provider", Field(desktop, config?.LlmProvider)), ("LLM endpoint", Field(desktop, config?.LlmEndpoint)), ("Context size", Field(desktop, config?.LlmContextSize)), ("Routing", "Backend owned") },
-            "Voice" => new[] { ("Input device", Field(desktop, config?.InputDevice)), ("Output backend", Field(desktop, config?.OutputBackend)), ("Wake word", Field(desktop, config?.WakeKeyword)), ("STT", sttText), ("TTS engine", Field(desktop, config?.TtsEngine)), ("Language", Field(desktop, config?.Language)) },
-            "Memory" => new[] { ("Capture", Field(desktop, config?.MemoryEnabled)), ("Proactive surfacing", Field(desktop, config?.MemoryProactive)), ("Context window", Field(desktop, config?.ContextWindowEnabled)), ("Retention", "Backend owned") },
-            "Privacy" => new[] { ("Microphone gate", "UNAVAILABLE"), ("Camera gate", "UNAVAILABLE"), ("Clipboard gate", "UNAVAILABLE") },
-            "Cloud" => new[] { ("Cloud permission", "UNAVAILABLE"), ("Provider", "UNAVAILABLE") },
-            "Tools" => new[] { ("Remote tools", "UNAVAILABLE"), ("Confirmation policy", "Backend owned") },
-            "Mobile" => new[] { ("Pairing", "NOT_IMPLEMENTED"), ("Device list", "UNAVAILABLE") },
-            _ => new[] { ("Log level", "Backend owned"), ("Diagnostics package", "NOT_IMPLEMENTED"), ("Live events", "NO LIVE DATA") },
+            "Allgemein" => [("Autostart mit Windows", "Startet J.A.R.V.I.S bei der Anmeldung", "NOT_IMPLEMENTED"), ("Beim Start minimiert", "Nur Infobereich", "NOT_IMPLEMENTED"), ("Anzeigesprache", "Folgt der Systemsprache", "Systemstandard")],
+            "Darstellung" => [("Darstellungsmodus", "Systemeinstellung", "System"), ("Fenstermaterial", "Nativ vom System", "Mica"), ("Skalierung", "Folgt Windows", "Von Windows verwaltet")],
+            "Runtime" => [("Supervisor", "Lokales Steuerskript", "JARVIS-Runtime.ps1"), ("Repository", "Erkannter Main-Checkout", _repositoryRoot ?? "UNAVAILABLE"), ("Lifecycle-Aktionen", "Nur mit Supervisor-Freigabe", "SUPERVISOR OWNED")],
+            "Models" => [("LLM-Anbieter", backendValue, Field(desktop, config?.LlmProvider)), ("LLM-Endpunkt", backendValue, Field(desktop, config?.LlmEndpoint)), ("Kontextgröße", backendValue, Field(desktop, config?.LlmContextSize)), ("Routing", "Backend-Richtlinie", "BACKEND OWNED")],
+            "Voice" => [("Eingabegerät", "Geräteliste aus dem Backend", Field(desktop, config?.InputDevice)), ("Ausgabe-Backend", backendValue, Field(desktop, config?.OutputBackend)), ("Wake Word", backendValue, Field(desktop, config?.WakeKeyword)), ("STT", backendValue, sttText), ("TTS-Engine", backendValue, Field(desktop, config?.TtsEngine)), ("Sprache", backendValue, Field(desktop, config?.Language))],
+            "Memory" => [("Aufnahme", "Gate liegt im Backend", Field(desktop, config?.MemoryEnabled)), ("Proaktives Surfacing", backendValue, Field(desktop, config?.MemoryProactive)), ("Kontext-Fenster", backendValue, Field(desktop, config?.ContextWindowEnabled)), ("Aufbewahrung", "Backend-Richtlinie", "BACKEND OWNED")],
+            "Privacy" => [("Mikrofon-Gate", "Gate liegt im Backend", "UNAVAILABLE"), ("Kamera-Gate", "Gate liegt im Backend", "UNAVAILABLE"), ("Clipboard-Gate", "Gate liegt im Backend", "UNAVAILABLE")],
+            "Cloud" => [("Cloud-Freigabe", "Gate liegt im Backend", "UNAVAILABLE"), ("Anbieter", backendValue, "UNAVAILABLE")],
+            "Tools" => [("Remote Tools", "Gate liegt im Backend", "UNAVAILABLE"), ("Bestätigungsrichtlinie", "Backend-Richtlinie", "BACKEND OWNED")],
+            "Mobile" => [("Pairing", "Kein Gerätevertrag", "NOT_IMPLEMENTED"), ("Geräteliste", "Kein Gerätevertrag", "UNAVAILABLE")],
+            _ => [("Log-Level", "Backend-Richtlinie", "BACKEND OWNED"), ("Diagnosepaket", "Kein lokaler Vertrag", "NOT_IMPLEMENTED"), ("Live-Ereignisse", "Keine Live-Quelle", "NO LIVE DATA")],
         };
-        var content = Vertical(
-            TitleLine(selected.ToUpperInvariant(), "READ ONLY"),
-            InfoBanner("Backend-owned values", "Nur lesend. config.yaml gehört dem Backend; es gibt keinen Schreibvertrag mit Validierung, deshalb speichert diese Ansicht nichts."),
-            SectionLabel("CONFIGURATION"));
-        foreach (var row in rows) content.Children.Add(SettingRow(row.Item1, row.Item2));
-        if (!desktop.IsReady && selected is "Models" or "Voice" or "Memory") content.Children.Add(Caption(Note(desktop)));
-        content.Children.Add(Divider());
-        content.Children.Add(Caption("Änderungen werden erst angeboten, wenn ein passender lokaler Vertrag vorhanden ist."));
-        content.Children.Add(Horizontal(ActionButton("Zurücksetzen", false, OnRefreshClick), ActionButton("Übernehmen", false, OnRefreshClick)));
-        return content;
+
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        // .jx-set-head: Icon-Kachel, Brotkrumen "Systemeinstellungen", Bereichstitel 1.2rem, rechts die Marke "Nur Backend".
+        var head = new Grid { ColumnSpacing = 12, Padding = new Thickness(17.6, 14.4, 17.6, 14.4), BorderBrush = Brush("JarvisLineBrush"), BorderThickness = new Thickness(0, 0, 0, 1) };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.Children.Add(SlotIcon(icon, glyph: 20, brushKey: "JarvisSignalBrush", borderKey: "JarvisLineBrush"));
+        var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1.6 };
+        titles.Children.Add(new TextBlock { Text = "Systemeinstellungen", FontSize = 12, Foreground = Brush("JarvisMutedTextBrush") });
+        titles.Children.Add(new TextBlock { Text = group, FontSize = 19.2, LineHeight = 24, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush("JarvisTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+        Grid.SetColumn(titles, 1);
+        head.Children.Add(titles);
+        var gate = BackendGate();
+        Grid.SetColumn(gate, 2);
+        head.Children.Add(gate);
+        root.Children.Add(head);
+
+        var body = new StackPanel { Padding = new Thickness(17.6, 12, 17.6, 8), Spacing = 0 };
+        body.Children.Add(InfoBanner("Werte gehören dem Backend", "Nur lesend. config.yaml gehört dem Backend; es gibt keinen Schreibvertrag mit Validierung, deshalb speichert diese Ansicht nichts."));
+        body.Children.Add(new TextBlock
+        {
+            Text = "KONFIGURATION",
+            FontSize = 11.52,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            CharacterSpacing = 40,
+            Foreground = Brush("JarvisSecondaryTextBrush"),
+            Margin = new Thickness(0, 14.4, 0, 3.2),
+        });
+        for (var i = 0; i < rows.Length; i++) body.Children.Add(SettingRow(rows[i].Label, rows[i].Hint, rows[i].Value, last: i == rows.Length - 1));
+        if (!desktop.IsReady && group is "Models" or "Voice" or "Memory") body.Children.Add(Caption(Note(desktop)));
+        var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Grid.SetRow(scroll, 1);
+        root.Children.Add(scroll);
+
+        // .jx-set-foot: Hinweis links, gesperrte Aktionen rechts.
+        var foot = new Grid { ColumnSpacing = 16, Padding = new Thickness(17.6, 10.4, 17.6, 10.4), BorderBrush = Brush("JarvisLineBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var footNote = Caption("Änderungen werden erst angeboten, wenn ein passender lokaler Vertrag vorhanden ist.");
+        footNote.VerticalAlignment = VerticalAlignment.Center;
+        foot.Children.Add(footNote);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actions.Children.Add(ActionButton("Zurücksetzen", false, OnRefreshClick));
+        actions.Children.Add(ActionButton("Übernehmen", false, OnRefreshClick));
+        Grid.SetColumn(actions, 1);
+        foot.Children.Add(actions);
+        Grid.SetRow(foot, 2);
+        root.Children.Add(foot);
+        AutomationProperties.SetName(root, group + ", Systemeinstellungen, nur lesend");
+        return root;
     }
 
-    private UIElement RuntimeStateView() => Panel("CURRENT STATUS", _snapshot?.State ?? "UNAVAILABLE", Vertical(
-        StateValue("State", _snapshot?.State ?? "UNAVAILABLE"),
-        StateValue("Observed", _snapshot?.UpdatedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "UNAVAILABLE"),
-        StateValue("Components", _snapshot?.Components.Count.ToString() ?? "UNAVAILABLE")));
+    /// <summary>.jx-gate: gesperrte Backend-Hoheit, Schloss-Icon, Cascadia Mono 0.7rem.</summary>
+    private static Border BackendGate()
+    {
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6.4, VerticalAlignment = VerticalAlignment.Center };
+        var lockIcon = Lucide("LockKeyhole", 14, "JarvisMutedTextBrush");
+        lockIcon.VerticalAlignment = VerticalAlignment.Center;
+        content.Children.Add(lockIcon);
+        content.Children.Add(new TextBlock
+        {
+            Text = "Nur Backend",
+            FontSize = 11.2,
+            FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"],
+            Foreground = Brush("JarvisMutedTextBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var gate = new Border
+        {
+            MinHeight = 30.4,
+            Padding = new Thickness(9.6, 0, 9.6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            CornerRadius = new CornerRadius(4),
+            BorderBrush = Brush("JarvisBorderBrush"),
+            BorderThickness = new Thickness(1),
+            Background = Brush("JarvisBackgroundBrush"),
+            Child = content,
+        };
+        AutomationProperties.SetName(gate, "Nur Backend");
+        return gate;
+    }
+
+    // Aktueller Zustand als Wertegruppe innerhalb des Lifecycle-Panels (kein verschachteltes Panel, Lovable schachtelt keine Module).
+    private UIElement RuntimeStateView() => Compact(
+        SectionLabel("AKTUELLER ZUSTAND"),
+        StateValue("Zustand", _snapshot?.State ?? "UNAVAILABLE"),
+        StateValue("Beobachtet", _snapshot?.UpdatedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "UNAVAILABLE"),
+        StateValue("Komponenten", _snapshot?.Components.Count.ToString() ?? "UNAVAILABLE"));
 
     private async void OnRefreshClick(object sender, RoutedEventArgs args) => await RefreshRuntimeAsync();
     private async void OnStartClick(object sender, RoutedEventArgs args) => await RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction.Start, _snapshot?.CanStart == true);
@@ -847,15 +984,46 @@ public sealed partial class ShellPage : Page
 
     private static UIElement StatusEmpty(WebReading reading) => StatusEmpty(StateText(reading), Note(reading));
 
-    private static UIElement StatusEmpty(string label, string message) => new StackPanel
+    private static UIElement StatusEmpty(string state, string message) => StateBlock(state, null, message);
+
+    /// <summary>
+    /// .jx-pstate: Lucide-Icon je Zustandsart, deutscher Titel, technischer Hinweis. Icons neutral, nur ERROR und OFFLINE
+    /// in Fehlerfarbe, DEGRADED in Warnfarbe (Lovable page-kit.tsx emptyIcon, emptyTitle; styles.css .jx-pstate).
+    /// </summary>
+    private static UIElement StateBlock(string state, string? title, string message, bool centered = false)
     {
-        VerticalAlignment = VerticalAlignment.Center,
-        Spacing = 6,
-        Children =
+        var (icon, defaultTitle, brushKey) = StateKind(state);
+        var row = new Grid
         {
-            new TextBlock { Text = label, FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, CharacterSpacing = 40, Foreground = StateBrush(label), FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"] },
-            new TextBlock { Text = message, FontSize = 12, Foreground = Brush("JarvisMutedTextBrush"), TextWrapping = TextWrapping.Wrap, LineHeight = 18 },
-        },
+            ColumnSpacing = 11.2,
+            Padding = new Thickness(2, 6, 2, 6),
+            HorizontalAlignment = centered ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var glyph = Lucide(icon, 20, brushKey);
+        glyph.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(glyph);
+        var text = new StackPanel { Spacing = 3.2, MaxWidth = 430, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = title ?? defaultTitle, FontSize = 12.48, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush("JarvisSecondaryTextBrush"), TextWrapping = TextWrapping.Wrap });
+        text.Children.Add(new TextBlock { Text = message, FontSize = 11.52, LineHeight = 17.6, Foreground = Brush("JarvisMutedTextBrush"), TextWrapping = TextWrapping.Wrap });
+        Grid.SetColumn(text, 1);
+        row.Children.Add(text);
+        AutomationProperties.SetName(row, (title ?? defaultTitle) + ". " + message);
+        return row;
+    }
+
+    private static (string Icon, string Title, string BrushKey) StateKind(string state) => state switch
+    {
+        "NOT_IMPLEMENTED" => ("CircleSlash", "Nicht implementiert", "JarvisUnavailableBrush"),
+        "OFFLINE" => ("WifiOff", "Offline", "JarvisErrorBrush"),
+        "ERROR" => ("TriangleAlert", "Fehler", "JarvisErrorBrush"),
+        "DEGRADED" => ("TriangleAlert", "Eingeschränkt", "JarvisDegradedBrush"),
+        "STARTING" => ("LoaderCircle", "Wird gestartet", "JarvisInfoBrush"),
+        "BACKEND OWNED" => ("LockKeyhole", "Gehört dem Backend", "JarvisUnavailableBrush"),
+        "UNAVAILABLE" => ("CloudOff", "Quelle nicht verfügbar", "JarvisUnavailableBrush"),
+        _ => ("Inbox", "Keine Einträge", "JarvisUnavailableBrush"),
     };
 
     private static StackPanel Compact(params UIElement[] children)
@@ -883,7 +1051,7 @@ public sealed partial class ShellPage : Page
             var text = new TextBlock
             {
                 Text = cells[i],
-                FontSize = isState ? 10 : 11,
+                FontSize = 11,
                 Foreground = isState ? StateBrush(cells[i]) : Brush("JarvisTextBrush"),
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources[isState ? "JarvisMonoFontFamily" : "JarvisFontFamily"],
@@ -914,30 +1082,23 @@ public sealed partial class ShellPage : Page
         grid.Children.Add(element);
     }
 
-    private static Border Panel(string title, string badge, UIElement content)
+    /// <summary>
+    /// Panel aller Modulseiten in derselben Sprache wie Home (.jx-module): Kopfzeile 2.6rem mit Lucide-Icon in Signalblau,
+    /// Titel in Versalien, rechts Status-Chip oder neutrale Marke; Inhalt mit 0.9rem Seitenabstand wie der Kopf.
+    /// </summary>
+    private static Border Panel(string icon, string title, string badge, UIElement content)
     {
-        var stack = new StackPanel { Spacing = 9 };
-        stack.Children.Add(TitleLine(title, badge));
-        stack.Children.Add(Divider());
-        stack.Children.Add(content);
-        return new Border { Style = (Style)Application.Current.Resources["JarvisPanelStyle"], Child = stack, MinWidth = 0, UseLayoutRounding = true };
+        var body = new Border { Padding = new Thickness(14.4, 12, 14.4, 14.4), Child = content };
+        var module = JxModule(icon, title, Badge(badge), body);
+        module.UseLayoutRounding = true;
+        return module;
     }
 
-    private static UIElement TitleLine(string title, string badge) => new Grid
-    {
-        ColumnDefinitions =
-        {
-            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-            new ColumnDefinition { Width = GridLength.Auto },
-        },
-        Children =
-        {
-            new TextBlock { Text = title, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, CharacterSpacing = 75, Foreground = Brush("JarvisHeaderBrush"), VerticalAlignment = VerticalAlignment.Center, FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisFontFamily"] },
-            BadgeText(badge),
-        },
-    }.WithBadgeColumn();
+    /// <summary>Runtime-Zustände als .jx-status-Chip; alles andere (NO LIVE DATA, READ ONLY, Zählwerte) als neutrale .jx-tag-Marke.</summary>
+    private static UIElement Badge(string text) => IsRuntimeState(text) ? StatusChipView.Create(text).Root : JxTag(text);
 
-    private static TextBlock BadgeText(string text) => new() { Text = text, FontSize = 9, CharacterSpacing = 25, Foreground = StateBrush(text), VerticalAlignment = VerticalAlignment.Center, FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"], TextTrimming = TextTrimming.CharacterEllipsis };
+    private static bool IsRuntimeState(string text) =>
+        text is "READY" or "STARTING" or "DEGRADED" or "ERROR" or "STOPPED" or "OFFLINE" or "NOT_IMPLEMENTED" or "UNAVAILABLE";
 
     private static Button ActionButton(string label, bool enabled, RoutedEventHandler handler)
     {
@@ -956,7 +1117,7 @@ public sealed partial class ShellPage : Page
         Children =
         {
             new TextBlock { Text = label, FontSize = 12, Foreground = Brush("JarvisMutedTextBrush"), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
-            new TextBlock { Text = value, FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = StateBrush(value), VerticalAlignment = VerticalAlignment.Center, FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"], TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 },
+            new TextBlock { Text = value, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = StateBrush(value), VerticalAlignment = VerticalAlignment.Center, FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"], TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 },
         },
     }.WithSecondColumn();
 
@@ -983,16 +1144,7 @@ public sealed partial class ShellPage : Page
         return grid;
     }
 
-    private static UIElement Empty(string text) => new StackPanel
-    {
-        VerticalAlignment = VerticalAlignment.Center,
-        Spacing = 6,
-        Children =
-        {
-            new TextBlock { Text = EmptyStateLabel(text), FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, CharacterSpacing = 40, Foreground = StateBrush(EmptyStateLabel(text)), FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"] },
-            new TextBlock { Text = text, FontSize = 12, Foreground = Brush("JarvisMutedTextBrush"), TextWrapping = TextWrapping.Wrap, LineHeight = 18 },
-        },
-    };
+    private static UIElement Empty(string text) => StateBlock(EmptyStateLabel(text), null, text);
 
     private static TextBlock Caption(string text) => new() { Text = text, FontSize = 11, Foreground = Brush("JarvisMutedTextBrush"), TextWrapping = TextWrapping.Wrap, LineHeight = 16 };
     private static Border Divider() => new() { Height = 1, Background = Brush("JarvisBorderBrush"), Margin = new Thickness(0, 1, 0, 1) };
@@ -1000,8 +1152,8 @@ public sealed partial class ShellPage : Page
     private static TextBlock SectionLabel(string text) => new()
     {
         Text = text,
-        FontSize = 9,
-        CharacterSpacing = 65,
+        FontSize = 11,
+        CharacterSpacing = 60,
         FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         Foreground = Brush("JarvisMutedTextBrush"),
         FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"],
@@ -1017,20 +1169,11 @@ public sealed partial class ShellPage : Page
         },
     };
 
-    private static UIElement CenteredEmpty(string title, string detail) => new Grid
+    /// <summary>Zentrierter Zustand für Flächen ohne Inhalt (Viewport, Tabelle ohne Zeilen), wie .jx-module[data-variant=viewport] .jx-pstate.</summary>
+    private static UIElement CenteredEmpty(string state, string title, string detail) => new Grid
     {
         MinHeight = 105,
-        Children =
-        {
-            new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                MaxWidth = 430,
-                Spacing = 7,
-                Children = { SectionLabel(title), new TextBlock { Text = detail, FontSize = 12, Foreground = Brush("JarvisMutedTextBrush"), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, LineHeight = 18 } },
-            },
-        },
+        Children = { StateBlock(state, title, detail, centered: true) },
     };
 
     private static UIElement InfoBanner(string title, string detail) => new Border
@@ -1040,21 +1183,30 @@ public sealed partial class ShellPage : Page
         BorderBrush = Brush("JarvisBorderBrush"),
         BorderThickness = new Thickness(1, 1, 1, 1),
         CornerRadius = new CornerRadius(4),
-        Child = Vertical(SectionLabel(title.ToUpperInvariant()), Caption(detail)),
+        Child = new StackPanel { Spacing = 3.2, Children = { new TextBlock { Text = title, FontSize = 12.48, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush("JarvisSecondaryTextBrush") }, Caption(detail) } },
     };
 
-    private static UIElement SettingRow(string label, string value)
+    /// <summary>.jx-set-row: Label 0.8rem mit Hinweis 0.7rem links, lesender Wert rechts (15rem), Trennlinie darunter.</summary>
+    private static UIElement SettingRow(string label, string hint, string value, bool last)
     {
-        var grid = new Grid { ColumnSpacing = 18, Margin = new Thickness(0, 8, 0, 8) };
+        var grid = new Grid
+        {
+            ColumnSpacing = 24,
+            Padding = new Thickness(0, 10.4, 0, 10.4),
+            BorderBrush = Brush("JarvisDividerBrush"),
+            BorderThickness = new Thickness(0, 0, 0, last ? 0 : 1),
+        };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
-        var description = Vertical(new TextBlock { Text = label, FontSize = 12, Foreground = Brush("JarvisTextBrush"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold }, Caption("Änderung nur über einen passenden Konfigurationsvertrag."));
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
+        var description = new StackPanel { Spacing = 1.6, VerticalAlignment = VerticalAlignment.Center };
+        description.Children.Add(new TextBlock { Text = label, FontSize = 12.8, LineHeight = 18.4, Foreground = Brush("JarvisTextBrush"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        description.Children.Add(new TextBlock { Text = hint, FontSize = 11.2, LineHeight = 16.8, Foreground = Brush("JarvisMutedTextBrush"), TextWrapping = TextWrapping.Wrap });
         grid.Children.Add(description);
-        var state = new TextBlock { Text = value, FontSize = 10, Foreground = StateBrush(value), FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"], TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+        var state = new TextBlock { Text = value, FontSize = 11, Foreground = StateBrush(value), FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)Application.Current.Resources["JarvisMonoFontFamily"], TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         Grid.SetColumn(state, 1);
         grid.Children.Add(state);
-        var stack = new StackPanel { Spacing = 0, Children = { grid, Divider() } };
-        return stack;
+        AutomationProperties.SetName(grid, $"{label}: {value}, nur lesend");
+        return grid;
     }
 
     private static UIElement TableHeader(params string[] columns)
@@ -1063,8 +1215,8 @@ public sealed partial class ShellPage : Page
         foreach (var _ in columns) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var i = 0; i < columns.Length; i++)
         {
-            var header = SectionLabel(columns[i]);
-            header.TextTrimming = TextTrimming.CharacterEllipsis;
+            // .jx-th: 0.72rem, halbfett, Sekundärtext (keine Mini-Versalien).
+            var header = new TextBlock { Text = columns[i], FontSize = 11.52, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush("JarvisSecondaryTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis };
             Grid.SetColumn(header, i);
             grid.Children.Add(header);
         }
@@ -1080,38 +1232,40 @@ public sealed partial class ShellPage : Page
         UseSystemFocusVisuals = true,
     };
 
-    private static UIElement CommandSurface(string placeholder, string note)
+    /// <summary>
+    /// .jx-flow: nummerierte Schritte mit Icon-Kachel, Titel und Detail, verbunden durch eine feine Linie auf Höhe der
+    /// Kachel. Konzeptuelle Abläufe tragen keinen Zustand je Schritt; der Zustand steht im Panelkopf.
+    /// </summary>
+    private static UIElement FlowStrip(params (string Icon, string Title, string Detail)[] steps)
     {
-        var stack = new StackPanel { Spacing = 7 };
-        stack.Children.Add(TitleLine("COMMAND SURFACE", "NOT_IMPLEMENTED"));
-        var composer = new Grid { ColumnSpacing = 8 };
-        composer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        composer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        composer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var mic = new Button { Content = "Voice", IsEnabled = false, Style = ButtonStyle(), MinWidth = 68, MinHeight = 40 };
-        var input = new TextBox { PlaceholderText = placeholder, IsEnabled = false, MinHeight = 40, Style = (Style)Application.Current.Resources["JarvisTextBoxStyle"] };
-        var send = new Button { Content = "Senden", IsEnabled = false, Style = ButtonStyle(), MinWidth = 82, MinHeight = 40 };
-        Grid.SetColumn(input, 1);
-        Grid.SetColumn(send, 2);
-        composer.Children.Add(mic);
-        composer.Children.Add(input);
-        composer.Children.Add(send);
-        stack.Children.Add(composer);
-        stack.Children.Add(Caption(note));
-        return new Border { Style = (Style)Application.Current.Resources["JarvisPanelStyle"], Child = stack, Padding = new Thickness(14, 10, 14, 10), VerticalAlignment = VerticalAlignment.Stretch };
-    }
-
-    private static UIElement FlowStrip(params (string Index, string Title, string Detail)[] steps)
-    {
-        var grid = new Grid { ColumnSpacing = 8, MinHeight = 95 };
+        var grid = new Grid { MinHeight = 95 };
         foreach (var _ in steps) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var i = 0; i < steps.Length; i++)
         {
             var step = steps[i];
-            var content = Vertical(SectionLabel(step.Index), new TextBlock { Text = step.Title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush("JarvisTextBrush"), TextWrapping = TextWrapping.Wrap }, Caption(step.Detail));
-            var border = new Border { Padding = new Thickness(10, 8, 10, 8), Background = Brush("JarvisQuietBrush"), BorderBrush = Brush("JarvisBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Child = content, VerticalAlignment = VerticalAlignment.Stretch };
-            Grid.SetColumn(border, i);
-            grid.Children.Add(border);
+            var cell = new Grid { RowSpacing = 5.6, Padding = new Thickness(0, 0, 16, 0) };
+            for (var r = 0; r < 4; r++) cell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            cell.Children.Add(SectionLabel((i + 1).ToString("00", CultureInfo.InvariantCulture)));
+            var tile = SlotIcon(step.Icon);
+            tile.HorizontalAlignment = HorizontalAlignment.Left;
+            Grid.SetRow(tile, 1);
+            if (i < steps.Length - 1)
+            {
+                var connector = new Border { Height = 1, Background = Brush("JarvisLineBrush"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(41.6, 0, -6.4, 0) };
+                Grid.SetRow(connector, 1);
+                cell.Children.Add(connector);
+            }
+
+            cell.Children.Add(tile);
+            var title = new TextBlock { Text = step.Title, FontSize = 12.8, LineHeight = 18.4, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush("JarvisTextBrush"), TextWrapping = TextWrapping.Wrap };
+            Grid.SetRow(title, 2);
+            cell.Children.Add(title);
+            var detail = new TextBlock { Text = step.Detail, FontSize = 11.2, LineHeight = 16.8, Foreground = Brush("JarvisMutedTextBrush"), TextWrapping = TextWrapping.Wrap };
+            Grid.SetRow(detail, 3);
+            cell.Children.Add(detail);
+            AutomationProperties.SetName(cell, $"Schritt {i + 1}: {step.Title}. {step.Detail}");
+            Grid.SetColumn(cell, i);
+            grid.Children.Add(cell);
         }
         return grid;
     }
@@ -1144,6 +1298,4 @@ internal static class ShellLayoutExtensions
         if (grid.Children.Count > 1 && grid.Children[1] is FrameworkElement second) Grid.SetColumn(second, 1);
         return grid;
     }
-
-    public static Grid WithBadgeColumn(this Grid grid) => grid.WithSecondColumn();
 }

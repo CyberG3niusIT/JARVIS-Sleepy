@@ -231,20 +231,7 @@ public sealed partial class ShellPage
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var iconGlyph = Lucide(kind, 18, "JarvisSecondaryTextBrush");
-        iconGlyph.HorizontalAlignment = HorizontalAlignment.Center;
-        iconGlyph.VerticalAlignment = VerticalAlignment.Center;
-        row.Children.Add(new Border
-        {
-            Width = 33.6,
-            Height = 33.6,
-            VerticalAlignment = VerticalAlignment.Center,
-            CornerRadius = new CornerRadius(5),
-            Background = Brush("JarvisQuietBrush"),
-            BorderBrush = Brush("JarvisSlotIconBorderBrush"),
-            BorderThickness = new Thickness(1),
-            Child = iconGlyph,
-        });
+        row.Children.Add(SlotIcon(kind));
 
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1.6 };
         text.Children.Add(new TextBlock
@@ -272,6 +259,25 @@ public sealed partial class ShellPage
         Grid.SetColumn(chip, 2);
         row.Children.Add(chip);
         return row;
+    }
+
+    /// <summary>.jx-slot-icon: 2.1rem-Kachel, Icon 18 in Sekundärfarbe (Farbe trägt Bedeutung erst bei Kopf, Aktiv und Hover).</summary>
+    private static Border SlotIcon(string kind, double size = 33.6, double glyph = 18, string brushKey = "JarvisSecondaryTextBrush", string borderKey = "JarvisSlotIconBorderBrush")
+    {
+        var icon = Lucide(kind, glyph, brushKey);
+        icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        return new Border
+        {
+            Width = size,
+            Height = size,
+            VerticalAlignment = VerticalAlignment.Center,
+            CornerRadius = new CornerRadius(5),
+            Background = Brush("JarvisQuietBrush"),
+            BorderBrush = Brush(borderKey),
+            BorderThickness = new Thickness(1),
+            Child = icon,
+        };
     }
 
     // ---- Memory & Thinking ------------------------------------------------------------------------------------
@@ -570,14 +576,20 @@ public sealed partial class ShellPage
 
     // ---- Command / Conversation Surface -----------------------------------------------------------------------
 
-    private static Grid BuildCommand()
+    private static Grid BuildCommand() =>
+        BuildCommand("Nachricht an J.A.R.V.I.S …", "Chat ist NOT_IMPLEMENTED. Senden deaktiviert.", inset: true);
+
+    /// <summary>
+    /// .jx-command: Mikrofon 57.6, Feld 57.6 als Pille, Hinweis darunter. <paramref name="inset"/> = Home mit 12 %
+    /// Innenabstand je Seite; sonst .jx-command-inline (Chat) über die volle Breite.
+    /// </summary>
+    private static Grid BuildCommand(string placeholder, string noteText, bool inset)
     {
-        // .jx-command: Innenabstand 0 12 % je Seite; Mikrofon 57.6, Feld 57.6 als Pille, Hinweis darunter.
         var outer = new Grid { MinHeight = 79.7 };
         AutomationProperties.SetName(outer, "Conversation / Command");
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.12, GridUnitType.Star) });
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.76, GridUnitType.Star) });
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.12, GridUnitType.Star) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(inset ? 0.12 : 0, GridUnitType.Star) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(inset ? 0.76 : 1, GridUnitType.Star) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(inset ? 0.12 : 0, GridUnitType.Star) });
 
         var root = new Grid { ColumnSpacing = 12 };
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -613,7 +625,7 @@ public sealed partial class ShellPage
         field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var input = new TextBox
         {
-            PlaceholderText = "Nachricht an J.A.R.V.I.S …",
+            PlaceholderText = placeholder,
             IsEnabled = false,
             BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
@@ -645,7 +657,7 @@ public sealed partial class ShellPage
 
         var note = new TextBlock
         {
-            Text = "Chat ist NOT_IMPLEMENTED. Senden deaktiviert.",
+            Text = noteText,
             FontSize = 11.52,
             Foreground = Brush("JarvisMutedTextBrush"),
             Margin = new Thickness(19.2, 4.8, 0, 0),

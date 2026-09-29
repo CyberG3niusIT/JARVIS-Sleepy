@@ -43,6 +43,7 @@ internal static class Program
         VerifyFailureClassification(failures);
         VerifyMobileAdapter(failures);
         VerifyBrainActivity(failures);
+        VerifyIconRegistry(failures);
         await VerifyHubAsync(failures, skipped);
 
         foreach (var item in skipped) Console.WriteLine("SKIPPED: " + item);
@@ -266,6 +267,99 @@ internal static class Program
         Check(status.State == MobileConnectionState.NotImplemented && status.DeviceName is null && status.LastContact is null,
             "Mobile Connection muss NOT_IMPLEMENTED ohne Geräte melden.", failures);
         Check(MobileConnectionAdapter.StateText(status.State) == "NOT_IMPLEMENTED", "Mobile-Zustandstext muss NOT_IMPLEMENTED sein.", failures);
+    }
+
+    /// <summary>
+    /// Jedes in den Views referenzierte Lucide-Icon muss in der zentralen Registry stehen (ein fehlender Name rendert in
+    /// WinUI stillschweigend nichts), und jede Pfadangabe muss syntaktisch vollständig sein (Befehl mit passender Anzahl Werte).
+    /// </summary>
+    private static void VerifyIconRegistry(ICollection<string> failures)
+    {
+        var registry = Jarvis.ControlHub.WinUI.Icons.LucideIcons.Kinds.ToHashSet(StringComparer.Ordinal);
+        foreach (var kind in registry)
+        {
+            Jarvis.ControlHub.WinUI.Icons.LucideIcons.TryGet(kind, out var data);
+            Check(PathDataWellFormed(data), $"Icon {kind}: Pfaddaten unvollständig oder ungültig.", failures);
+        }
+
+        var views = FindRepoFile(Path.Combine("WindowsApp", "WinUI3", "Views"));
+        if (views is null)
+        {
+            failures.Add("Icon-Registry: Views-Verzeichnis nicht gefunden.");
+            return;
+        }
+
+        var source = string.Concat(Directory.GetFiles(views, "*.cs").Concat(Directory.GetFiles(views, "*.xaml")).Select(File.ReadAllText));
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        void Collect(string text, string pattern)
+        {
+            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(text, pattern)) used.Add(match.Groups[1].Value);
+        }
+
+        // Direkte Aufrufe und XAML-Attribute.
+        Collect(source, @"Kind=""(\w+)""");
+        Collect(source, @"Kind = ""(\w+)""");
+        Collect(source, @"(?:Lucide|SlotIcon|JxModule|JxSlot|Panel|LucideIcon\.Create)\(""(\w+)""");
+        Collect(source, @"SystemGroup\(""[^""]+"", ""(\w+)""");
+        // Tabellen, deren Icon-Spalte nur im jeweiligen Block gilt.
+        Collect(Block(source, "FlowStrip(", ");", all: true), @"\(""(\w+)"", ""[^""]*"", ""[^""]*""\)");
+        Collect(Block(source, "SettingsGroups =", "];"), @"\(""[^""]+"", ""(\w+)""\)");
+        Collect(Block(source, "StateKind(string state) => state switch", "};"), @"=> \(""(\w+)"", ");
+        Collect(Block(source, "Sections =", "};"), @"\(""[^""]+"", ""[^""]+"", ""(\w+)""\)");
+
+        Check(used.Count >= 60, $"Icon-Registry: nur {used.Count} Icon-Verweise gefunden, Extraktion vermutlich defekt.", failures);
+        foreach (var kind in used.Where(kind => !registry.Contains(kind)).Order(StringComparer.Ordinal))
+        {
+            failures.Add($"Icon-Registry: '{kind}' wird in den Views verwendet, fehlt aber in LucideIcons.");
+        }
+    }
+
+    private static string Block(string source, string start, string end, bool all = false)
+    {
+        var builder = new StringBuilder();
+        var index = 0;
+        while ((index = source.IndexOf(start, index, StringComparison.Ordinal)) >= 0)
+        {
+            var stop = source.IndexOf(end, index, StringComparison.Ordinal);
+            if (stop < 0) break;
+            builder.Append(source, index, stop - index).Append('\n');
+            index = stop;
+            if (!all) break;
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool PathDataWellFormed(string? data)
+    {
+        if (string.IsNullOrWhiteSpace(data)) return false;
+        var tokens = System.Text.RegularExpressions.Regex.Matches(data, @"[MmLlHhVvCcSsQqTtAaZz]|-?(?:\d+\.?\d*|\.\d+)(?:[eE]-?\d+)?")
+            .Select(match => match.Value).ToList();
+        if (string.Concat(tokens).Length != System.Text.RegularExpressions.Regex.Replace(data, @"[\s,]", string.Empty).Length) return false;
+        if (tokens.Count == 0 || tokens[0] is not ("M" or "m")) return false;
+        var i = 0;
+        while (i < tokens.Count)
+        {
+            var command = char.ToUpperInvariant(tokens[i++][0]);
+            var arity = command switch { 'M' or 'L' or 'T' => 2, 'H' or 'V' => 1, 'C' => 6, 'S' or 'Q' => 4, 'A' => 7, 'Z' => 0, _ => -1 };
+            if (arity < 0) return false;
+            var count = 0;
+            while (i < tokens.Count && !char.IsLetter(tokens[i][0])) { count++; i++; }
+            if (arity == 0 ? count != 0 : count == 0 || count % arity != 0) return false;
+        }
+
+        return true;
+    }
+
+    private static string? FindRepoFile(string relative)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, relative);
+            if (Directory.Exists(candidate) || File.Exists(candidate)) return candidate;
+        }
+
+        return null;
     }
 
     private static void VerifyBrainActivity(ICollection<string> failures)

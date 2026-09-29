@@ -45,11 +45,23 @@
             </StackPanel>
         </Grid>
         <ScrollViewer x:Name="PageScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Padding="13.6" Spacing="14">
-                <StackPanel x:Name="SectionHeader" Spacing="3" Visibility="Collapsed">
-                    <TextBlock x:Name="SectionTitle" Text="Home" FontSize="23" FontWeight="SemiBold" Foreground="{StaticResource JarvisTextBrush}" />
-                    <TextBlock x:Name="SectionDescription" FontSize="12" Foreground="{StaticResource JarvisMutedTextBrush}" />
-                </StackPanel>
+            <StackPanel Padding="13.6" Spacing="12">
+                <!-- .jx-page-head: Icon-Kachel 2.4rem in Signalblau, Titel 1.2rem, Untertitel 0.7rem, Abstand zum Raster 0.75rem. -->
+                <Border x:Name="SectionHeader" Visibility="Collapsed" Padding="14.4,11.2,14.4,11.2" CornerRadius="6" BorderThickness="1" BorderBrush="{StaticResource JarvisLineBrush}" Background="{StaticResource JarvisPanelBrush}">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="38.4" Height="38.4" CornerRadius="5" BorderThickness="1" BorderBrush="{StaticResource JarvisLineBrush}" Background="{StaticResource JarvisQuietBrush}" VerticalAlignment="Center">
+                            <ic:LucideIcon x:Name="SectionIcon" Kind="Home" Size="20" Foreground="{StaticResource JarvisSignalBrush}" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="1.6" VerticalAlignment="Center">
+                            <TextBlock x:Name="SectionTitle" Text="Home" FontSize="19.2" LineHeight="24" FontWeight="SemiBold" Foreground="{StaticResource JarvisTextBrush}" />
+                            <TextBlock x:Name="SectionDescription" FontSize="11.2" LineHeight="16.8" TextWrapping="Wrap" Foreground="{StaticResource JarvisMutedTextBrush}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
                 <Grid x:Name="PageBody" />
             </StackPanel>
         </ScrollViewer>
