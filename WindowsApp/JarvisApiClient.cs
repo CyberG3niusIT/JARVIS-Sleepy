@@ -43,47 +43,14 @@ public sealed class JarvisApiClient : IDisposable
     public Task<JsonDocument> GetStatsAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("api/stats", TimeSpan.FromSeconds(4), cancellationToken);
 
-    public Task<JsonDocument> GetDesktopLiveAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/desktop/live", TimeSpan.FromMilliseconds(1800), cancellationToken);
-
     public Task<JsonDocument> GetDesktopSnapshotAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("api/desktop/snapshot", TimeSpan.FromSeconds(5), cancellationToken);
-
-    public Task<JsonDocument> GetSttEventsAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/events/stt?hours=24", TimeSpan.FromSeconds(5), cancellationToken);
-
-    public Task<JsonDocument> GetTtsEventsAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/events/tts?hours=24", TimeSpan.FromSeconds(5), cancellationToken);
-
-    public Task<JsonDocument> GetRoutingEventsAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/events/routing?hours=24", TimeSpan.FromSeconds(6), cancellationToken);
 
     public Task<JsonDocument> GetAgentStatusAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("api/agents/status", TimeSpan.FromSeconds(5), cancellationToken);
 
     public Task<JsonDocument> GetAutomationsStatusAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("api/automations/status", TimeSpan.FromSeconds(5), cancellationToken);
-
-    public Task<JsonDocument> GetHealthHistoryAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/events/health?hours=24", TimeSpan.FromSeconds(5), cancellationToken);
-
-    public Task<JsonDocument> GetMetricsSummaryAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/metrics/summary?hours=24", TimeSpan.FromSeconds(6), cancellationToken);
-
-    public Task<JsonDocument> GetMetricsSkillsAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/metrics/skills?hours=24", TimeSpan.FromSeconds(6), cancellationToken);
-
-    public Task<JsonDocument> GetMetricsRoutesAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/metrics/routes?hours=24", TimeSpan.FromSeconds(6), cancellationToken);
-
-    public Task<JsonDocument> GetMetricsTimeseriesAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/metrics/timeseries?hours=24&bucket=hour", TimeSpan.FromSeconds(6), cancellationToken);
-
-    public Task<JsonDocument> GetMetricsToolsAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/metrics/tools?hours=24", TimeSpan.FromSeconds(6), cancellationToken);
-
-    public Task<JsonDocument> GetMetricsSearchStatsAsync(CancellationToken cancellationToken = default) =>
-        GetJsonAsync("api/metrics/search_stats?hours=24", TimeSpan.FromSeconds(6), cancellationToken);
 
     public Task<JsonDocument> GetEventsAggregateAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("api/events/aggregate?hours=24", TimeSpan.FromSeconds(5), cancellationToken);

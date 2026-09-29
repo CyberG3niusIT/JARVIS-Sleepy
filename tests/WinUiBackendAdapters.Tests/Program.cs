@@ -51,6 +51,7 @@ internal static class Program
         VerifyBrainPrivacyAndReadOnly(failures);
         VerifyHeaderLayout(failures);
         VerifyProjectSources(failures);
+        VerifyClientPathsAreDesktopAllowlisted(failures);
         VerifyPortedLegacyChecks(failures, skipped);
         await VerifyHubAsync(failures, skipped);
 
@@ -590,7 +591,7 @@ internal static class Program
     }
 
     /// <summary>
-    /// Aus dem Legacy-Harness tests/WindowsAppFreshness.Tests (WPF-MainWindowViewModel) übernommene Anliegen, geprüft
+    /// Anliegen des entfernten Legacy-Harness (siehe docs/DESKTOP_ARCHITECTURE.md), geprüft
     /// gegen den aktuellen Backend-Vertrag (jarvis_web.py agents_status_handler, JARVIS.Runtime.psm1) und den WinUI-Code:
     /// Planner ohne Inhalte und nur mit plausiblen Zählern, Lifecycle-Freigabe nur aus dem Supervisor-Zustand desselben
     /// Checkouts, Repository-Erkennung und Reparse-Point-Schutz. Die WPF-Zeitschwellen sind bewusst nicht übernommen.
@@ -659,6 +660,9 @@ internal static class Program
         var checkAfter = dialog < 0 ? -1 : shellText.IndexOf("IsRuntimeActionAllowedAsync(action, root)", dialog, StringComparison.Ordinal);
         Check(request >= 0 && checkBefore > request && checkBefore < dialog && checkAfter > dialog && checkAfter < send,
             "Lifecycle: Supervisor-Freigabe muss vor und nach dem Bestätigungsdialog neu abgefragt werden.", failures);
+        Check(request >= 0 && shellText.IndexOf("_runtimeActionInFlight) return;", request, StringComparison.Ordinal) is > 0 and var guard && guard < dialog
+                && shellText.IndexOf("_runtimeActionInFlight = false;", request, StringComparison.Ordinal) > 0,
+            "Lifecycle: parallele Aktionen (zweiter Klick während Dialog oder Supervisor-Abfrage) müssen ausgeschlossen sein.", failures);
 
         // Repository-Erkennung: im integrierten Repo ist der Root selbst der validierte Checkout; ungültige explizite
         // Roots fallen nicht still auf einen anderen Checkout zurück.
@@ -719,6 +723,42 @@ internal static class Program
             try { if (Directory.Exists(testRoot)) Directory.Delete(testRoot, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>
+    /// Vertrag Client ↔ Backend: jeder Pfad, den JarvisApiClient abfragen kann, steht samt Query-Schlüsseln in
+    /// _DESKTOP_READ_ALLOWLIST von jarvis_web.py. Sonst würde der Desktop-Modus ihn mit 403 ablehnen.
+    /// </summary>
+    private static void VerifyClientPathsAreDesktopAllowlisted(ICollection<string> failures)
+    {
+        var client = FindRepoFile(Path.Combine("WindowsApp", "JarvisApiClient.cs"));
+        var backend = FindRepoFile("jarvis_web.py");
+        if (client is null || backend is null)
+        {
+            failures.Add("Allowlist-Vertrag: JarvisApiClient.cs oder jarvis_web.py nicht gefunden.");
+            return;
+        }
+
+        var block = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(backend), @"_DESKTOP_READ_ALLOWLIST = \{(?<body>.*?)\n\}", System.Text.RegularExpressions.RegexOptions.Singleline);
+        var allow = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (System.Text.RegularExpressions.Match entry in System.Text.RegularExpressions.Regex.Matches(block.Groups["body"].Value, @"'(?<path>/api/[^']+)':\s*frozenset\((?:\{(?<keys>[^}]*)\})?\)"))
+        {
+            allow[entry.Groups["path"].Value] = entry.Groups["keys"].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(key => key.Trim('\'')).ToHashSet(StringComparer.Ordinal);
+        }
+
+        Check(allow.Count == 9, $"Allowlist-Vertrag: erwartet 9 Desktop-Pfade im Backend, gefunden {allow.Count}.", failures);
+        var requests = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(client), @"GetJsonAsync\(""(?<path>[^""]+)""")
+            .Select(match => match.Groups["path"].Value).ToList();
+        Check(requests.Count == 9, $"Allowlist-Vertrag: erwartet 9 Client-Pfade, gefunden {requests.Count}.", failures);
+        foreach (var request in requests)
+        {
+            var parts = request.Split('?', 2);
+            var path = "/" + parts[0];
+            var keys = parts.Length > 1 ? parts[1].Split('&').Select(pair => pair.Split('=')[0]) : [];
+            Check(allow.TryGetValue(path, out var allowed) && keys.All(allowed.Contains),
+                $"Allowlist-Vertrag: Client-Pfad {request} ist im Desktop-Modus nicht freigegeben.", failures);
         }
     }
 

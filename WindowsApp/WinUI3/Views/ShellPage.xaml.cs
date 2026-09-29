@@ -40,6 +40,7 @@ public sealed partial class ShellPage : Page
     private string? _repositoryRoot;
     private Jarvis.ControlHub.RuntimeSnapshot? _snapshot;
     private string? _snapshotRoot;
+    private bool _runtimeActionInFlight;
     private bool _refreshing;
     private CancellationTokenSource? _lifetime;
     private DispatcherTimer? _pollTimer;
@@ -954,7 +955,22 @@ public sealed partial class ShellPage : Page
     private async Task RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction action)
     {
         var root = _repositoryRoot;
-        if (root is null) return;
+        // Eine Aktion zur Zeit: ein zweiter Klick würde einen zweiten ContentDialog öffnen (Ausnahme) oder zwei
+        // Lifecycle-Skripte parallel starten.
+        if (root is null || _runtimeActionInFlight) return;
+        _runtimeActionInFlight = true;
+        try
+        {
+            await RunRuntimeActionAsync(action, root);
+        }
+        finally
+        {
+            _runtimeActionInFlight = false;
+        }
+    }
+
+    private async Task RunRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction action, string root)
+    {
         if (!await IsRuntimeActionAllowedAsync(action, root))
         {
             RuntimeDetailLabel.Text = "Aktion nicht freigegeben: der soeben abgefragte Supervisor-Zustand dieses Checkouts erlaubt sie nicht.";
