@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-JARVIS Web UI â€” Browser-based chat interface.
+JARVIS Web UI — Browser-based chat interface.
 
 Serves a static frontend via aiohttp and bridges commands to the
 full JARVIS skill pipeline over WebSocket.
@@ -107,7 +107,7 @@ def _check_auth_token(request) -> bool:
     """Validate bearer token from header or query param. Returns True if OK."""
     token = request.app.get('auth_token')
     if not token:
-        return True  # No token configured â€” allow all (localhost mode)
+        return True  # No token configured — allow all (localhost mode)
 
     # Check Authorization header
     auth_header = request.headers.get('Authorization', '')
@@ -178,7 +178,7 @@ async def mail_security_middleware(request, handler):
     origin = request.headers.get('Origin')
     if request.method not in ('GET', 'HEAD') and origin and origin not in (
             f'http://{request.host}', f'https://{request.host}'):
-        raise web.HTTPForbidden(text='UngÃ¼ltiger Ursprung')
+        raise web.HTTPForbidden(text='Ungültiger Ursprung')
     response = await handler(request)
     response.headers['Cache-Control'] = 'no-store, private'
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -188,7 +188,7 @@ async def mail_security_middleware(request, handler):
 # --desktop-mode: read-only second process for the native desktop app, loopback only.
 DESKTOP_MODE_HOST = '127.0.0.1'
 DESKTOP_MODE_PORT = 8091
-DESKTOP_MODE_REJECTION = 'Desktop-Modus: schreibgeschÃ¼tzt. Diese Aktion ist nicht verfÃ¼gbar.'
+DESKTOP_MODE_REJECTION = 'Desktop-Modus: schreibgeschützt. Diese Aktion ist nicht verfügbar.'
 _DESKTOP_WS_ALLOWED_TYPES = frozenset({'client_info'})
 
 # Exactly the read endpoints the native WinUI app calls (UI/WindowsApp/WinUI3/Adapters/BackendHub.cs ->
@@ -222,7 +222,7 @@ async def desktop_readonly_middleware(request, handler):
     refused with 403 and logged (path only, the query may carry a token).
     """
     if request.method not in ('GET', 'HEAD'):
-        logger.warning("Desktop-Modus: %s %s abgelehnt (schreibgeschÃ¼tzt).", request.method, request.path)
+        logger.warning("Desktop-Modus: %s %s abgelehnt (schreibgeschützt).", request.method, request.path)
         return web.json_response({'error': DESKTOP_MODE_REJECTION, 'desktopMode': True}, status=403)
     if not _desktop_read_allowed(request.path, request.query.keys()):
         logger.warning("Desktop-Modus: %s %s abgelehnt (nicht in der Desktop-Allowlist).",
@@ -236,9 +236,9 @@ def _desktop_mode_argument_problem(args):
     if args.voice:
         return "--desktop-mode erlaubt kein --voice."
     if args.host not in (None, DESKTOP_MODE_HOST):
-        return f"--desktop-mode bindet ausschlieÃŸlich {DESKTOP_MODE_HOST}."
+        return f"--desktop-mode bindet ausschließlich {DESKTOP_MODE_HOST}."
     if args.port not in (None, DESKTOP_MODE_PORT):
-        return f"--desktop-mode nutzt ausschlieÃŸlich Port {DESKTOP_MODE_PORT}."
+        return f"--desktop-mode nutzt ausschließlich Port {DESKTOP_MODE_PORT}."
     return None
 
 
@@ -258,7 +258,7 @@ def _make_artifact_id() -> str:
 
 
 # ---------------------------------------------------------------------------
-# ConnectionContext â€” per-WebSocket connection state for session isolation
+# ConnectionContext — per-WebSocket connection state for session isolation
 # ---------------------------------------------------------------------------
 
 class ConnectionContext:
@@ -288,7 +288,7 @@ class ConnectionContext:
 
 
 # ---------------------------------------------------------------------------
-# WebTTSProxy â€” Routes TTS calls to WebSocket + optional real TTS
+# WebTTSProxy — Routes TTS calls to WebSocket + optional real TTS
 # ---------------------------------------------------------------------------
 
 class WebTTSProxy:
@@ -305,7 +305,7 @@ class WebTTSProxy:
         """Speak via TTS and optionally queue as announcement banner.
 
         During user-command processing (_command_depth > 0), speech is
-        TTS-only â€” the text is NOT queued as an announcement banner.
+        TTS-only — the text is NOT queued as an announcement banner.
         Proactive deliveries (reminders, alerts, rundowns) call speak()
         outside command processing, so they queue normally and appear
         as banners via the announcement pump.
@@ -383,7 +383,7 @@ def init_components(config, tts_proxy, desktop_mode=False):
             except Exception as e:
                 logger.warning("Calendar init failed: %s", e)
 
-        # Don't start RM background polling in web mode â€” the voice pipeline
+        # Don't start RM background polling in web mode — the voice pipeline
         # handles proactive reminders/rundowns.  The RM is still available for
         # explicit commands ("daily rundown", "remind me...").
         components['reminder_manager'] = rm
@@ -585,7 +585,7 @@ _AFFIRM_WORDS = {"yes", "yeah", "yep", "yup", "sure", "please", "go ahead",
                  "yes please", "go for it", "read it", "absolutely", "ok",
                  "okay", "definitely"}
 
-# Delivery mode keyword sets â€” checked after affirm prefix is stripped
+# Delivery mode keyword sets — checked after affirm prefix is stripped
 _DELIVERY_MODES = {
     "read": {"read it", "read it to me", "read through it", "go through it",
              "read it out", "read that"},
@@ -634,7 +634,7 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
             return mode
 
     # 2) Check for clarify phrases ("show me" without specifying how)
-    #    But first: "show me in the chat" â†’ resolve to specific mode
+    #    But first: "show me in the chat" → resolve to specific mode
     #    Guard: if the remainder after "show me" is >4 words, it's a new
     #    content request ("show me what that would look like"), not delivery.
     clarify_match = cmd in _DELIVERY_CLARIFY or any(cmd.startswith(p) for p in _DELIVERY_CLARIFY)
@@ -654,7 +654,7 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
                 return None
         return "clarify"
 
-    # 3) Affirm-based: "yes" / "sure" etc. â€” need context from last response
+    # 3) Affirm-based: "yes" / "sure" etc. — need context from last response
     matched = cmd in _AFFIRM_WORDS
     if not matched:
         sorted_affirms = sorted(_AFFIRM_WORDS, key=len, reverse=True)
@@ -662,10 +662,10 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
     if not matched:
         return None
 
-    # Affirm matched â€” check what JARVIS offered
+    # Affirm matched — check what JARVIS offered
     # If JARVIS asked delivery clarification, parse the specific mode from command
     if any(p in lower_resp for p in _CLARIFY_PHRASES):
-        # User said "yes" to clarification â€” strip affirm prefix, check remainder
+        # User said "yes" to clarification — strip affirm prefix, check remainder
         remainder = cmd
         for a in sorted(_AFFIRM_WORDS, key=len, reverse=True):
             if remainder.startswith(a):
@@ -675,10 +675,10 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
             for mode, phrases in _DELIVERY_MODES.items():
                 if remainder in phrases or any(remainder.startswith(p) for p in phrases):
                     return mode
-        # Bare affirm after clarification â€” default to "read"
+        # Bare affirm after clarification — default to "read"
         return "read"
 
-    # If JARVIS offered a readback, affirm â†’ "read"
+    # If JARVIS offered a readback, affirm → "read"
     if any(p in lower_resp for p in _OFFER_PHRASES):
         # Check if affirm has a trailing delivery mode: "yes print it"
         remainder = cmd
@@ -738,7 +738,7 @@ async def _stream_readback(ws, llm, cached_tool_result: str,
     else:
         honorific_rule = f"YOU MUST address the user as '{h}'."
 
-    # Tell readback which result was picked â€” prefer cache artifact over conv_state
+    # Tell readback which result was picked — prefer cache artifact over conv_state
     prior_pick = ""
     _pick_source = prior_synthesis or (conv_state.last_response_text if conv_state else "")
     if _pick_source:
@@ -755,7 +755,7 @@ async def _stream_readback(ws, llm, cached_tool_result: str,
             f"Here are search results:\n\n{cached_tool_result}\n\n"
             f"{prior_pick}"
             "The user has asked you to read the full content (recipe, instructions, steps, etc.).\n"
-            "RULES â€” follow these EXACTLY:\n"
+            "RULES — follow these EXACTLY:\n"
             "1. YOU MUST read from the SAME source you recommended in your previous response. "
             "DO NOT switch to a different source. DO NOT combine, consolidate, or merge "
             "content from multiple sources.\n"
@@ -866,7 +866,7 @@ async def _stream_readback(ws, llm, cached_tool_result: str,
 
 
 # ---------------------------------------------------------------------------
-# Structured readback â€” section-based interactive delivery
+# Structured readback — section-based interactive delivery
 # ---------------------------------------------------------------------------
 
 async def _start_structured_readback(ws, llm, conv_state, tts_proxy) -> tuple:
@@ -906,7 +906,7 @@ async def _start_structured_readback(ws, llm, conv_state, tts_proxy) -> tuple:
 
     if not parse_ok:
         # Fall back to unstructured streaming
-        logger.info("Structured readback parse failed â€” falling back to stream")
+        logger.info("Structured readback parse failed — falling back to stream")
         result = await _stream_readback(
             ws, llm, _cached_text, conv_state=conv_state,
             prior_synthesis=_prior_synthesis,
@@ -914,7 +914,7 @@ async def _start_structured_readback(ws, llm, conv_state, tts_proxy) -> tuple:
         conv_state.last_tool_result_text = ""
         return result
 
-    # Parse succeeded â€” store session and begin delivery
+    # Parse succeeded — store session and begin delivery
     conv_state.readback_session = session
     if _art:
         session.source_artifact_id = _art.artifact_id
@@ -1065,7 +1065,7 @@ def _get_cached_content(conv_state) -> tuple[str | None, dict | None]:
 
 
 async def _display_in_chat(ws, llm, conv_state, tts_proxy) -> tuple:
-    """Display content as formatted text in chat â€” no TTS, no pauses."""
+    """Display content as formatted text in chat — no TTS, no pauses."""
     from core.readback_session import ReadbackSession
 
     cached_text, _prov = _get_cached_content(conv_state)
@@ -1231,7 +1231,7 @@ async def _open_in_browser(ws, conv_state, tts_proxy, config: dict) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# Command processing â€” shared router (Phase 3 of conversational flow refactor)
+# Command processing — shared router (Phase 3 of conversational flow refactor)
 # ---------------------------------------------------------------------------
 
 async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy,
@@ -1257,7 +1257,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
             _msg_kwargs['client_id'] = conn_ctx.client_id
         _msg_kwargs['target_history'] = conn_ctx.session_history
 
-    # Strip wake word prefix (leading only â€” preserve trailing
+    # Strip wake word prefix (leading only — preserve trailing
     # "Jarvis" so greetings like "Good afternoon, Jarvis" stay intact)
     command = re.sub(r'^(?:hey\s+)?jarvis[\s,.:!]*', '', command, flags=re.IGNORECASE).strip()
     if not command:
@@ -1345,7 +1345,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
     streamed = False
     _resp_image_url = None  # Set by _stream_llm_ws when tool produces an image
     if result.skip:
-        # Bare ack noise â€” return empty response
+        # Bare ack noise — return empty response
         t_end = time.perf_counter()
         return {'response': '', 'stats': {}, 'used_llm': False, 'streamed': False}
 
@@ -1364,7 +1364,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
                 await ws.send_json({"type": "stream_start"})
                 await ws.send_json({"type": "stream_token", "token": response + "\n\n"})
 
-            # Capture event loop for syncâ†’async bridge in progress callback
+            # Capture event loop for sync→async bridge in progress callback
             loop = asyncio.get_event_loop()
 
             def _web_progress(desc):
@@ -1438,7 +1438,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
                 ).start()
 
         elif result.intent == "readback_recall":
-            # Step or ingredient lookup â€” result.text has the answer
+            # Step or ingredient lookup — result.text has the answer
             result.text = _ensure_honorific_tail(result.text)
             if tts_proxy.hybrid and tts_proxy.real_tts:
                 threading.Thread(
@@ -1448,7 +1448,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
                 ).start()
 
         elif result.intent == "readback_stop":
-            # Session already ended by router â€” speak summary
+            # Session already ended by router — speak summary
             if tts_proxy.hybrid and tts_proxy.real_tts:
                 threading.Thread(
                     target=tts_proxy.real_tts.speak,
@@ -1457,7 +1457,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
                 ).start()
 
         elif result.intent == "readback_request":
-            # "Read that to me" â€” route cached content to structured readback
+            # "Read that to me" — route cached content to structured readback
             used_llm = True
             response, streamed = await _start_structured_readback(
                 ws, llm, conv_state, tts_proxy,
@@ -1553,7 +1553,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
         response_type="llm" if not skill_handled else "skill",
     )
 
-    # Record metrics for ALL interactions (not just LLM â€” skills, CAL-L0, memory ops too)
+    # Record metrics for ALL interactions (not just LLM — skills, CAL-L0, memory ops too)
     metrics = components.get('metrics')
     if metrics:
         try:
@@ -1754,7 +1754,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                     first_chunk_checked = True
                     quality_issue = llm._check_response_quality(chunk, command)
                     if quality_issue:
-                        # Quality retry â€” fall back to non-streaming
+                        # Quality retry — fall back to non-streaming
                         await ws.send_json({
                             'type': 'info',
                             'content': f'Quality retry: {quality_issue}',
@@ -1767,7 +1767,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                         # Drain remaining producer output
                         thread.join(timeout=5)
                         return (retry or "", False, None)
-                    # Quality OK â€” start streaming, flush buffer
+                    # Quality OK — start streaming, flush buffer
                     await ws.send_json({'type': 'stream_start'})
                     await ws.send_json({
                         'type': 'stream_token',
@@ -1804,7 +1804,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
             _dedup_limit = _TOOL_DEDUP_LIMITS.get(_tc_name, 2)
             if _tool_call_counts[_tc_name] > _dedup_limit:
                 logger.warning(
-                    "Dedup: %s called %d times this turn (limit %d) â€” "
+                    "Dedup: %s called %d times this turn (limit %d) — "
                     "skipping, synthesizing from prior results",
                     _tc_name, _tool_call_counts[_tc_name], _dedup_limit,
                 )
@@ -1827,7 +1827,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                     'type': 'info',
                     'content': f'Searching: {query}',
                 })
-                # Trim fetch volume on 2nd+ search â€” snippets alone
+                # Trim fetch volume on 2nd+ search — snippets alone
                 # provide sufficient factual density for sub-queries.
                 _is_followup = _tool_call_counts.get("web_search", 0) > 1
                 _max_res = 3 if _is_followup else 5
@@ -1849,7 +1849,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                         _el.emit(
                             category="tool_execution",
                             event="tool_completed",
-                            message=f"web_search: {query[:80]} â†’ {len(results)} results in {_ws_elapsed:.0f}ms",
+                            message=f"web_search: {query[:80]} → {len(results)} results in {_ws_elapsed:.0f}ms",
                             severity="info",
                             source="tool_registry",
                             stage="tool",
@@ -1904,7 +1904,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                     'content': f'Found {len(results)} results',
                 })
             else:
-                # Skill tool â€” dispatch via tool_executor
+                # Skill tool — dispatch via tool_executor
                 from core.tool_executor import execute_tool
                 from core.tool_registry import parse_tool_result, save_tool_image
                 await ws.send_json({
@@ -1912,7 +1912,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                     'content': f'Running: {tool_call_request.name}',
                 })
                 _tool_args = tool_call_request.arguments
-                # Force capture_webcam to mobile when client is mobile â€”
+                # Force capture_webcam to mobile when client is mobile —
                 # don't trust LLM source param, it may hallucinate 'desktop'
                 if (tool_call_request.name == 'capture_webcam'
                         and client_type == 'mobile'):
@@ -1951,7 +1951,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                     except Exception as e:
                         logger.warning("Failed to save tool image: %s", e)
 
-                # Artifact cache â€” store non-web-search tool results
+                # Artifact cache — store non-web-search tool results
                 _cache = get_interaction_cache()
                 if _cache and conv_state:
                     from core.interaction_cache import store_tool_artifact
@@ -1976,15 +1976,15 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                                 f"{_msg['content'][:500]}"
                             )
                             logger.debug(
-                                "Compressed prior tool result [%d]: %dâ†’%d chars",
+                                "Compressed prior tool result [%d]: %d→%d chars",
                                 _i, _raw_len, len(_msg['content']),
                             )
 
-            # Scale max_tokens with chain depth â€” multi-source answers
+            # Scale max_tokens with chain depth — multi-source answers
             # (e.g. trip cost: gas + tolls + food) need more output budget.
             _synth_max_tokens = 400 + (tool_chain_count * 100)
 
-            # Stream synthesis â€” may yield text tokens or another ToolCallRequest
+            # Stream synthesis — may yield text tokens or another ToolCallRequest
             synthesis_queue = asyncio.Queue()
             _current_tcr = tool_call_request
             _current_tr = tool_result
@@ -2033,7 +2033,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
             syn_thread.start()
 
             next_tool_call = None
-            # Multimodal tools (screenshot) need longer timeout â€”
+            # Multimodal tools (screenshot) need longer timeout —
             # mmproj processes images on CPU before first token
             _synth_timeout = 120 if _current_img else 60
             while True:
@@ -2063,7 +2063,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
         # _tool_call_messages and ask the LLM to synthesize them directly.
         if not synthesis.strip() and tool_chain_count > 0:
             logger.warning(
-                "Synthesis empty after %d tool calls â€” attempting partial fallback",
+                "Synthesis empty after %d tool calls — attempting partial fallback",
                 tool_chain_count,
             )
             _tcm = getattr(llm, '_tool_call_messages', [])
@@ -2121,7 +2121,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                         user_id=user_id or 'christopher',
                     )
             except NameError:
-                pass  # No web search results â€” non-research tool call
+                pass  # No web search results — non-research tool call
 
         # Artifact cache: store synthesis
         _cache = get_interaction_cache()
@@ -2171,7 +2171,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                 "conversation", raw_command, full_response,
                 user_id=user_id or 'christopher',
             )
-        # Short enough to send as non-streaming response â€” still inject honorific
+        # Short enough to send as non-streaming response — still inject honorific
         if full_response and full_response.strip():
             full_response = _ensure_honorific_tail(full_response)
         return (full_response, False, None)
@@ -2261,13 +2261,13 @@ async def _llm_fallback(llm, command, history, web_researcher,
                 except Exception:
                     pass
             else:
-                # Skill tool â€” dispatch via tool_executor
+                # Skill tool — dispatch via tool_executor
                 from core.tool_executor import execute_tool
                 tool_result = await asyncio.to_thread(
                     execute_tool, tool_call_request.name, tool_call_request.arguments
                 )
 
-                # Artifact cache â€” store non-web-search tool results
+                # Artifact cache — store non-web-search tool results
                 _cache = get_interaction_cache()
                 if _cache and conv_state:
                     from core.interaction_cache import store_tool_artifact
@@ -2283,7 +2283,7 @@ async def _llm_fallback(llm, command, history, web_researcher,
                 nonlocal synthesis
                 for token in llm.continue_after_tool_call(
                     tool_call_request, tool_result,
-                    tools=None,  # fallback path â€” web search only, no chaining
+                    tools=None,  # fallback path — web search only, no chaining
                     synthesis_temperature=synthesis_temperature,
                     synthesis_category=synthesis_category,
                 ):
@@ -2404,7 +2404,7 @@ def _build_stats(match_info, llm, used_llm, t_start, t_match, t_end,
         if input_toks:
             stats['input_tokens'] = input_toks
 
-        # Dual-model call chain â€” captures routing + synthesis model info
+        # Dual-model call chain — captures routing + synthesis model info
         chain = getattr(llm, 'last_call_chain', [])
         if chain:
             stats['llm_calls'] = len(chain)
@@ -2469,7 +2469,7 @@ async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
                         " [streamed]" if result.get('streamed') else "")
 
             # Always send response message (even empty) so every command
-            # produces the full WS sequence: response â†’ stats â†’ system_stats
+            # produces the full WS sequence: response → stats → system_stats
             if not result.get('streamed'):
                 await ws.send_json({
                     'type': 'response',
@@ -2529,7 +2529,7 @@ async def websocket_handler(request):
     config = app['config']
     doc_buffer = components['doc_buffer']
 
-    # Per-connection state â€” isolates user, client_type, session history,
+    # Per-connection state — isolates user, client_type, session history,
     # conversation state, and command lock per WebSocket connection.
     conn_ctx = ConnectionContext()
 
@@ -2612,7 +2612,7 @@ async def websocket_handler(request):
                 if app.get('desktop_mode') and msg_type not in _DESKTOP_WS_ALLOWED_TYPES:
                     # Chat, slash commands, voice toggles and user switches would write conversation,
                     # memory or weather state that another process owns: refuse loudly, never silently.
-                    logger.warning("Desktop-Modus: WebSocket-Nachricht '%s' abgelehnt (schreibgeschÃ¼tzt).",
+                    logger.warning("Desktop-Modus: WebSocket-Nachricht '%s' abgelehnt (schreibgeschützt).",
                                    str(msg_type)[:40])
                     await ws.send_json({'type': 'error', 'content': DESKTOP_MODE_REJECTION})
                     continue
@@ -2782,10 +2782,10 @@ async def websocket_handler(request):
                                         lat=lat, lon=lon,
                                         user_id=uid, source="gps",
                                     )
-                                    logger.info("Weather: user %s away from home â€” tracking alerts for %s",
+                                    logger.info("Weather: user %s away from home — tracking alerts for %s",
                                                 uid, location)
                                 else:
-                                    # Back near home â€” remove away tracking if it existed
+                                    # Back near home — remove away tracking if it existed
                                     wdb.remove_tracked_location(loc_key)
 
                 elif msg_type == 'frame_response':
@@ -2847,7 +2847,7 @@ async def websocket_handler(request):
             logger.info("Shared state reset to christopher on disconnect (was %s)", conn_ctx.user_id)
 
         # Per-connection state is garbage-collected with conn_ctx.
-        # No shared session_history to clear â€” each connection owns its own.
+        # No shared session_history to clear — each connection owns its own.
         conn_ctx.conv_state.close_window()
         logger.info("WS disconnect: conn_ctx released (client_id=%s)", conn_ctx.client_id)
 
@@ -2957,7 +2957,7 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
             })
 
     elif cmd == '/new':
-        # Start a fresh session â€” clear per-connection history + doc buffer
+        # Start a fresh session — clear per-connection history + doc buffer
         if conn_ctx:
             conn_ctx.session_history.clear()
             conn_ctx.conv_state.close_window()
@@ -2981,7 +2981,7 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
     elif cmd == '/help':
         await ws.send_json({
             'type': 'info',
-            'content': "J.A.R.V.I.S. Web UI â€” type naturally to interact. "
+            'content': "J.A.R.V.I.S. Web UI — type naturally to interact. "
                        "Use the toolbar buttons for paste, clear, file, clipboard, and help.",
         })
 
@@ -3136,7 +3136,7 @@ def _save_sessions_meta(config, meta: dict):
 # ---------------------------------------------------------------------------
 
 async def sessions_handler(request):
-    """GET /api/sessions â€” Return session list for sidebar.
+    """GET /api/sessions — Return session list for sidebar.
 
     Query params:
         offset: Number of sessions to skip (default 0)
@@ -3173,7 +3173,7 @@ async def sessions_handler(request):
 
 
 async def session_messages_handler(request):
-    """GET /api/session/{session_id} â€” Return messages for a specific session."""
+    """GET /api/session/{session_id} — Return messages for a specific session."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3186,7 +3186,7 @@ async def session_messages_handler(request):
     filtered = [m for m in all_messages if m.get('user_id', 'christopher') == user_filter]
     sessions = _detect_sessions(filtered)
 
-    # Find matching session â€” session_id is the start_ts as string
+    # Find matching session — session_id is the start_ts as string
     for s in sessions:
         if s['id'] == session_id:
             # Extract messages in this time range from the filtered list
@@ -3200,7 +3200,7 @@ async def session_messages_handler(request):
 
 
 async def session_rename_handler(request):
-    """PUT /api/session/{session_id}/rename â€” Rename a session."""
+    """PUT /api/session/{session_id}/rename — Rename a session."""
     config = request.app['config']
 
     session_id = request.match_info['session_id']
@@ -3224,10 +3224,10 @@ async def session_rename_handler(request):
 
 
 async def history_handler(request):
-    """GET /api/history â€” Return recent chat messages for scroll-back.
+    """GET /api/history — Return recent chat messages for scroll-back.
 
     Query params:
-        before: Unix timestamp â€” return messages before this time (for pagination)
+        before: Unix timestamp — return messages before this time (for pagination)
         limit: Max messages to return (default 50, max 200)
     """
     components = request.app.get('components')
@@ -3238,7 +3238,7 @@ async def history_handler(request):
     before = request.query.get('before')
     limit = min(int(request.query.get('limit', 50)), 200)
 
-    # Load all messages from disk (personal assistant â€” file is manageable)
+    # Load all messages from disk (personal assistant — file is manageable)
     all_messages = await asyncio.to_thread(conversation.load_full_history)
 
     # Filter by user (matches session endpoints)
@@ -3448,7 +3448,7 @@ def _is_path_allowed(p: Path) -> bool:
 
 
 async def browse_handler(request):
-    """GET /api/browse â€” List directory contents for file browser.
+    """GET /api/browse — List directory contents for file browser.
 
     Query params:
         path: Directory path to list (default: /home/user)
@@ -3491,7 +3491,7 @@ async def browse_handler(request):
 
 
 async def stats_overview_handler(request):
-    """GET /api/stats â€” Return system overview stats for header readout."""
+    """GET /api/stats — Return system overview stats for header readout."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3501,7 +3501,7 @@ async def stats_overview_handler(request):
 
 
 async def agents_status_handler(request):
-    """GET /api/agents/status â€” privacy-safe task planner state only."""
+    """GET /api/agents/status — privacy-safe task planner state only."""
     components = request.app.get('components') or {}
     planner = components.get('task_planner')
     from datetime import datetime, timezone
@@ -3609,7 +3609,7 @@ def _positive_interval_seconds(value):
 
 
 async def automations_status_handler(request):
-    """GET /api/automations/status â€” system-owned scheduler metadata only."""
+    """GET /api/automations/status — system-owned scheduler metadata only."""
     from datetime import datetime, timezone
 
     components = request.app.get('components') or {}
@@ -3706,7 +3706,7 @@ async def automations_status_handler(request):
 
 
 async def desktop_live_handler(request):
-    """GET /api/desktop/live â€” request-time host CPU/RAM, not the 10-minute history."""
+    """GET /api/desktop/live — request-time host CPU/RAM, not the 10-minute history."""
     sampler = request.app.get('desktop_live_sampler')
     if sampler is None:
         sampler = LiveTelemetrySampler()
@@ -3833,7 +3833,7 @@ def _desktop_snapshot(config, components: dict, desktop_mode: bool = False) -> d
 
 
 async def desktop_snapshot_handler(request):
-    """GET /api/desktop/snapshot â€” sanitized configuration and capability inventory."""
+    """GET /api/desktop/snapshot — sanitized configuration and capability inventory."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3842,7 +3842,7 @@ async def desktop_snapshot_handler(request):
 
 
 # ---------------------------------------------------------------------------
-# Metrics Dashboard â€” REST endpoints + WebSocket
+# Metrics Dashboard — REST endpoints + WebSocket
 # ---------------------------------------------------------------------------
 
 async def dashboard_handler(request):
@@ -3851,7 +3851,7 @@ async def dashboard_handler(request):
 
 
 async def metrics_summary_handler(request):
-    """GET /api/metrics/summary?hours=24 â€” Aggregated dashboard cards."""
+    """GET /api/metrics/summary?hours=24 — Aggregated dashboard cards."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3866,7 +3866,7 @@ async def metrics_summary_handler(request):
 
 
 async def metrics_timeseries_handler(request):
-    """GET /api/metrics/timeseries?hours=24&bucket=hour â€” Chart data."""
+    """GET /api/metrics/timeseries?hours=24&bucket=hour — Chart data."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3885,7 +3885,7 @@ async def metrics_timeseries_handler(request):
 
 
 async def metrics_skills_handler(request):
-    """GET /api/metrics/skills?hours=24 â€” Skill breakdown."""
+    """GET /api/metrics/skills?hours=24 — Skill breakdown."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3900,7 +3900,7 @@ async def metrics_skills_handler(request):
 
 
 async def metrics_search_stats_handler(request):
-    """GET /api/metrics/search_stats?hours=24 â€” Web search performance data."""
+    """GET /api/metrics/search_stats?hours=24 — Web search performance data."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3915,7 +3915,7 @@ async def metrics_search_stats_handler(request):
 
 
 async def metrics_routes_handler(request):
-    """GET /api/metrics/routes?hours=24 â€” Route layer breakdown."""
+    """GET /api/metrics/routes?hours=24 — Route layer breakdown."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3930,7 +3930,7 @@ async def metrics_routes_handler(request):
 
 
 async def metrics_interactions_handler(request):
-    """GET /api/metrics/interactions?offset=0&limit=50&provider=&skill= â€” Paginated raw data."""
+    """GET /api/metrics/interactions?offset=0&limit=50&provider=&skill= — Paginated raw data."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3961,7 +3961,7 @@ async def metrics_interactions_handler(request):
 
 
 async def metrics_filters_handler(request):
-    """GET /api/metrics/filters â€” Distinct values for filter dropdowns."""
+    """GET /api/metrics/filters — Distinct values for filter dropdowns."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -3975,7 +3975,7 @@ async def metrics_filters_handler(request):
 
 
 async def metrics_export_handler(request):
-    """GET /api/metrics/export?format=csv â€” CSV download."""
+    """GET /api/metrics/export?format=csv — CSV download."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -4001,7 +4001,7 @@ async def metrics_export_handler(request):
 
 
 # ---------------------------------------------------------------------------
-# Pipeline & System Health Dashboard â€” event-based endpoints
+# Pipeline & System Health Dashboard — event-based endpoints
 # ---------------------------------------------------------------------------
 
 async def dashboard_pipeline_handler(request):
@@ -4074,7 +4074,7 @@ async def mail_message_handler(request):
     try:
         uid = int(request.query.get('uid', '0'))
     except ValueError:
-        raise web.HTTPBadRequest(text='UngÃ¼ltige Nachricht')
+        raise web.HTTPBadRequest(text='Ungültige Nachricht')
     return await _mail_call(_mail_service().message, request.query.get('account', ''),
                             request.query.get('folder', 'INBOX'), uid)
 
@@ -4137,7 +4137,7 @@ async def mail_draft_export_handler(request):
 
 
 async def governance_proposals_handler(request):
-    """GET /api/governance/proposals?status=pending â€” List proposals."""
+    """GET /api/governance/proposals?status=pending — List proposals."""
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
@@ -4149,7 +4149,7 @@ async def governance_proposals_handler(request):
 
 
 async def governance_proposal_detail_handler(request):
-    """GET /api/governance/proposals/{id} â€” Single proposal detail."""
+    """GET /api/governance/proposals/{id} — Single proposal detail."""
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
@@ -4163,7 +4163,7 @@ async def governance_proposal_detail_handler(request):
 
 
 async def governance_review_handler(request):
-    """POST /api/governance/proposals/{id}/review â€” Owner reviews a proposal.
+    """POST /api/governance/proposals/{id}/review — Owner reviews a proposal.
 
     Body: {"decision": "approve|reject|defer|edit", "comment": "optional"}
     Returns proposal with confirmation code if approved.
@@ -4195,7 +4195,7 @@ async def governance_review_handler(request):
 
 
 async def metrics_tools_aggregate_handler(request):
-    """GET /api/metrics/tools?hours=24 â€” Aggregated tool usage respecting time range."""
+    """GET /api/metrics/tools?hours=24 — Aggregated tool usage respecting time range."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -4232,7 +4232,7 @@ async def metrics_tools_aggregate_handler(request):
 
 
 async def governance_circuit_reset_handler(request):
-    """POST /api/governance/circuit-breaker/reset â€” Reset tripped circuit breaker.
+    """POST /api/governance/circuit-breaker/reset — Reset tripped circuit breaker.
 
     Body: {"password_hash": "<sha256 hash>"}
 
@@ -4268,7 +4268,7 @@ async def governance_circuit_reset_handler(request):
         if password_hash != stored_hash:
             return web.json_response({'error': 'Invalid governance password'}, status=401)
     except PermissionError:
-        # Web service can't read root-only file â€” trust the console script's verification
+        # Web service can't read root-only file — trust the console script's verification
         pass
     except FileNotFoundError:
         return web.json_response({'error': 'Governance password not configured'}, status=500)
@@ -4281,13 +4281,13 @@ async def governance_circuit_reset_handler(request):
 
 
 async def governance_confirm_handler(request):
-    """POST /api/governance/proposals/{id}/confirm â€” Console-side 2FA confirmation.
+    """POST /api/governance/proposals/{id}/confirm — Console-side 2FA confirmation.
 
     Body: {"confirmation_code": "ABC123", "password_verified": true}
 
     The password is verified by the jarvis-confirm script (running as root,
     reads /etc/jarvis/.governance_pw directly). This endpoint only accepts
-    pre-verified requests from localhost â€” remote requests are rejected.
+    pre-verified requests from localhost — remote requests are rejected.
     """
     # Only accept from localhost (the console script)
     peername = request.transport.get_extra_info('peername')
@@ -4319,7 +4319,7 @@ async def governance_confirm_handler(request):
             {'error': 'Password must be verified by console script'},
             status=403)
 
-    # Password already verified by the sudo console script â€” just check the code
+    # Password already verified by the sudo console script — just check the code
     result = await asyncio.to_thread(
         gov.confirm_proposal_code_only, proposal_id, code)
 
@@ -4332,7 +4332,7 @@ async def governance_confirm_handler(request):
 
 
 async def observations_findings_handler(request):
-    """GET /api/observations/findings â€” Latest observation collector findings."""
+    """GET /api/observations/findings — Latest observation collector findings."""
     from core.observation_collector import get_observation_collector
     oc = get_observation_collector()
     if not oc:
@@ -4347,7 +4347,7 @@ async def observations_findings_handler(request):
 
 
 async def observations_collect_handler(request):
-    """POST /api/observations/collect â€” Trigger immediate collection."""
+    """POST /api/observations/collect — Trigger immediate collection."""
     from core.observation_collector import get_observation_collector
     oc = get_observation_collector()
     if not oc:
@@ -4372,9 +4372,9 @@ async def observations_collect_handler(request):
 
 
 async def observations_consult_handler(request):
-    """POST /api/observations/consult â€” Collect findings and request consultation.
+    """POST /api/observations/consult — Collect findings and request consultation.
 
-    Full cycle: collect â†’ consult â†’ propose to governance.
+    Full cycle: collect → consult → propose to governance.
     """
     from core.observation_collector import get_observation_collector
     from core.claude_consultation import get_claude_consultation
@@ -4417,7 +4417,7 @@ async def observations_consult_handler(request):
 
 
 async def governance_status_handler(request):
-    """GET /api/governance/status â€” Governance system health."""
+    """GET /api/governance/status — Governance system health."""
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
@@ -4426,7 +4426,7 @@ async def governance_status_handler(request):
 
 
 async def governance_test_proposal_handler(request):
-    """POST /api/governance/test-proposal â€” Submit a test proposal for flow validation."""
+    """POST /api/governance/test-proposal — Submit a test proposal for flow validation."""
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
@@ -4438,14 +4438,14 @@ async def governance_test_proposal_handler(request):
         diff='--- core/conversation_router.py\n+++ core/conversation_router.py\n@@ -891,1 +891,1 @@\n-        if best_score < 0.78:\n+        if best_score < 0.75:',
         justification='Test proposal to validate the governance approval flow. '
                        'No actual changes will be made.',
-        rollback_plan='No changes to roll back â€” this is a test.',
+        rollback_plan='No changes to roll back — this is a test.',
         risk_tier=2,
     )
     return web.json_response({'proposal_id': pid, 'status': 'queued'})
 
 
 async def events_tts_stats_handler(request):
-    """GET /api/events/tts?hours=24 â€” TTS performance from event logger."""
+    """GET /api/events/tts?hours=24 — TTS performance from event logger."""
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
@@ -4496,7 +4496,7 @@ async def events_tts_stats_handler(request):
 
 
 async def events_stt_stats_handler(request):
-    """GET /api/events/stt?hours=24 â€” STT performance from event logger."""
+    """GET /api/events/stt?hours=24 — STT performance from event logger."""
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
@@ -4535,7 +4535,7 @@ async def events_stt_stats_handler(request):
 
 
 async def events_speaker_id_handler(request):
-    """GET /api/events/speaker_id?hours=24 â€” Speaker ID from event logger."""
+    """GET /api/events/speaker_id?hours=24 — Speaker ID from event logger."""
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
@@ -4574,7 +4574,7 @@ async def events_speaker_id_handler(request):
 
 
 async def events_routing_handler(request):
-    """GET /api/events/routing?hours=24 â€” Routing decisions from metrics DB.
+    """GET /api/events/routing?hours=24 — Routing decisions from metrics DB.
 
     Uses metrics.db instead of events.db because metrics are recorded AFTER
     tools execute, so route_layer and tools_called are populated.
@@ -4604,7 +4604,7 @@ async def events_routing_handler(request):
 
         total = len(rows)
 
-        # Build descriptive labels â€” no generic "unknown" or "skill"
+        # Build descriptive labels — no generic "unknown" or "skill"
         intents = {}
         for r in rows:
             route = r['route_layer'] or 'llm_direct'
@@ -4656,7 +4656,7 @@ async def events_routing_handler(request):
 
 
 async def events_watchdog_handler(request):
-    """GET /api/events/watchdog?hours=168 â€” Watchdog interventions."""
+    """GET /api/events/watchdog?hours=168 — Watchdog interventions."""
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
@@ -4687,7 +4687,7 @@ async def events_watchdog_handler(request):
 
 
 async def events_aggregate_handler(request):
-    """GET /api/events/aggregate?hours=24 â€” counts only; never returns event content."""
+    """GET /api/events/aggregate?hours=24 — counts only; never returns event content."""
     from core.event_logger import get_event_logger
     event_logger = get_event_logger()
     if not event_logger:
@@ -4795,7 +4795,7 @@ async def events_recent_handler(request):
 
 
 async def events_health_trends_handler(request):
-    """GET /api/events/health?hours=168&metrics=cpu.temp,gpu1.vram â€” Health trends."""
+    """GET /api/events/health?hours=168&metrics=cpu.temp,gpu1.vram — Health trends."""
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
@@ -4836,7 +4836,7 @@ async def memory_page_handler(request):
 
 
 async def memory_summary_handler(request):
-    """GET /api/memory/summary â€” Fact counts, context stats, FAISS size (all users combined)."""
+    """GET /api/memory/summary — Fact counts, context stats, FAISS size (all users combined)."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -4930,7 +4930,7 @@ async def memory_summary_handler(request):
 
 
 async def memory_facts_handler(request):
-    """GET /api/memory/facts?category=&user_id=&sort=&offset=0&limit=50 â€” Paginated facts."""
+    """GET /api/memory/facts?category=&user_id=&sort=&offset=0&limit=50 — Paginated facts."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -4988,7 +4988,7 @@ async def memory_facts_handler(request):
 
 
 async def memory_fact_delete_handler(request):
-    """DELETE /api/memory/facts/{fact_id} â€” Soft-delete a fact."""
+    """DELETE /api/memory/facts/{fact_id} — Soft-delete a fact."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -5005,7 +5005,7 @@ async def memory_fact_delete_handler(request):
 
 
 async def memory_interactions_handler(request):
-    """GET /api/memory/interactions?type=&days=7&offset=0&limit=50 â€” Paginated interaction log."""
+    """GET /api/memory/interactions?type=&days=7&offset=0&limit=50 — Paginated interaction log."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -5051,7 +5051,7 @@ async def memory_interactions_handler(request):
 
 
 async def memory_timeseries_handler(request):
-    """GET /api/memory/timeseries?days=30 â€” Interaction counts over time by type."""
+    """GET /api/memory/timeseries?days=30 — Interaction counts over time by type."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -5100,7 +5100,7 @@ async def memory_timeseries_handler(request):
 
 
 async def memory_db_health_handler(request):
-    """GET /api/memory/db-health â€” All data store sizes, row counts, and status."""
+    """GET /api/memory/db-health — All data store sizes, row counts, and status."""
     import sqlite3, time as _time, datetime
 
     data_dir = Path('/mnt/storage/jarvis/data')
@@ -5148,13 +5148,13 @@ async def memory_db_health_handler(request):
             'name': 'people.db',
             'path': str(data_dir / 'people.db'),
             'tables': {'people': 'SELECT COUNT(*) FROM people'},
-            'stale_days': 30,  # Low-frequency â€” only written on introductions
+            'stale_days': 30,  # Low-frequency — only written on introductions
         },
         {
             'name': 'profiles.db',
             'path': str(data_dir / 'profiles' / 'profiles.db'),
             'tables': {'profiles': 'SELECT COUNT(*) FROM profiles'},
-            'stale_days': 30,  # Low-frequency â€” only written on enrollment
+            'stale_days': 30,  # Low-frequency — only written on enrollment
         },
     ]
 
@@ -5281,7 +5281,7 @@ async def memory_db_health_handler(request):
 
 
 async def memory_fact_update_handler(request):
-    """PATCH /api/memory/facts/{fact_id} â€” Update editable fields of a fact."""
+    """PATCH /api/memory/facts/{fact_id} — Update editable fields of a fact."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -5323,7 +5323,7 @@ async def memory_fact_update_handler(request):
 
 
 async def memory_interaction_delete_handler(request):
-    """DELETE /api/memory/interactions/{interaction_id} â€” Delete an interaction log entry."""
+    """DELETE /api/memory/interactions/{interaction_id} — Delete an interaction log entry."""
     components = request.app.get('components')
     if not components:
         return web.json_response({'error': 'Not initialized'}, status=503)
@@ -5402,7 +5402,7 @@ _WEBCAM_SERVER = "http://127.0.0.1:8089"
 
 
 async def webcam_stream_handler(request):
-    """MJPEG multipart stream â€” proxied from voice service frame server."""
+    """MJPEG multipart stream — proxied from voice service frame server."""
     try:
         session: _aiohttp_lib.ClientSession = request.app['http_session']
         async with session.get(f"{_WEBCAM_SERVER}/stream", timeout=None) as upstream:
@@ -5435,7 +5435,7 @@ async def webcam_stream_handler(request):
 
 
 async def webcam_snapshot_handler(request):
-    """Single JPEG frame â€” proxied from voice service frame server."""
+    """Single JPEG frame — proxied from voice service frame server."""
     try:
         session: _aiohttp_lib.ClientSession = request.app['http_session']
         async with session.get(
@@ -5456,7 +5456,7 @@ async def webcam_snapshot_handler(request):
 
 
 async def webcam_status_handler(request):
-    """Webcam feed status (JSON) â€” proxied from voice service frame server."""
+    """Webcam feed status (JSON) — proxied from voice service frame server."""
     try:
         session: _aiohttp_lib.ClientSession = request.app['http_session']
         async with session.get(
@@ -5584,7 +5584,7 @@ def create_app(config, desktop_mode=False) -> web.Application:
     app = web.Application(
         middlewares=[desktop_readonly_middleware, auth_middleware, mail_security_middleware]
         if desktop_mode else [auth_middleware, mail_security_middleware],
-        client_max_size=20 * 1024 * 1024,  # 20MB â€” iPhone photos base64-encoded for img2img
+        client_max_size=20 * 1024 * 1024,  # 20MB — iPhone photos base64-encoded for img2img
     )
     app['desktop_mode'] = bool(desktop_mode)
 
@@ -5698,7 +5698,7 @@ async def on_startup(app):
     app['components'] = components
     app['cmd_lock'] = asyncio.Lock()
     app['dashboard_clients'] = set()
-    app['ws_connections'] = {}  # ws â†’ conn_ctx, for targeted alert routing
+    app['ws_connections'] = {}  # ws → conn_ctx, for targeted alert routing
 
     # HTTP session for proxying webcam requests to voice service frame server
     app['http_session'] = _aiohttp_lib.ClientSession()
@@ -5714,7 +5714,7 @@ async def on_startup(app):
     # Store weather_db on app for easy access from WS handler
     app['weather_db'] = components.get('weather_db')
 
-    # Weather alert banner â€” push structured alerts to targeted WS connections
+    # Weather alert banner — push structured alerts to targeted WS connections
     wp = components.get('weather_poller')
     if wp:
         loop = asyncio.get_event_loop()
@@ -5734,7 +5734,7 @@ async def on_startup(app):
             # Determine target user_id for away alerts
             target_user_id = None
             if location_key != 'home':
-                # location_key is like "christopher_mobile" â€” extract user_id
+                # location_key is like "christopher_mobile" — extract user_id
                 # Look up in tracked_locations for authoritative user_id
                 wdb = app.get('weather_db')
                 if wdb:
@@ -5768,7 +5768,7 @@ async def on_startup(app):
 
         wp.set_alert_banner_callback(_push_weather_alert)
 
-    # Wire live dashboard push â€” MetricsTracker calls this after each record()
+    # Wire live dashboard push — MetricsTracker calls this after each record()
     metrics = components.get('metrics')
     if metrics:
         loop = asyncio.get_event_loop()
@@ -5786,12 +5786,12 @@ async def on_startup(app):
         metrics.set_on_record(_push_to_dashboard)
 
     skill_count = len(components['skill_manager'].skills)
-    logger.info("JARVIS Web UI ready â€” %d skills loaded", skill_count)
+    logger.info("JARVIS Web UI ready — %d skills loaded", skill_count)
 
 
 async def on_shutdown(app):
     """Clean shutdown of components."""
-    logger.info("Shutdown initiated â€” closing WebSocket connections...")
+    logger.info("Shutdown initiated — closing WebSocket connections...")
 
     # Force-close all active WebSocket connections so aiohttp doesn't wait for them
     ws_conns = app.get('ws_connections', {})
@@ -5843,7 +5843,7 @@ def main():
     if args.desktop_mode and (problem := _desktop_mode_argument_problem(args)):
         parser.error(problem)
 
-    # Setup logging â€” route to web.log file + console
+    # Setup logging — route to web.log file + console
     log_file = Path(__file__).parent / "logs" / "web.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -5888,12 +5888,12 @@ def main():
         runner = web.AppRunner(app)
         await runner.setup()
 
-        # HTTP â€” localhost only (secure context for desktop browsers)
+        # HTTP — localhost only (secure context for desktop browsers)
         http_site = web.TCPSite(runner, '127.0.0.1', port)
         await http_site.start()
-        logger.info("HTTP  â†’ http://127.0.0.1:%s", port)
+        logger.info("HTTP  → http://127.0.0.1:%s", port)
 
-        # HTTPS â€” all interfaces (mobile via Tailscale)
+        # HTTPS — all interfaces (mobile via Tailscale)
         if tls_enabled:
             base = Path(__file__).parent
             cert_path = base / tls_config.get("cert", ".certs/ts.crt")
@@ -5905,14 +5905,14 @@ def main():
                 ctx.load_cert_chain(str(cert_path), str(key_path))
                 https_site = web.TCPSite(runner, '0.0.0.0', tls_port, ssl_context=ctx)
                 await https_site.start()
-                logger.info("HTTPS â†’ https://0.0.0.0:%s", tls_port)
+                logger.info("HTTPS → https://0.0.0.0:%s", tls_port)
             else:
-                logger.warning("TLS enabled but cert/key not found (%s, %s) â€” HTTPS disabled",
+                logger.warning("TLS enabled but cert/key not found (%s, %s) — HTTPS disabled",
                                cert_path, key_path)
 
-        print(f"\n  J.A.R.V.I.S. Web UI â†’ http://127.0.0.1:{port}")
+        print(f"\n  J.A.R.V.I.S. Web UI → http://127.0.0.1:{port}")
         if tls_enabled:
-            print(f"  J.A.R.V.I.S. Web UI â†’ https://0.0.0.0:{tls_config.get('port', 8443)}")
+            print(f"  J.A.R.V.I.S. Web UI → https://0.0.0.0:{tls_config.get('port', 8443)}")
         print()
 
         # Wait for SIGTERM/SIGINT
@@ -5922,7 +5922,7 @@ def main():
             loop.add_signal_handler(sig, stop.set)
         await stop.wait()
 
-        logger.info("SIGTERM received â€” shutting down...")
+        logger.info("SIGTERM received — shutting down...")
         # Run our on_shutdown hooks directly (component cleanup, WS close)
         # then exit without waiting for aiohttp's full graceful shutdown
         # which hangs indefinitely on open HTTP keep-alive connections.
@@ -5930,8 +5930,8 @@ def main():
             await on_shutdown(app)
         except Exception as e:
             logger.error("Shutdown hook error: %s", e)
-        logger.info("Shutdown complete â€” exiting")
-        # Force exit â€” runner.cleanup() hangs on keep-alive connections
+        logger.info("Shutdown complete — exiting")
+        # Force exit — runner.cleanup() hangs on keep-alive connections
         import sys
         sys.exit(0)
 
