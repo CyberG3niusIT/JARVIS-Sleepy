@@ -5,6 +5,8 @@ import os
 import shutil
 import socket
 import subprocess
+
+import pytest
 from pathlib import Path
 
 
@@ -35,6 +37,8 @@ if cmd == "import-environment":
     s["manager_interop"] = os.environ.get("WSL_INTEROP", "")
     save(); sys.exit(0)
 def prop(unit, key):
+    if unit == "jarvis-desktop-api.service":
+        return {"LoadState":s["desktop_load"], "FragmentPath":s["desktop_fragment"], "ExecStart":s["desktop_exec"], "ActiveState":"active" if s["desktop_active"] else "inactive", "MainPID":"440"}[key]
     if unit == "jarvis.service":
         return {"LoadState":s["jarvis_load"], "FragmentPath":s["jarvis_fragment"], "ExecStart":s["jarvis_exec"], "ActiveState":"active" if s["jarvis_active"] else "inactive", "InvocationID":s["invocation"], "MainPID":"430"}[key]
     if unit == "chatterbox.service":
@@ -51,7 +55,12 @@ if cmd == "show":
     unit = a[1]; key = next(x.split("=",1)[1] for x in a if x.startswith("--property="))
     print(prop(unit, key)); sys.exit(0)
 if cmd == "link":
+    if a[1].endswith("jarvis-desktop-api.service"):
+        s["desktop_calls"].append("link"); s["desktop_load"]="loaded"; s["desktop_fragment"]=a[1]; save(); sys.exit(0)
     s["jarvis_load"]="loaded"; s["jarvis_fragment"]=os.path.join(os.environ["FAKE_ROOT"],"systemd/jarvis.service"); save(); sys.exit(0)
+if cmd in ("start", "stop", "restart") and a[1] == "jarvis-desktop-api.service":
+    # Recorded apart from "calls" so the voice/LLM/Chatterbox expectations stay exactly as they are.
+    s["desktop_calls"].append(cmd); s["desktop_active"] = cmd != "stop"; save(); sys.exit(0)
 if cmd in ("start", "stop", "restart"):
     unit=a[1]; s["calls"].append(cmd+":"+unit)
     if unit == "jarvis.service":
@@ -64,7 +73,7 @@ if cmd in ("start", "stop", "restart"):
     elif unit == "jarvis-chatterbox.service": s["chat_started"] = cmd == "start"
     save(); sys.exit(0)
 if cmd == "is-active":
-    unit=a[-1]; active=s["jarvis_active"] if unit == "jarvis.service" else s["chat_started"]
+    unit=a[-1]; active=s["jarvis_active"] if unit == "jarvis.service" else s["desktop_active"] if unit == "jarvis-desktop-api.service" else s["chat_started"]
     sys.exit(0 if active else 3)
 if cmd == "daemon-reload": sys.exit(0)
 sys.exit(0)
@@ -138,6 +147,11 @@ if "runtime_state.py" in args:
     # Delegate lifecycle recording to the real stdlib-only writer from the repository under test.
     rest = sys.argv[1 + next(i for i, a in enumerate(sys.argv[1:]) if a.endswith("runtime_state.py")) + 1:]
     os.execv(sys.executable, [sys.executable, os.path.join(os.environ["FAKE_REPO"], "core", "runtime_state.py"), *rest])
+if "runtime_status.py" in args and "--desktop-api-ready" in args:
+    import json
+    with open(os.environ["FAKE_STATE_FILE"]) as f: st = json.load(f)
+    if st["desktop_active"] and st.get("desktop_ready", True): print("READY: Schreibgeschützt, 127.0.0.1:8092."); sys.exit(0)
+    print("STARTING: /api/stats noch nicht bereit."); sys.exit(1)
 if "--llm-port" in args: print("8080"); sys.exit(0)
 if "--llm-unit" in args: print(os.environ.get("FAKE_LLM_UNIT", "llama-server.service")); sys.exit(0)
 if "--expert-unit" in args: print(os.environ.get("FAKE_EXPERT_UNIT", "")); sys.exit(0)
@@ -183,6 +197,7 @@ def _sandbox(tmp_path):
     for name in ("start.sh", "stop.sh", "restart.sh"):
         shutil.copy2(REPO / name, root / name)
     (root / "systemd/jarvis.service").write_text("unit", encoding="utf-8")
+    (root / "systemd/jarvis-desktop-api.service").write_text("unit", encoding="utf-8")
     bindir = _fake_bin(tmp_path)
     state_file = tmp_path / "state.json"
     state = {
@@ -198,6 +213,13 @@ def _sandbox(tmp_path):
         "manager_path": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "manager_interop": "",
         "calls": [],
+        # jarvis-desktop-api.service: this checkout's unit, already running and ready unless a test changes it.
+        "desktop_load": "loaded",
+        "desktop_fragment": str(root / "systemd/jarvis-desktop-api.service"),
+        "desktop_exec": f"path=/home/alex/jarvis-venv/bin/python3 ; argv[]=/home/alex/jarvis-venv/bin/python3 {root}/jarvis_web.py --desktop-mode",
+        "desktop_active": True,
+        "desktop_ready": True,
+        "desktop_calls": [],
     }
     state_file.write_text(json.dumps(state), encoding="utf-8")
     proc_root = tmp_path / "fake-proc"
@@ -685,3 +707,97 @@ def test_activating_llm_not_started_by_this_run_is_never_stopped_on_failure(tmp_
     assert result.returncode != 0
     calls = _state(state_file)["calls"]
     assert not [c for c in calls if "llama-server" in c]          # neither started nor cleaned up by us
+
+
+# --- desktop API (jarvis-desktop-api.service) --------------------------------------------------------
+
+def _desktop(state_file, **values):
+    state = _state(state_file)
+    state.update(values)
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+
+
+def test_start_links_starts_and_waits_for_the_desktop_api(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    _desktop(state_file, desktop_load="not-found", desktop_fragment="", desktop_active=False)
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "READY:" in result.stdout and "Desktop-API sind bereit" in result.stdout
+    state = _state(state_file)
+    assert state["desktop_calls"] == ["link", "start"]
+    assert state["desktop_fragment"] == str(root / "systemd/jarvis-desktop-api.service")
+
+
+def test_running_desktop_api_is_left_as_it_is(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "READY:" in result.stdout
+    assert _state(state_file)["desktop_calls"] == []
+
+
+def test_desktop_api_not_ready_degrades_but_keeps_voice_running(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    _desktop(state_file, desktop_active=False, desktop_ready=False)
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "DEGRADED: Desktop-API" in result.stdout and "nicht bereit" in result.stdout
+    assert "READY:" not in result.stdout.replace("DEGRADED", "")
+    state = _state(state_file)
+    assert state["desktop_calls"] == ["start"]
+    assert state["jarvis_active"] is True and "stop:jarvis.service" not in state["calls"]
+
+
+@pytest.mark.parametrize("values,needle", [
+    ({"desktop_fragment": "/home/alex/.config/systemd/user/jarvis-desktop-api.service"}, "andere Datei"),
+    ({"desktop_exec": "path=/home/alex/jarvis-venv/bin/python3 ; argv[]=/home/alex/jarvis-venv/bin/python3 /elsewhere/jarvis_web.py --desktop-mode"}, "--desktop-mode dieses Checkouts"),
+    ({"desktop_exec": "path=/home/alex/jarvis-venv/bin/python3 ; argv[]=/home/alex/jarvis-venv/bin/python3 CHECKOUT/jarvis_web.py"}, "--desktop-mode dieses Checkouts"),
+])
+def test_foreign_desktop_unit_is_never_started(tmp_path, values, needle):
+    root, state_file, env = _sandbox(tmp_path)
+    values = {k: v.replace("CHECKOUT", str(root)) for k, v in values.items()}
+    _desktop(state_file, desktop_active=False, **values)
+    result = _invoke(root, env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "DEGRADED: Desktop-API" in result.stdout and needle in result.stdout
+    assert _state(state_file)["desktop_calls"] == []
+
+
+def test_stop_stops_the_desktop_api_before_the_voice_backend(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    _desktop(state_file, jarvis_active=True)
+    result = _invoke(root, env, "stop")
+    assert result.returncode == 0, result.stderr + result.stdout
+    state = _state(state_file)
+    assert state["desktop_calls"] == ["stop"] and state["desktop_active"] is False
+    assert state["calls"] == ["stop:jarvis.service"]
+
+
+def test_stop_leaves_a_foreign_desktop_unit_alone_and_still_stops_voice(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    _desktop(state_file, jarvis_active=True, desktop_fragment="/home/alex/.config/systemd/user/jarvis-desktop-api.service")
+    result = _invoke(root, env, "stop")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "WARN: jarvis-desktop-api.service" in result.stdout
+    state = _state(state_file)
+    assert state["desktop_calls"] == [] and state["calls"] == ["stop:jarvis.service"]
+
+
+def test_restart_cycles_the_desktop_api_with_the_backend(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    _desktop(state_file, jarvis_active=True)
+    result = _invoke(root, env, "restart")
+    assert result.returncode == 0, result.stderr + result.stdout
+    state = _state(state_file)
+    assert state["desktop_calls"] == ["stop", "start"]
+    assert state["calls"] == ["stop:jarvis.service", "start:jarvis.service"]
+
+
+def test_failed_start_before_the_desktop_step_never_touches_it(tmp_path):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_REQUIRED_FAIL"] = "1"
+    _desktop(state_file, desktop_active=False)
+    result = _invoke(root, env)
+    assert result.returncode != 0
+    assert _state(state_file)["desktop_calls"] == []
+

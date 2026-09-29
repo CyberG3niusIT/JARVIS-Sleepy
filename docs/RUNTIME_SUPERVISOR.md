@@ -146,7 +146,8 @@ Die Probe ist die weitergehende Prüfung; `start.sh` würde den heutigen Ausfall
 
 ## Port-Audit
 
-`jarvis_web` nutzt **8091** (HTTPS 8443 unverändert). 8088 gehört der VVS API
+`jarvis_web` nutzt **8091** (HTTPS 8443 unverändert). Die schreibgeschützte Desktop-API (`jarvis_web.py --desktop-mode`,
+`jarvis-desktop-api.service`, Komponente `desktop-api`) nutzt fest **8092** (Integrationsstand 2026-09-29). 8088 gehört der VVS API
 (`wimaedv-vvs-api.service`), 8089 dem Webcam-Frame-Server (`core/webcam_server.py`).
 
 Verbleibende 8088 im Repo sind ausschließlich VVS: `.env`, `docs/SCHOOL_MOBILITY.md`, `docs/ARCHITECTURE.md` (Hinweis),

@@ -29,9 +29,9 @@ internal static class Program
     {
         if (args.Contains("--serve"))
         {
-            // Manueller Modus für den UI-Lauf: synthetische API auf 127.0.0.1:8091, bis der Prozess beendet wird.
+            // Manueller Modus für den UI-Lauf: synthetische API auf 127.0.0.1:JarvisApiClient.LoopbackPort, bis der Prozess beendet wird.
             using var serving = new MiniServer { Handler = Synthetic };
-            Console.WriteLine("SERVING (synthetisch) auf 127.0.0.1:8091");
+            Console.WriteLine($"SERVING (synthetisch) auf 127.0.0.1:{JarvisApiClient.LoopbackPort}");
             await Task.Delay(Timeout.Infinite);
             return 0;
         }
@@ -749,6 +749,16 @@ internal static class Program
         }
 
         Check(allow.Count == 9, $"Allowlist-Vertrag: erwartet 9 Desktop-Pfade im Backend, gefunden {allow.Count}.", failures);
+
+        // Port-Vertrag: der Client spricht genau den Port des Desktop-Modus an, nie den Standard-Webport.
+        var backendText = File.ReadAllText(backend);
+        var desktopPort = System.Text.RegularExpressions.Regex.Match(backendText, @"^DESKTOP_MODE_PORT = (\d+)$", System.Text.RegularExpressions.RegexOptions.Multiline);
+        var configFile = FindRepoFile("config.yaml");
+        var webPort = configFile is null ? null : System.Text.RegularExpressions.Regex.Match(File.ReadAllText(configFile), @"^web:\s*\n\s+port:\s*(\d+)", System.Text.RegularExpressions.RegexOptions.Multiline);
+        Check(desktopPort.Success && int.Parse(desktopPort.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) == JarvisApiClient.LoopbackPort,
+            $"Port-Vertrag: JarvisApiClient.LoopbackPort ({JarvisApiClient.LoopbackPort}) muss jarvis_web.DESKTOP_MODE_PORT entsprechen.", failures);
+        Check(webPort is { Success: true } && int.Parse(webPort.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) != JarvisApiClient.LoopbackPort,
+            "Port-Vertrag: Desktop-API darf nicht auf dem Standard-Webport (config.yaml web.port) liegen.", failures);
         var requests = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(client), @"GetJsonAsync\(""(?<path>[^""]+)""")
             .Select(match => match.Groups["path"].Value).ToList();
         Check(requests.Count == 9, $"Allowlist-Vertrag: erwartet 9 Client-Pfade, gefunden {requests.Count}.", failures);
@@ -930,7 +940,7 @@ internal static class Program
         Check(new BrainActivityEvent(BrainActivityType.InputReceived, IsTest: true).IsTest, "Test-Events müssen explizit markierbar sein.", failures);
     }
 
-    // ---- Hub gegen echten Loopback-Server auf 127.0.0.1:8091 ------------------------------------------------
+    // ---- Hub gegen echten Loopback-Server auf dem Desktop-API-Port ------------------------------------------------
 
     private static async Task VerifyHubAsync(ICollection<string> failures, ICollection<string> skipped)
     {
@@ -939,7 +949,7 @@ internal static class Program
         // 1) Nichts lauscht: OFFLINE, kein Datensatz, übrige Endpunkte werden nicht einzeln abgefragt.
         if (!PortFree())
         {
-            skipped.Add("Hub-Tests: Port 127.0.0.1:8091 ist belegt (echte Web-API läuft?). Es wird nichts gegen sie getestet.");
+            skipped.Add($"Hub-Tests: Port 127.0.0.1:{JarvisApiClient.LoopbackPort} ist belegt (echte Desktop-API läuft?). Es wird nichts gegen sie getestet.");
             return;
         }
 
@@ -1071,7 +1081,7 @@ internal static class Program
     {
         try
         {
-            var probe = new TcpListener(IPAddress.Loopback, 8091);
+            var probe = new TcpListener(IPAddress.Loopback, JarvisApiClient.LoopbackPort);
             probe.Start();
             probe.Stop();
             return true;
@@ -1084,7 +1094,7 @@ internal static class Program
 
     private sealed class MiniServer : IDisposable
     {
-        private readonly TcpListener _listener = new(IPAddress.Loopback, 8091);
+        private readonly TcpListener _listener = new(IPAddress.Loopback, JarvisApiClient.LoopbackPort);
         private readonly CancellationTokenSource _stop = new();
 
         public MiniServer()

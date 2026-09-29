@@ -185,9 +185,11 @@ async def mail_security_middleware(request, handler):
     return response
 
 
-# --desktop-mode: read-only second process for the native desktop app, loopback only.
+# --desktop-mode: read-only second process for the native desktop app, loopback only. Its own port, so it
+# runs beside a standard-mode process (web.port, default 8091) instead of competing for it. Lifecycle owner:
+# systemd/jarvis-desktop-api.service, started and stopped by start.sh / stop.sh.
 DESKTOP_MODE_HOST = '127.0.0.1'
-DESKTOP_MODE_PORT = 8091
+DESKTOP_MODE_PORT = 8092
 DESKTOP_MODE_REJECTION = 'Desktop-Modus: schreibgeschützt. Diese Aktion ist nicht verfügbar.'
 _DESKTOP_WS_ALLOWED_TYPES = frozenset({'client_info'})
 
@@ -239,6 +241,13 @@ def _desktop_mode_argument_problem(args):
         return f"--desktop-mode bindet ausschließlich {DESKTOP_MODE_HOST}."
     if args.port not in (None, DESKTOP_MODE_PORT):
         return f"--desktop-mode nutzt ausschließlich Port {DESKTOP_MODE_PORT}."
+    return None
+
+
+def _standard_mode_port_problem(port) -> str | None:
+    """The desktop port belongs to the desktop-mode process only."""
+    if port == DESKTOP_MODE_PORT:
+        return f"Port {DESKTOP_MODE_PORT} gehört dem Desktop-Modus (jarvis-desktop-api.service); web.port bzw. --port ändern."
     return None
 
 
@@ -5837,7 +5846,7 @@ def main():
     parser.add_argument("--host", default=None, help="Host to bind to")
     parser.add_argument("--voice", action="store_true", help="Start with voice enabled")
     parser.add_argument("--desktop-mode", action="store_true",
-                        help="Read-only mode for the native desktop app: 127.0.0.1:8091 only, no TLS, "
+                        help=f"Read-only mode for the native desktop app: {DESKTOP_MODE_HOST}:{DESKTOP_MODE_PORT} only, no TLS, "
                              "no daemon-owned workers, read-only memory, GET-only HTTP")
     args = parser.parse_args()
     if args.desktop_mode and (problem := _desktop_mode_argument_problem(args)):
@@ -5868,6 +5877,8 @@ def main():
     else:
         host = args.host or config.get("web.host", "127.0.0.1")
         port = args.port or config.get("web.port", 8091)
+        if problem := _standard_mode_port_problem(port):
+            parser.error(problem)
         auth_token = _configured_web_auth_token(config)
     app = create_app(config, desktop_mode=desktop_mode)
     app['config'] = config

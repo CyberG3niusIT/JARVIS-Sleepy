@@ -78,12 +78,15 @@ def world(monkeypatch, tmp_path):
         "web_sockets": [],
         "web_health": (200, ""),
         "web_identity": (True, True),
+        # jarvis-desktop-api.service: installed but stopped unless a test starts it.
+        "desktop_unit": dict(UNIT_INACTIVE),
     }
     monkeypatch.setattr(rs, "_web_listening_sockets", lambda: facts["web_sockets"])
     monkeypatch.setattr(rs, "_web_health", lambda port: facts["web_health"])
     monkeypatch.setattr(rs, "_web_process_identity", lambda pid: facts["web_identity"])
     monkeypatch.setattr(rs.dependencies, "Config", lambda: facts["config"])
-    monkeypatch.setattr(rs, "unit_props", lambda unit: facts["voice"] if unit == rs.VOICE_UNIT else facts["llm_unit"])
+    monkeypatch.setattr(rs, "unit_props", lambda unit: facts["voice"] if unit == rs.VOICE_UNIT
+                        else facts["desktop_unit"] if unit == rs.DESKTOP_API_UNIT else facts["llm_unit"])
     monkeypatch.setattr(rs.dependencies, "_check_llm", lambda endpoint: facts["llm_health"])
     monkeypatch.setattr(rs.dependencies, "_stt_model_present", lambda config: facts["stt"])
     monkeypatch.setattr(rs.chatterbox, "diagnose", lambda *a, **k: facts["chatterbox"])
@@ -1050,3 +1053,77 @@ def test_web_health_forwards_a_configured_token_and_survives_a_closed_port(monke
         server.close()
     status, reason = rs._web_health(server.port)  # closed now
     assert status is None and reason
+
+
+# --- desktop API (jarvis-desktop-api.service, jarvis_web.py --desktop-mode) ------------------------
+
+DESKTOP_PID = 5150
+
+
+def _desktop_running(world, *sockets, identity=(True, True), health=(200, "")):
+    world["desktop_unit"] = dict(UNIT_ACTIVE, MainPID=str(DESKTOP_PID))
+    world["web_sockets"] = list(sockets) or [("127.0.0.1", rs.DESKTOP_API_PORT, DESKTOP_PID)]
+    world["web_identity"] = identity
+    world["web_health"] = health
+
+
+def test_desktop_api_stopped_or_missing_unit_is_reported_and_does_not_degrade(world):
+    snapshot = rs.collect()
+    assert_ui_contract(snapshot)
+    assert component(snapshot, "desktop-api")["state"] == "STOPPED"
+    assert snapshot["state"] == "READY"
+    world["desktop_unit"] = {"LoadState": "not-found"}
+    desktop = component(rs.collect(), "desktop-api")
+    assert desktop["state"] == "STOPPED" and "nicht installiert" in desktop["detail"]
+
+
+def test_desktop_api_ready_only_for_its_own_loopback_desktop_process_with_health(world):
+    _desktop_running(world)
+    snapshot = rs.collect()
+    assert_ui_contract(snapshot)
+    assert component(snapshot, "desktop-api")["state"] == "READY"
+    assert component(snapshot, "web")["state"] == "OFFLINE"  # standard port 8091 stays separate
+    assert snapshot["state"] == "READY"
+
+
+@pytest.mark.parametrize("change,state", [
+    ({"desktop_unit": dict(UNIT_FAILED)}, "ERROR"),
+    ({"desktop_unit": dict(UNIT_ACTIVE, ActiveState="activating", MainPID=str(DESKTOP_PID))}, "STARTING"),
+    ({"web_sockets": []}, "STARTING"),
+    ({"web_health": (503, "")}, "STARTING"),
+    ({"web_health": (None, "URLError")}, "STARTING"),
+    ({"web_health": (500, "")}, "ERROR"),
+])
+def test_desktop_api_unit_and_health_states(world, change, state):
+    _desktop_running(world)
+    world.update(change)
+    assert component(rs.collect(), "desktop-api")["state"] == state
+
+
+@pytest.mark.parametrize("sockets,identity", [
+    ([("127.0.0.1", 8092, 999)], (True, True)),            # port owned by another pid than the unit
+    ([("127.0.0.1", 8092, DESKTOP_PID)], (False, False)),   # foreign program
+    ([("127.0.0.1", 8092, DESKTOP_PID)], (True, False)),    # this checkout, but standard mode
+    ([("127.0.0.1", 8092, DESKTOP_PID), ("0.0.0.0", 8092, DESKTOP_PID)], (True, True)),  # beyond loopback
+])
+def test_desktop_api_foreign_or_exposed_listener_is_an_error_and_degrades(world, sockets, identity):
+    _desktop_running(world, *sockets, identity=identity)
+    snapshot = rs.collect()
+    assert component(snapshot, "desktop-api")["state"] == "ERROR"
+    assert snapshot["state"] == "DEGRADED"
+    assert any("Desktop-API" in reason for reason in snapshot["degradedReasons"])
+
+
+def test_desktop_api_ready_cli_exit_code(world, capsys):
+    assert rs.main(["--desktop-api-ready"]) == 1
+    assert capsys.readouterr().out.startswith("STOPPED")
+    _desktop_running(world)
+    assert rs.main(["--desktop-api-ready"]) == 0
+    assert capsys.readouterr().out.startswith("READY")
+
+
+def test_desktop_api_port_is_the_desktop_mode_port_not_the_web_port():
+    import jarvis_web
+    assert rs.DESKTOP_API_PORT == jarvis_web.DESKTOP_MODE_PORT
+    assert rs.DESKTOP_API_PORT != ConfigStub().get("web.port")
+

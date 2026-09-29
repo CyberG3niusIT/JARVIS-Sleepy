@@ -25,6 +25,7 @@ fi
 started_llm=0
 started_chatterbox=0
 started_jarvis=0
+started_desktop_api=0
 degraded=0
 
 # Lifecycle record for the runtime supervisor (scripts/runtime_status.py reads it).
@@ -43,6 +44,7 @@ fail() {
     code=$?
     trap - ERR
     record_lifecycle finished --result ERROR --message "Start fehlgeschlagen (exit $code); neu gestartete Dienste wurden bereinigt."
+    if (( started_desktop_api )); then systemctl --user stop jarvis-desktop-api.service >/dev/null 2>&1 || true; fi
     if (( started_jarvis )); then systemctl --user stop jarvis.service >/dev/null 2>&1 || true; fi
     if (( started_chatterbox == 1 )); then systemctl --user stop jarvis-chatterbox.service >/dev/null 2>&1 || true; fi
     if (( started_chatterbox == 2 )); then sudo -n systemctl stop chatterbox.service >/dev/null 2>&1 || true; fi
@@ -472,12 +474,59 @@ jarvis_cmd="$(tr '\0' ' ' <"$PROC_ROOT/$jarvis_pid/cmdline" 2>/dev/null || true)
     false
 }
 
+# Read-only desktop API for the native Windows app (jarvis_web.py --desktop-mode, 127.0.0.1:8092).
+# Owned by this lifecycle like jarvis.service, but optional for voice: a problem makes the start
+# DEGRADED and never rolls back the voice backend. A unit that is not this checkout's is never touched.
+desktop_unit=jarvis-desktop-api.service
+desktop_api_problem=""
+prepare_desktop_api() {
+    local load fragment_real unit_real execstart
+    load="$(unit_field $desktop_unit LoadState)"
+    if [[ "$load" == not-found ]]; then
+        systemctl --user link "$JARVIS_ROOT/systemd/$desktop_unit" >/dev/null 2>&1 \
+            || { desktop_api_problem="Unit konnte nicht verlinkt werden."; return 1; }
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        load="$(unit_field $desktop_unit LoadState)"
+    fi
+    [[ "$load" == loaded ]] || { desktop_api_problem="Unit ist nicht geladen."; return 1; }
+    fragment_real="$(readlink -f "$(unit_field $desktop_unit FragmentPath)" 2>/dev/null || true)"
+    unit_real="$(readlink -f "$JARVIS_ROOT/systemd/$desktop_unit" 2>/dev/null || true)"
+    [[ -n "$unit_real" && "$fragment_real" == "$unit_real" ]] \
+        || { desktop_api_problem="Unit verweist auf eine andere Datei; nichts gestartet."; return 1; }
+    execstart="$(unit_field $desktop_unit ExecStart)"
+    [[ "$execstart" == *"/home/alex/jarvis-venv/bin/python3"* && "$execstart" == *"$JARVIS_ROOT/jarvis_web.py"* \
+        && "$execstart" == *"--desktop-mode"* ]] \
+        || { desktop_api_problem="Unit startet nicht jarvis_web.py --desktop-mode dieses Checkouts; nichts gestartet."; return 1; }
+}
+if prepare_desktop_api; then
+    if [[ "$(unit_field $desktop_unit ActiveState)" != active ]]; then
+        started_desktop_api=1
+        systemctl --user start $desktop_unit >/dev/null 2>&1 || desktop_api_problem="Start fehlgeschlagen."
+    fi
+    if [[ -z "$desktop_api_problem" ]]; then
+        desktop_ready=0
+        desktop_report=""
+        for _ in {1..90}; do
+            if desktop_report="$(cd "$JARVIS_ROOT" && "$RUNTIME_PYTHON" scripts/runtime_status.py --desktop-api-ready 2>/dev/null)"; then
+                desktop_ready=1
+                break
+            fi
+            sleep 1
+        done
+        (( desktop_ready )) || desktop_api_problem="nach 90 s nicht bereit (${desktop_report:-keine Antwort})."
+    fi
+fi
+if [[ -n "$desktop_api_problem" ]]; then
+    echo "DEGRADED: Desktop-API ($desktop_unit): $desktop_api_problem"
+    degraded=1
+fi
+
 if (( degraded )); then
     state=DEGRADED
     echo "$state: Backend, lokales LLM, Chatterbox und Listener laufen; optionale Abhängigkeiten sind eingeschränkt."
 else
     state=READY
-    echo "$state: Backend, lokales LLM, kanonische Chatterbox und Listener sind bereit."
+    echo "$state: Backend, lokales LLM, kanonische Chatterbox, Listener und Desktop-API sind bereit."
 fi
 record_lifecycle finished --result "$state"
 trap - ERR

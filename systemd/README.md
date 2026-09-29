@@ -192,3 +192,14 @@ Neue Vorlagen im Repo (beide **User-Scope**, nicht installiert, nicht auf Hardwa
 - `systemd/llama-server-expert.service`: Qwen3.5-35B-A3B, Port 8082 (`llm.expert`), GPU-exklusiv.
 
 **NEEDS HW VERIFY:** Gemma-/mmproj-Dateinamen und Port 8082 sind Platzhalter. Der Nutzer muss die Units selbst nach `~/.config/systemd/user/` installieren und `daemon-reload` ausführen. Die tatsächlich laufende Unit liegt außerhalb des Repos; die Vorlagen ersetzen sie nicht automatisch. Vor der Installation prüfen, dass keine alte System-Unit `llama-server.service` denselben Port 8080 belegt (Doppelbelegung).
+
+## Update 2026-09-29: jarvis-desktop-api.service (User-Scope)
+
+`jarvis-desktop-api.service` runs `jarvis_web.py --desktop-mode`, the read-only API of the native WinUI app, on
+`127.0.0.1:8092`. It is a user unit like `jarvis.service` and uses the same checkout path and venv. `start.sh`
+links it from this checkout (never replaces a foreign unit), starts it after the voice listener is ready and waits
+up to 90 s for `scripts/runtime_status.py --desktop-api-ready`; a failure there makes the start DEGRADED and does
+not roll back the voice backend. `stop.sh` stops it before `jarvis.service` (and only if it is this checkout's
+unit), so the statement above that stop/restart touch only `jarvis.service` no longer holds. It is not enabled
+for boot; it follows the runtime lifecycle. Not verified on Sleepy: run `systemctl --user status
+jarvis-desktop-api.service` and `curl -s http://127.0.0.1:8092/api/stats` after `start.sh`.

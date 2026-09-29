@@ -4,7 +4,7 @@ The production desktop client is `WindowsApp/WinUI3/Jarvis.ControlHub.WinUI.cspr
 
 `WindowsPackageType=None` selects unpackaged execution for this development baseline. Production distribution (MSIX, unpackaged, or another supported model) is intentionally undecided and must be reviewed before release.
 
-The shell reads the local runtime through `Adapters/BackendHub.cs` (JARVIS web API, read-only, loopback `127.0.0.1:8091`) and `WindowsApp/RuntimeSupervisorClient.cs` (Runtime Supervisor snapshot via the embedded `JARVIS-Runtime.ps1` from the repository root). Values without a backend source stay `UNAVAILABLE`, `NOT_IMPLEMENTED` or `NO LIVE DATA`. Mobile Connection is a separate area from Mobility/VVS, with no device or pairing data fabricated.
+The shell reads the local runtime through `Adapters/BackendHub.cs` (JARVIS desktop API, read-only, loopback `127.0.0.1:8092`) and `WindowsApp/RuntimeSupervisorClient.cs` (Runtime Supervisor snapshot via the embedded `JARVIS-Runtime.ps1` from the repository root). Values without a backend source stay `UNAVAILABLE`, `NOT_IMPLEMENTED` or `NO LIVE DATA`. Mobile Connection is a separate area from Mobility/VVS, with no device or pairing data fabricated.
 
 `WindowsApp/JarvisApiClient.cs` and `WindowsApp/RuntimeSupervisorClient.cs` sit outside the project folder and are linked into it; `JarvisApiClient` is used only behind `BackendHub`.
 
@@ -20,10 +20,10 @@ Contract source: `jarvis_web.py` on the integration branch (backend handoff `han
 
 ### Desktop mode and port
 
-- `python jarvis_web.py --desktop-mode` is the read-only second process for this client: fixed to `127.0.0.1:8091`, no TLS, no voice, only the nine `GET`/`HEAD` paths below (`_DESKTOP_READ_ALLOWLIST`); every other path, including all `/api/mail/*`, `/ws` and static files, is refused with HTTP 403 and `desktopMode: true`. Memory and context are opened read-only; calendar, news, weather, health scheduler and observation collector are not started.
-- The standard web process also listens on `127.0.0.1:8091` (`config.yaml` `web.port`). Only one of the two can run at a time; `scripts/runtime_status.py` reports which mode owns the port. The client works against either.
-- Authentication: the client sends `Authorization: Bearer <JARVIS_WEB_AUTH_TOKEN>` when that variable is set in the Windows environment. Desktop mode needs no token. The standard mode needs the same value as its own `JARVIS_WEB_AUTH_TOKEN` when a token is configured. HTTP 401 is reported as an authentication problem, HTTP 403 as a path outside the desktop allowlist.
-- No repository script starts the web process in either mode. Starting it, and reaching WSL's `127.0.0.1:8091` from Windows, is part of local verification.
+- The client reads only the **desktop API**: `jarvis_web.py --desktop-mode`, fixed to `127.0.0.1:8092` (`jarvis_web.DESKTOP_MODE_PORT`, `JarvisApiClient.LoopbackPort`), no TLS, no voice, only the nine `GET`/`HEAD` paths below (`_DESKTOP_READ_ALLOWLIST`); every other path, including all `/api/mail/*`, `/ws` and static files, is refused with HTTP 403 and `desktopMode: true`. Memory and context are opened read-only; calendar, news, weather, health scheduler and observation collector are not started.
+- Lifecycle owner: `systemd/jarvis-desktop-api.service`, linked and started by `start.sh` after the voice backend is ready, stopped by `stop.sh` before it, cycled by `restart.sh`; systemd restarts it on failure. The Runtime Supervisor reports it as component `desktop-api` (READY only when its own process answers `/api/stats` on loopback). Starting the runtime from this app therefore starts the desktop API; nobody starts `jarvis_web.py` by hand.
+- The standard web process keeps `config.yaml` `web.port` (8091) for its own clients (browser UI, governance scripts, test suites); it has no lifecycle owner in this repository and is not needed by this app. It refuses the desktop port.
+- Authentication: the client sends `Authorization: Bearer <JARVIS_WEB_AUTH_TOKEN>` when that variable is set in the Windows environment. Desktop mode needs no token and honours a configured one. HTTP 401 is reported as an authentication problem, HTTP 403 as a path outside the desktop allowlist.
 
 ### Planner and lifecycle safety
 

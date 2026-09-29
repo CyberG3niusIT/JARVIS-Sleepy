@@ -63,7 +63,7 @@ public static class RuntimeComponents
     public static (RuntimeState State, string Message) ClassifyFailure(JarvisApiException exception) => exception.Kind switch
     {
         JarvisApiFailureKind.ConnectionRefused =>
-            (RuntimeState.Offline, "Web-API nicht erreichbar (Verbindung abgelehnt, 127.0.0.1:8091). Sie wird nicht vom Supervisor verwaltet."),
+            (RuntimeState.Offline, $"Desktop-API nicht erreichbar (Verbindung abgelehnt, 127.0.0.1:{Jarvis.ControlHub.JarvisApiClient.LoopbackPort}). Sie startet mit der Runtime (jarvis-desktop-api.service)."),
         JarvisApiFailureKind.Timeout =>
             (RuntimeState.Unavailable, "Zeitüberschreitung; der Zustand der Web-API ist unbekannt."),
         JarvisApiFailureKind.ConnectionFailed =>

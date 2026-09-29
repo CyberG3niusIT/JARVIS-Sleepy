@@ -12,7 +12,9 @@ namespace Jarvis.ControlHub;
 /// </summary>
 public sealed class JarvisApiClient : IDisposable
 {
-    public const int LoopbackPort = 8091;
+    // Desktop-API: jarvis_web.py --desktop-mode (jarvis_web.DESKTOP_MODE_PORT), gestartet von start.sh als
+    // jarvis-desktop-api.service. Nicht der Standard-Webport (web.port 8091), der andere Clients bedient.
+    public const int LoopbackPort = 8092;
 
     private static readonly string BaseAddress = $"http://127.0.0.1:{LoopbackPort}/";
     private const int MaxResponseBytes = 2 * 1024 * 1024;
@@ -102,7 +104,7 @@ public sealed class JarvisApiClient : IDisposable
                 TimeoutException or OperationCanceledException => JarvisApiFailureKind.Timeout,
                 _ => JarvisApiFailureKind.ConnectionFailed,
             };
-            throw new JarvisApiException("Die JARVIS-API auf 127.0.0.1:8091 ist nicht erreichbar.", kind);
+            throw new JarvisApiException($"Die JARVIS-Desktop-API auf 127.0.0.1:{LoopbackPort} ist nicht erreichbar.", kind);
         }
 
         using (response)

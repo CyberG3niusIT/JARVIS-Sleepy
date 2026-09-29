@@ -7,7 +7,19 @@ Status: accepted, 2026-09-29.
 - **Production desktop client: WinUI 3** — `WindowsApp/WinUI3/Jarvis.ControlHub.WinUI.csproj` (C#, .NET, Windows App SDK, XAML). It is the only desktop client in this repository.
 - **WPF: retired legacy.** No WPF project, WPF reference or WPF test may exist in build, runtime or test paths. WPF must not be reintroduced.
 - React, Tailwind, Vite, WebView, Node or a browser shell are not desktop client targets. Lovable is a design reference only.
-- The backend (`jarvis_web.py`) is the source of truth. The desktop client reads the read-only desktop mode on `127.0.0.1:8091` and never writes to it.
+- The backend (`jarvis_web.py`) is the source of truth. The desktop client reads the read-only desktop API on `127.0.0.1:8092` and never writes to it.
+
+## Process and port ownership
+
+| Process | Bind | Lifecycle owner | Clients |
+|---|---|---|---|
+| Voice daemon `jarvis_continuous.py` | — | `systemd/jarvis.service` via `start.sh`/`stop.sh` | — (single writer of memory, context, event log) |
+| Desktop API `jarvis_web.py --desktop-mode` | `127.0.0.1:8092`, fixed | `systemd/jarvis-desktop-api.service` via `start.sh` (after voice is ready, readiness wait up to 90 s), `stop.sh` (before voice), `restart.sh`; `Restart=on-failure` | WinUI client only |
+| Standard web `jarvis_web.py` | `web.port` (8091) on loopback, TLS `web.tls.port` (8443) when certificates exist | none in this repository (started by hand when needed) | browser UI, `scripts/jarvis-confirm`, `scripts/jarvis-circuit-reset`, `scripts/test_suite_v3`, `scripts/ws_test.py`, `tests/integration` |
+
+Why a separate desktop process instead of an existing one: the voice daemon has no HTTP server and adding one would change the voice architecture; the standard web process starts its own reminder/news/weather pollers, health scheduler and observation collector (duplicates of the voice daemon's), serves write paths and has no lifecycle owner. The desktop mode already exists for exactly this role: read-only memory and context, no daemon workers, GET-only allowlist.
+
+Readiness and health: `scripts/runtime_status.py` probes the unit state, that the unit's main process is this checkout's `jarvis_web.py --desktop-mode` and the only listener on 8092, that it listens on loopback only, and `/api/stats` (component `desktop-api`). `start.sh` waits on the same probe (`--desktop-api-ready`). A desktop API that is down or not ready never rolls back or blocks the voice backend: the start reports DEGRADED, and a broken or foreign listener degrades the runtime snapshot. Recovery is systemd's `Restart=on-failure`, or restart from the app. Port 8092 was chosen because no file in the repository uses it; whether a Windows program holds it can only be checked locally.
 
 ## What happened to the WPF code
 

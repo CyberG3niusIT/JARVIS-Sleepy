@@ -490,6 +490,57 @@ def probe_web(config: Any) -> Finding:
     return finding(DEGRADED, f"{WEB_HEALTH_PATH} meldet {'HTTP ' + str(status) if not reason else reason}.")
 
 
+DESKTOP_API_UNIT = "jarvis-desktop-api.service"
+# Must equal jarvis_web.DESKTOP_MODE_PORT (tests/unit/test_desktop_api_lifecycle.py).
+DESKTOP_API_PORT = 8092
+
+
+def probe_desktop_api(props: dict[str, str]) -> Finding:
+    """Read-only desktop API (jarvis_web.py --desktop-mode), owned by start.sh/stop.sh via its user unit.
+
+    READY only if the unit is active, its MainPID is the one project process in desktop mode listening on
+    127.0.0.1:DESKTOP_API_PORT (loopback only), and /api/stats answers 200. Optional for the runtime: when it
+    is merely down the voice runtime stays READY; a broken or foreign listener degrades it.
+    """
+    name = "JARVIS Desktop-API"
+    port = DESKTOP_API_PORT
+
+    def finding(state: str, detail: str = "") -> Finding:
+        return Finding("desktop-api", name, state, detail)
+
+    if props.get("LoadState") != "loaded":
+        return finding(STOPPED, f"{DESKTOP_API_UNIT} ist nicht installiert.")
+    unit = _unit_state(props)
+    if unit == ERROR:
+        return finding(ERROR, f"{DESKTOP_API_UNIT} ist fehlgeschlagen oder startet nach einem Fehler neu.")
+    if unit in (STARTING, STOPPED):
+        return finding(unit)
+    try:
+        sockets = _web_listening_sockets()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return finding(NOT_IMPLEMENTED, f"Listener-Prüfung nicht möglich ({type(exc).__name__}).")
+    on_port = [entry for entry in sockets if entry[1] == port]
+    if not on_port:
+        return finding(STARTING, f"Unit aktiv, noch kein Listener auf 127.0.0.1:{port}.")
+    pids = {pid for _, _, pid in on_port}
+    main_pid = _num(props.get("MainPID"), int)
+    if pids != {main_pid}:
+        return finding(ERROR, f"Port {port} gehört nicht dem Hauptprozess von {DESKTOP_API_UNIT}.")
+    identical, desktop = _web_process_identity(main_pid)
+    if not identical or not desktop:
+        return finding(ERROR, f"Port {port} ist nicht von {WEB_SCRIPT} --desktop-mode dieses Checkouts belegt.")
+    exposed = sorted({f"{host}:{p}" for host, p, owner in sockets
+                      if owner == main_pid and not (host.startswith("127.") or host in ("[::1]", "::1"))})
+    if exposed:
+        return finding(ERROR, "Desktop-API lauscht nicht ausschließlich auf Loopback: " + ", ".join(exposed[:3]) + ".")
+    status, reason = _web_health(port)
+    if status == 200 and not reason:
+        return finding(READY, f"Schreibgeschützt, 127.0.0.1:{port}.")
+    if status == 503 or status is None:
+        return finding(STARTING, f"{WEB_HEALTH_PATH} noch nicht bereit ({'HTTP ' + str(status) if status else reason}).")
+    return finding(ERROR, f"{WEB_HEALTH_PATH} meldet {'HTTP ' + str(status) if not reason else reason}.")
+
+
 # -- derivation (the single place that decides the runtime state) -----------------
 
 def derive_state(voice: Finding, findings: list[Finding], lifecycle: dict[str, Any] | None,
@@ -584,6 +635,7 @@ def collect() -> dict[str, Any]:
         findings += [f for f in (probe_llm_expert(config, expert_props, handover), probe_llm_small(config),
                                  probe_audio(config, voice_props), probe_vvs(config), probe_flux(config),
                                  probe_npu_sensor(config)) if f is not None]
+        findings.append(probe_desktop_api(unit_props(DESKTOP_API_UNIT)))
         findings.append(probe_web(config))
 
         lifecycle = runtime_state.read_lifecycle()
@@ -603,8 +655,19 @@ def collect() -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--json", action="store_true", required=True, help="Runtime-Snapshot als JSON ausgeben.")
-    parser.parse_args(argv)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--json", action="store_true", help="Runtime-Snapshot als JSON ausgeben.")
+    mode.add_argument("--desktop-api-ready", action="store_true",
+                      help="Readiness der Desktop-API (Exit 0 nur bei READY; eine Zeile Zustand und Detail).")
+    args = parser.parse_args(argv)
+    if args.desktop_api_ready:
+        try:
+            desktop = probe_desktop_api(unit_props(DESKTOP_API_UNIT))
+        except RuntimeError as exc:
+            print(f"{ERROR}: {exc}")
+            return 1
+        print(f"{desktop.state}: {desktop.detail}".rstrip(": "))
+        return 0 if desktop.state == READY else 1
     print(json.dumps(collect(), ensure_ascii=True))
     return 0
 
