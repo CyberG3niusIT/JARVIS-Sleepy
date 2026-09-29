@@ -50,6 +50,7 @@ internal static class Program
         await VerifyBrainEventBridgeAsync(failures);
         VerifyBrainPrivacyAndReadOnly(failures);
         VerifyHeaderLayout(failures);
+        VerifyProjectSources(failures);
         await VerifyHubAsync(failures, skipped);
 
         foreach (var item in skipped) Console.WriteLine("SKIPPED: " + item);
@@ -256,6 +257,10 @@ internal static class Program
         Check(Classify(JarvisApiFailureKind.HttpStatus, HttpStatusCode.Unauthorized).State == RuntimeState.Unavailable
                 && Classify(JarvisApiFailureKind.HttpStatus, HttpStatusCode.Forbidden).State == RuntimeState.Unavailable,
             "401/403 muss UNAVAILABLE sein.", failures);
+        Check(Classify(JarvisApiFailureKind.HttpStatus, HttpStatusCode.Unauthorized).Message.Contains("JARVIS_WEB_AUTH_TOKEN", StringComparison.Ordinal)
+                && !Classify(JarvisApiFailureKind.HttpStatus, HttpStatusCode.Forbidden).Message.Contains("Anmeldung", StringComparison.Ordinal)
+                && !Classify(JarvisApiFailureKind.HttpStatus, HttpStatusCode.Forbidden).Message.Contains("TOKEN", StringComparison.Ordinal),
+            "403 ist im Backend kein Auth-Fehler (401), sondern ein nicht freigegebener Pfad; kein Token-Hinweis.", failures);
         Check(Classify(JarvisApiFailureKind.HttpStatus, HttpStatusCode.NotFound).State == RuntimeState.Unavailable,
             "404 muss UNAVAILABLE sein.", failures);
         Check(Classify(JarvisApiFailureKind.HttpStatus, HttpStatusCode.ServiceUnavailable).State == RuntimeState.Unavailable,
@@ -578,6 +583,31 @@ internal static class Program
         }
 
         Check(source.Contains("http://127.0.0.1:", StringComparison.Ordinal) && !System.Text.RegularExpressions.Regex.IsMatch(source, @"https?://(?!127\.0\.0\.1)[a-z0-9.-]+[:/]"), "Loopback-only verletzt: Nicht-Loopback-Adresse im Adapter oder API-Client.", failures);
+    }
+
+    /// <summary>Alle relativen Quellen des WinUI-Projekts liegen im Repository (kein Workspace-Layout außerhalb).</summary>
+    private static void VerifyProjectSources(ICollection<string> failures)
+    {
+        var project = FindRepoFile(Path.Combine("WindowsApp", "WinUI3", "Jarvis.ControlHub.WinUI.csproj"));
+        var repoRoot = FindRepoFile("jarvis_web.py") is { } web ? Path.GetDirectoryName(web) : null;
+        if (project is null || repoRoot is null)
+        {
+            failures.Add("Projektquellen: WinUI-Projekt oder Repository-Root nicht gefunden.");
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(project)!;
+        var includes = System.Xml.Linq.XDocument.Load(project).Descendants()
+            .Select(element => (string?)element.Attribute("Include"))
+            .Where(include => include is not null && include.StartsWith("..", StringComparison.Ordinal) && !include.Contains('*'))
+            .ToList();
+        Check(includes.Count > 0, "Projektquellen: keine relativen Includes gefunden.", failures);
+        foreach (var include in includes)
+        {
+            var full = Path.GetFullPath(Path.Combine(directory, include!.Replace('\\', Path.DirectorySeparatorChar)));
+            Check(full.StartsWith(repoRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal), $"Projektquelle außerhalb des Repositorys: {include}.", failures);
+            Check(File.Exists(full), $"Projektquelle fehlt: {include}.", failures);
+        }
     }
 
     private static void VerifyHeaderLayout(ICollection<string> failures)

@@ -70,8 +70,10 @@ public static class RuntimeComponents
             (RuntimeState.Unavailable, "Verbindung zur Web-API fehlgeschlagen; der Zustand ist unbekannt."),
         JarvisApiFailureKind.HttpStatus => exception.StatusCode switch
         {
-            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+            HttpStatusCode.Unauthorized =>
                 (RuntimeState.Unavailable, "Web-API lehnt die Anmeldung ab (JARVIS_WEB_AUTH_TOKEN prüfen)."),
+            HttpStatusCode.Forbidden =>
+                (RuntimeState.Unavailable, "Web-API verweigert diesen Endpunkt (HTTP 403, Desktop-Modus-Allowlist)."),
             HttpStatusCode.NotFound => (RuntimeState.Unavailable, "Endpunkt in dieser Backend-Version nicht vorhanden."),
             HttpStatusCode.ServiceUnavailable => (RuntimeState.Unavailable, "Backend meldet: noch nicht bereit."),
             { } code when (int)code >= 500 => (RuntimeState.Error, $"Backend meldet HTTP {(int)code}."),

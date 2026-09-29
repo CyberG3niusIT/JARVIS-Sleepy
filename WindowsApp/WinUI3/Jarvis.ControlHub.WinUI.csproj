@@ -22,7 +22,7 @@
     <Compile Include="..\MetricBucket.cs" Link="Shared\MetricBucket.cs" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="..\..\..\Main\JARVIS-Runtime.ps1" LogicalName="Jarvis.ControlHub.Runtime.JARVIS-Runtime.ps1" />
+    <EmbeddedResource Include="..\..\JARVIS-Runtime.ps1" LogicalName="Jarvis.ControlHub.Runtime.JARVIS-Runtime.ps1" />
     <Content Include="Resources\jarvis-wordmark.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Resources\jarvis-brain-idle.jpg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

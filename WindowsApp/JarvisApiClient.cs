@@ -144,8 +144,11 @@ public sealed class JarvisApiClient : IDisposable
             {
                 var explanation = response.StatusCode switch
                 {
-                    HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+                    HttpStatusCode.Unauthorized =>
                         "JARVIS-API lehnt die Anmeldung ab. Falls Authentifizierung aktiviert ist, JARVIS_WEB_AUTH_TOKEN in der Windows-Umgebung setzen und das Programm neu starten.",
+                    // Das Backend meldet Auth-Fehler mit 401; 403 bedeutet einen nicht freigegebenen Pfad (Desktop-Modus-Allowlist).
+                    HttpStatusCode.Forbidden =>
+                        "JARVIS-API verweigert diesen Endpunkt (HTTP 403). Im Desktop-Modus sind nur freigegebene Lesepfade erreichbar.",
                     HttpStatusCode.NotFound => $"JARVIS-API-Endpunkt nicht verfügbar (HTTP {(int)response.StatusCode}).",
                     _ => $"JARVIS-API meldet HTTP {(int)response.StatusCode}.",
                 };
