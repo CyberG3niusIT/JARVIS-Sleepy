@@ -1,5 +1,7 @@
 # J.A.R.V.I.S Mobile
 
+> Workspaceweite technische Einordnung: [JARVIS Sleepy Dokumentation](../Dokumentation/README.md). Diese App bleibt ein separates Repository; ihr eigener Runtime- und Portierungsstand steht in den folgenden Abschnitten.
+
 **Local AI Assistant**
 
 J.A.R.V.I.S Mobile ist die native Android-Oberfläche für den mobilen Teil von J.A.R.V.I.S. Das Repository enthält zwei bewusst getrennte Ebenen:
