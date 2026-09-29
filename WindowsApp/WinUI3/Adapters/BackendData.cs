@@ -93,7 +93,9 @@ public sealed record PlannerInfo(
     long Completed,
     long Running,
     long Failed,
-    long Pending);
+    long Pending,
+    // Client-seitige Bewertung, kein Backend-Zustand: die Antwort verletzt die Invarianten von agents_status_handler.
+    bool Implausible = false);
 
 public sealed record MemoryInfo(
     long? FactsTotal,

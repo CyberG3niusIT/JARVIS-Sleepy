@@ -39,6 +39,7 @@ public sealed partial class ShellPage : Page
     private readonly HashSet<BackendDomain> _webLoading = [];
     private string? _repositoryRoot;
     private Jarvis.ControlHub.RuntimeSnapshot? _snapshot;
+    private string? _snapshotRoot;
     private bool _refreshing;
     private CancellationTokenSource? _lifetime;
     private DispatcherTimer? _pollTimer;
@@ -517,6 +518,8 @@ public sealed partial class ShellPage : Page
         var plannerOwned = agents.IsReady && planner is { Available: false } && planner.State == "BACKEND OWNED";
         UIElement plannerBody = plannerOwned
             ? StatusEmpty("BACKEND OWNED", "Der Planner gehört dem Voice-Daemon. Der Desktop-Web-Prozess hat keinen Planner-Status; ein lokaler Leerlauf wird nicht als Systemzustand gezeigt.")
+            : agents.IsReady && planner is { Implausible: true }
+            ? StatusEmpty(planner.State, "Backend meldet diesen Planner-Zustand. Die Oberfläche zeigt keine Schrittzahlen, weil Flags oder Zähler der Antwort nicht zum Backend-Vertrag passen (Prüfung im Client).")
             : planner is { Available: true } && agents.IsReady
             ? Compact(
                 StateValue("Zustand", planner.Available ? planner.State : "UNAVAILABLE"),
@@ -888,9 +891,9 @@ public sealed partial class ShellPage : Page
         StateValue("Komponenten", _snapshot?.Components.Count.ToString() ?? "UNAVAILABLE"));
 
     private async void OnRefreshClick(object sender, RoutedEventArgs args) => await RefreshRuntimeAsync();
-    private async void OnStartClick(object sender, RoutedEventArgs args) => await RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction.Start, _snapshot?.CanStart == true);
-    private async void OnStopClick(object sender, RoutedEventArgs args) => await RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction.Stop, _snapshot?.CanStop == true);
-    private async void OnRestartClick(object sender, RoutedEventArgs args) => await RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction.Restart, _snapshot?.CanRestart == true);
+    private async void OnStartClick(object sender, RoutedEventArgs args) => await RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction.Start);
+    private async void OnStopClick(object sender, RoutedEventArgs args) => await RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction.Stop);
+    private async void OnRestartClick(object sender, RoutedEventArgs args) => await RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction.Restart);
 
     private async Task RefreshRuntimeAsync()
     {
@@ -906,7 +909,9 @@ public sealed partial class ShellPage : Page
             }
             else
             {
-                _snapshot = await _supervisor.GetRuntimeAsync(_repositoryRoot);
+                var root = _repositoryRoot;
+                _snapshot = await _supervisor.GetRuntimeAsync(root);
+                _snapshotRoot = root;
                 SetRuntimeState(_snapshot.State, _snapshot.Detail.Length > 0 ? _snapshot.Detail : string.Join("; ", _snapshot.DegradedReasons));
             }
         }
@@ -925,9 +930,38 @@ public sealed partial class ShellPage : Page
         await LoadWebDataAsync(CurrentSection, force: true);
     }
 
-    private async Task RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction action, bool capabilityAllowed)
+    /// <summary>
+    /// Fragt den Supervisor für den gewählten Checkout neu ab und prüft dessen Freigabe. Wird vor dem
+    /// Bestätigungsdialog und danach erneut aufgerufen, damit keine zwischenzeitlich entzogene Freigabe greift.
+    /// </summary>
+    private async Task<bool> IsRuntimeActionAllowedAsync(Jarvis.ControlHub.JarvisRuntimeAction action, string root)
     {
-        if (!capabilityAllowed || _repositoryRoot is null) return;
+        try
+        {
+            var snapshot = await _supervisor.GetRuntimeAsync(root);
+            _snapshot = snapshot;
+            _snapshotRoot = root;
+        }
+        catch (Exception)
+        {
+            SetRuntimeUnavailable("Supervisor nicht erreichbar");
+            return false;
+        }
+
+        return RuntimeActionGuard.IsAllowed(action, _snapshot, _snapshotRoot, _repositoryRoot);
+    }
+
+    private async Task RequestRuntimeActionAsync(Jarvis.ControlHub.JarvisRuntimeAction action)
+    {
+        var root = _repositoryRoot;
+        if (root is null) return;
+        if (!await IsRuntimeActionAllowedAsync(action, root))
+        {
+            RuntimeDetailLabel.Text = "Aktion nicht freigegeben: der soeben abgefragte Supervisor-Zustand dieses Checkouts erlaubt sie nicht.";
+            RenderSection(CurrentSection);
+            return;
+        }
+
         var actionLabel = action switch
         {
             Jarvis.ControlHub.JarvisRuntimeAction.Start => "Runtime starten",
@@ -944,9 +978,16 @@ public sealed partial class ShellPage : Page
             XamlRoot = XamlRoot,
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (!RuntimeActionGuard.RootsMatch(root, _repositoryRoot) || !await IsRuntimeActionAllowedAsync(action, root))
+        {
+            RuntimeDetailLabel.Text = "Aktion nicht ausgeführt: der Supervisor erlaubt sie nach der Bestätigung nicht mehr, oder der Checkout hat gewechselt.";
+            RenderSection(CurrentSection);
+            return;
+        }
+
         try
         {
-            var result = await _supervisor.RequestActionAsync(action, _repositoryRoot);
+            var result = await _supervisor.RequestActionAsync(action, root);
             RuntimeDetailLabel.Text = result.Accepted ? "Aktion angenommen. Zustand wird neu abgefragt." : "Aktion nicht angenommen.";
             await RefreshRuntimeAsync();
         }
@@ -959,6 +1000,7 @@ public sealed partial class ShellPage : Page
     private void SetRuntimeUnavailable(string detail)
     {
         _snapshot = null;
+        _snapshotRoot = null;
         SetRuntimeState("UNAVAILABLE", detail);
     }
 

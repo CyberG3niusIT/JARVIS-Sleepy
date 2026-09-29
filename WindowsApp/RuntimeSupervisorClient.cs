@@ -29,7 +29,7 @@ public sealed record RuntimeSnapshot(
 public sealed record RuntimeActionResult(bool Accepted, string Message);
 
 /// <summary>
-/// Narrow adapter for Main/JARVIS-Runtime.ps1. Refresh invokes getRuntime only;
+/// Narrow adapter for JARVIS-Runtime.ps1 (repository root). Refresh invokes getRuntime only;
 /// lifecycle actions require an explicit call from the corresponding UI handler.
 /// </summary>
 public sealed class RuntimeSupervisorClient

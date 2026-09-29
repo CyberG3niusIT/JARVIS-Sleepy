@@ -51,6 +51,7 @@ internal static class Program
         VerifyBrainPrivacyAndReadOnly(failures);
         VerifyHeaderLayout(failures);
         VerifyProjectSources(failures);
+        VerifyPortedLegacyChecks(failures, skipped);
         await VerifyHubAsync(failures, skipped);
 
         foreach (var item in skipped) Console.WriteLine("SKIPPED: " + item);
@@ -146,8 +147,11 @@ internal static class Program
         Check(ownedPlanner is { Available: false, State: "BACKEND OWNED" },
             "Planner backend_owned muss als nicht verfügbar mit Zustand BACKEND OWNED gelesen werden.", failures);
 
+        // Vollständige Nutzlast wie jarvis_web.py agents_status_handler (Flags, skippedSteps, observedAt).
         var planner = BackendParsers.ParseAgents(Json("""
-            {"available":true,"state":"running","stepCount":5,"completedSteps":2,"runningSteps":1,"failedSteps":0,"pendingSteps":2}
+            {"available":true,"state":"running","active":true,"paused":false,"awaitingConfirmation":false,"canPause":false,
+             "stepCount":5,"completedSteps":2,"runningSteps":1,"failedSteps":0,"pendingSteps":2,"skippedSteps":0,
+             "observedAt":"2026-09-29T12:00:00+00:00"}
             """));
         Check(planner is { Available: true, State: "RUNNING", Steps: 5, Completed: 2, Running: 1, Failed: 0, Pending: 2 },
             "Planner-Status wurde nicht korrekt gelesen.", failures);
@@ -583,6 +587,139 @@ internal static class Program
         }
 
         Check(source.Contains("http://127.0.0.1:", StringComparison.Ordinal) && !System.Text.RegularExpressions.Regex.IsMatch(source, @"https?://(?!127\.0\.0\.1)[a-z0-9.-]+[:/]"), "Loopback-only verletzt: Nicht-Loopback-Adresse im Adapter oder API-Client.", failures);
+    }
+
+    /// <summary>
+    /// Aus dem Legacy-Harness tests/WindowsAppFreshness.Tests (WPF-MainWindowViewModel) übernommene Anliegen, geprüft
+    /// gegen den aktuellen Backend-Vertrag (jarvis_web.py agents_status_handler, JARVIS.Runtime.psm1) und den WinUI-Code:
+    /// Planner ohne Inhalte und nur mit plausiblen Zählern, Lifecycle-Freigabe nur aus dem Supervisor-Zustand desselben
+    /// Checkouts, Repository-Erkennung und Reparse-Point-Schutz. Die WPF-Zeitschwellen sind bewusst nicht übernommen.
+    /// </summary>
+    private static void VerifyPortedLegacyChecks(ICollection<string> failures, ICollection<string> skipped)
+    {
+        string Agent(string state, string flags, string counts, string extra = "") =>
+            "{\"available\":true,\"state\":\"" + state + "\"," + flags + "," + counts + ",\"canPause\":false,\"observedAt\":\"2026-09-29T12:00:00+00:00\"" + extra + "}";
+        const string running = "\"active\":true,\"paused\":false,\"awaitingConfirmation\":false";
+        const string counts = "\"stepCount\":3,\"completedSteps\":1,\"runningSteps\":1,\"failedSteps\":0,\"pendingSteps\":1,\"skippedSteps\":0";
+
+        var live = BackendParsers.ParseAgents(Json(Agent("running", running, counts,
+            ",\"original_request\":\"PRIVATE_AGENT_REQUEST_SENTINEL\",\"steps\":[{\"description\":\"PRIVATE_STEP_SENTINEL\",\"result\":\"PRIVATE_RESULT_SENTINEL\"}]")));
+        Check(live is { Available: true, Implausible: false, State: "RUNNING", Steps: 3, Completed: 1 }, "Planner: gültiger laufender Plan nicht gelesen.", failures);
+        Check(!live.ToString().Contains("PRIVATE_", StringComparison.Ordinal), "Planner: Plan- oder Schrittinhalt im Planner-Modell.", failures);
+
+        // Alle Flag-Kombinationen, die agents_status_handler tatsächlich erzeugt, sind gültig.
+        (string State, string Flags)[] backendCombinations =
+        [
+            ("paused", "\"active\":false,\"paused\":true,\"awaitingConfirmation\":false"),
+            ("paused", "\"active\":false,\"paused\":true,\"awaitingConfirmation\":true"),
+            ("awaiting_confirmation", "\"active\":true,\"paused\":false,\"awaitingConfirmation\":true"),
+            ("awaiting_confirmation", "\"active\":false,\"paused\":false,\"awaitingConfirmation\":true"),
+            ("pending", "\"active\":false,\"paused\":false,\"awaitingConfirmation\":false"),
+            ("completed", "\"active\":false,\"paused\":false,\"awaitingConfirmation\":false"),
+        ];
+        foreach (var (state, flags) in backendCombinations)
+        {
+            Check(BackendParsers.ParseAgents(Json(Agent(state, flags, counts))) is { Available: true, Implausible: false, Steps: 3 },
+                $"Planner: vom Backend erzeugte Kombination {state}/{flags} wurde verworfen.", failures);
+        }
+
+        // Kombinationen, die das Backend nie erzeugt: Backend-Aussage bleibt, Zahlen werden nicht gezeigt.
+        var contradictory = BackendParsers.ParseAgents(Json(Agent("running", "\"active\":false,\"paused\":true,\"awaitingConfirmation\":false", counts)));
+        Check(contradictory is { Available: true, Implausible: true, State: "RUNNING", Steps: 0 },
+            "Planner: paused=true mit state running muss client-seitig unplausibel sein, Backend-Zustand bleibt erhalten.", failures);
+        Check(BackendParsers.ParseAgents(Json(Agent("pending", running, counts))) is { Implausible: true },
+            "Planner: active=true außerhalb von running/awaiting_confirmation wurde akzeptiert.", failures);
+        Check(BackendParsers.ParseAgents(Json(Agent("running",
+                running, "\"stepCount\":0,\"completedSteps\":9223372036854775807,\"runningSteps\":2,\"failedSteps\":9223372036854775807,\"pendingSteps\":0,\"skippedSteps\":0"))) is { Implausible: true, Steps: 0 },
+            "Planner: überlaufende Schrittzähler wurden als Fortschritt akzeptiert.", failures);
+        Check(BackendParsers.ParseAgents(Json(Agent("running", running, counts.Replace("\"stepCount\":3", "\"stepCount\":4", StringComparison.Ordinal)))) is { Implausible: true },
+            "Planner: Schrittsumme ungleich stepCount wurde akzeptiert.", failures);
+
+        // observedAt ist der Abfragezeitpunkt des Backends, kein Planalter: kein client-seitiges STALE.
+        Check(BackendParsers.ParseAgents(Json(Agent("running", running, counts).Replace("2026-09-29T12:00:00+00:00", "2020-01-01T00:00:00Z", StringComparison.Ordinal))) is { Available: true, Implausible: false },
+            "Planner: observedAt darf nicht als Frische des Plans bewertet werden.", failures);
+
+        // Lifecycle-Freigabe: nur Supervisor-capabilities des Snapshots, der für den gewählten Checkout abgefragt wurde.
+        Jarvis.ControlHub.RuntimeSnapshot Snap() => new("READY", [], null, [], CanStart: false, CanStop: true, CanRestart: true, string.Empty);
+        const string root = "/srv/jarvis/Main";
+        var stop = Jarvis.ControlHub.JarvisRuntimeAction.Stop;
+        Check(RuntimeActionGuard.IsAllowed(stop, Snap(), root, root), "Lifecycle: vom Supervisor erlaubte Aktion nicht freigegeben.", failures);
+        Check(RuntimeActionGuard.IsAllowed(stop, Snap(), root + "/", root), "Lifecycle: gleicher Checkout mit abschließendem Trenner abgelehnt.", failures);
+        Check(!RuntimeActionGuard.IsAllowed(Jarvis.ControlHub.JarvisRuntimeAction.Start, Snap(), root, root), "Lifecycle: vom Supervisor nicht erlaubte Aktion freigegeben.", failures);
+        Check(!RuntimeActionGuard.IsAllowed(stop, Snap(), "/srv/jarvis/Old", root), "Lifecycle: Snapshot eines anderen Checkouts gibt Aktion frei.", failures);
+        Check(!RuntimeActionGuard.IsAllowed(stop, null, root, root) && !RuntimeActionGuard.IsAllowed(stop, Snap(), null, root)
+                && !RuntimeActionGuard.IsAllowed(stop, Snap(), root, null),
+            "Lifecycle: ohne Snapshot, Snapshot-Checkout oder gewählten Checkout freigegeben.", failures);
+        var shell = FindRepoFile(Path.Combine("WindowsApp", "WinUI3", "Views", "ShellPage.xaml.cs"));
+        var shellText = shell is null ? string.Empty : File.ReadAllText(shell);
+        var request = shellText.IndexOf("private async Task RequestRuntimeActionAsync", StringComparison.Ordinal);
+        var dialog = request < 0 ? -1 : shellText.IndexOf("dialog.ShowAsync()", request, StringComparison.Ordinal);
+        var send = request < 0 ? -1 : shellText.IndexOf("_supervisor.RequestActionAsync", request, StringComparison.Ordinal);
+        var checkBefore = request < 0 ? -1 : shellText.IndexOf("IsRuntimeActionAllowedAsync(action, root)", request, StringComparison.Ordinal);
+        var checkAfter = dialog < 0 ? -1 : shellText.IndexOf("IsRuntimeActionAllowedAsync(action, root)", dialog, StringComparison.Ordinal);
+        Check(request >= 0 && checkBefore > request && checkBefore < dialog && checkAfter > dialog && checkAfter < send,
+            "Lifecycle: Supervisor-Freigabe muss vor und nach dem Bestätigungsdialog neu abgefragt werden.", failures);
+
+        // Repository-Erkennung: im integrierten Repo ist der Root selbst der validierte Checkout; ungültige explizite
+        // Roots fallen nicht still auf einen anderen Checkout zurück.
+        var repoRoot = FindRepoFile("JARVIS-Runtime.ps1") is { } script ? Path.GetDirectoryName(script) : null;
+        Check(repoRoot is not null && Equals(Jarvis.ControlHub.RepositoryRootValidator.DiscoverFrom(AppContext.BaseDirectory), repoRoot),
+            "Legacy-Port: Repository-Root wurde vom App-Verzeichnis aus nicht erkannt.", failures);
+        Check(Equals(Jarvis.ControlHub.RepositoryRootValidator.ResolveConfiguredRoot([], AppContext.BaseDirectory), repoRoot),
+            "Legacy-Port: ohne konfigurierten Root lief keine automatische Erkennung.", failures);
+        Check(Jarvis.ControlHub.RepositoryRootValidator.ResolveConfiguredRoot([Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))], AppContext.BaseDirectory) is null,
+            "Legacy-Port: ungültiger expliziter Root fiel auf einen anderen Checkout zurück.", failures);
+        if (repoRoot is not null)
+        {
+            VerifyLinkedCheckoutRejected(repoRoot, linkFile: true, failures, skipped);
+            VerifyLinkedCheckoutRejected(repoRoot, linkFile: false, failures, skipped);
+        }
+    }
+
+    /// <summary>Ein Kandidat mit verlinktem Supervisor-Modul bzw. verlinktem scripts-Ordner muss abgelehnt werden.</summary>
+    private static void VerifyLinkedCheckoutRejected(string repoRoot, bool linkFile, ICollection<string> failures, ICollection<string> skipped)
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), $"JarvisLinkedCheckout-{Guid.NewGuid():N}");
+        var candidate = Path.Combine(testRoot, "Main");
+        var required = new[]
+        {
+            "JARVIS.Runtime.psm1", "JARVIS-Runtime.ps1", "jarvis_web.py", "config.yaml", "start.sh", "stop.sh", "restart.sh",
+            Path.Combine("scripts", "check_runtime_dependencies.py"), Path.Combine("scripts", "check_chatterbox_runtime.py"),
+            Path.Combine("scripts", "runtime_status.py"), Path.Combine("core", "runtime_state.py"),
+        };
+        try
+        {
+            Directory.CreateDirectory(candidate);
+            try
+            {
+                if (linkFile) File.CreateSymbolicLink(Path.Combine(candidate, "JARVIS.Runtime.psm1"), Path.Combine(repoRoot, "JARVIS.Runtime.psm1"));
+                else Directory.CreateSymbolicLink(Path.Combine(candidate, "scripts"), Path.Combine(repoRoot, "scripts"));
+            }
+            catch (Exception exception) when (exception is UnauthorizedAccessException or PlatformNotSupportedException or IOException)
+            {
+                skipped.Add($"Legacy-Port: Symlink-Prüfung ({(linkFile ? "Datei" : "Ordner")}) – Konto darf keine Symlinks anlegen.");
+                return;
+            }
+
+            foreach (var relative in required)
+            {
+                var target = Path.Combine(candidate, relative);
+                if (File.Exists(target) || (!linkFile && relative.StartsWith("scripts", StringComparison.Ordinal))) continue;
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.WriteAllText(target, string.Empty);
+            }
+
+            var rejected = false;
+            try { Jarvis.ControlHub.RepositoryRootValidator.Validate(candidate); }
+            catch (InvalidOperationException) { rejected = true; }
+            Check(rejected, $"Legacy-Port: Checkout mit verlinkt{(linkFile ? "em Supervisor-Modul" : "em scripts-Ordner")} wurde akzeptiert.", failures);
+        }
+        finally
+        {
+            try { if (Directory.Exists(testRoot)) Directory.Delete(testRoot, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     /// <summary>Alle relativen Quellen des WinUI-Projekts liegen im Repository (kein Workspace-Layout außerhalb).</summary>

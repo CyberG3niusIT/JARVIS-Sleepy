@@ -118,17 +118,51 @@ public static class BackendParsers
         return new AutomationsInfo(result);
     }
 
+    // Plan-Zustände ohne Pause/Bestätigung, wie agents_status_handler sie aus plan.status ableitet (sonst "idle").
+    private static readonly HashSet<string> PlanStates = new(StringComparer.Ordinal)
+    {
+        "idle", "pending", "running", "completed", "failed", "cancelled",
+    };
+
+    /// <summary>
+    /// Übernimmt die Planner-Aussage des Backends. Ob die Zahlen angezeigt werden, prüft der Client nur gegen die
+    /// Invarianten, die jarvis_web.py agents_status_handler selbst garantiert: paused bestimmt state "paused" (active
+    /// false), sonst bestimmt awaitingConfirmation "awaiting_confirmation", sonst ist active genau bei "running" wahr;
+    /// die fünf Schrittzähler summieren sich zu stepCount. Verletzt eine Antwort das, wird sie als client-seitig
+    /// unplausibel markiert (Implausible), ohne einen eigenen Runtime-Zustand zu erfinden. observedAt ist der
+    /// Abfragezeitpunkt des Backends und wird nicht als Alter des Plans bewertet.
+    /// </summary>
     public static PlannerInfo ParseAgents(JsonElement root)
     {
         RequireObject(root);
-        return new PlannerInfo(
-            Bool(root, "available") ?? false,
-            StateWord(Str(root, "state")),
-            Long(root, "stepCount") ?? 0,
-            Long(root, "completedSteps") ?? 0,
-            Long(root, "runningSteps") ?? 0,
-            Long(root, "failedSteps") ?? 0,
-            Long(root, "pendingSteps") ?? 0);
+        var available = Bool(root, "available") ?? false;
+        var rawState = Str(root, "state");
+        if (!available) return new PlannerInfo(false, StateWord(rawState), 0, 0, 0, 0, 0);
+
+        var implausible = new PlannerInfo(true, StateWord(rawState), 0, 0, 0, 0, 0, Implausible: true);
+        var state = rawState;
+        long? steps = Long(root, "stepCount"), completed = Long(root, "completedSteps"), running = Long(root, "runningSteps");
+        long? failed = Long(root, "failedSteps"), pending = Long(root, "pendingSteps"), skipped = Long(root, "skippedSteps");
+        if (Bool(root, "active") is not { } active || Bool(root, "paused") is not { } paused
+            || Bool(root, "awaitingConfirmation") is not { } awaiting || state is null) return implausible;
+
+        var flagsMatch = paused
+            ? state == "paused" && !active
+            : awaiting
+                ? state == "awaiting_confirmation"
+                : PlanStates.Contains(state) && active == (state == "running");
+        if (!flagsMatch || steps is not { } s || completed is not { } c || running is not { } r || failed is not { } f
+            || pending is not { } p || skipped is not { } k || new[] { s, c, r, f, p, k }.Any(value => value < 0)) return implausible;
+        try
+        {
+            if (checked(c + r + f + p + k) != s) return implausible;
+        }
+        catch (OverflowException)
+        {
+            return implausible;
+        }
+
+        return new PlannerInfo(true, StateWord(rawState), s, c, r, f, p);
     }
 
     public static MemoryInfo ParseMemory(JsonElement root)
