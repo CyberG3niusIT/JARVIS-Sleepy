@@ -17,9 +17,6 @@
   <ItemGroup>
     <Compile Include="..\JarvisApiClient.cs" Link="Shared\JarvisApiClient.cs" />
     <Compile Include="..\RuntimeSupervisorClient.cs" Link="Shared\RuntimeSupervisorClient.cs" />
-    <Compile Include="..\JarvisListItem.cs" Link="Shared\JarvisListItem.cs" />
-    <Compile Include="..\MetricBreakdown.cs" Link="Shared\MetricBreakdown.cs" />
-    <Compile Include="..\MetricBucket.cs" Link="Shared\MetricBucket.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\JARVIS-Runtime.ps1" LogicalName="Jarvis.ControlHub.Runtime.JARVIS-Runtime.ps1" />

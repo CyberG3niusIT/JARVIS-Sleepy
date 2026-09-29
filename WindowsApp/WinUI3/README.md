@@ -1,35 +1,34 @@
-# WinUI 3 migration baseline
+# J.A.R.V.I.S native desktop (WinUI 3)
 
-This project is a native WinUI 3 / C# / .NET / Windows App SDK shell. The existing WPF project remains beside it as a technical reference.
+The production desktop client is `WindowsApp/WinUI3/Jarvis.ControlHub.WinUI.csproj`: WinUI 3, C#, .NET, Windows App SDK, XAML. There is no other desktop client in this repository.
 
-`WindowsPackageType=None` selects unpackaged execution for this initial development baseline. Production distribution (MSIX, unpackaged, or another supported model) is intentionally undecided and must be reviewed before release.
+`WindowsPackageType=None` selects unpackaged execution for this development baseline. Production distribution (MSIX, unpackaged, or another supported model) is intentionally undecided and must be reviewed before release.
 
-The shell reads the local runtime through `Adapters/BackendHub.cs` (JARVIS web API, read-only, loopback `127.0.0.1:8091`) and `RuntimeSupervisorClient.cs` (Runtime Supervisor snapshot). Values without a backend source stay `UNAVAILABLE`, `NOT_IMPLEMENTED` or `NO LIVE DATA`. Mobile Connection is a separate area from Mobility/VVS, with no device or pairing data fabricated.
+The shell reads the local runtime through `Adapters/BackendHub.cs` (JARVIS web API, read-only, loopback `127.0.0.1:8091`) and `WindowsApp/RuntimeSupervisorClient.cs` (Runtime Supervisor snapshot via the embedded `JARVIS-Runtime.ps1` from the repository root). Values without a backend source stay `UNAVAILABLE`, `NOT_IMPLEMENTED` or `NO LIVE DATA`. Mobile Connection is a separate area from Mobility/VVS, with no device or pairing data fabricated.
 
-The WinUI project links (does not copy) the framework-neutral `JarvisApiClient.cs`, `JarvisListItem.cs`, `MetricBreakdown.cs`, and `MetricBucket.cs` source files from the preserved WPF folder. `JarvisApiClient` is used only behind `BackendHub`.
-
-## WPF source classification
-
-| Existing file / responsibility | Class | Evidence-based disposition |
-|---|---|---|
-| `Jarvis.ControlHub.csproj` | C | `UseWPF`, WPF WinExe and publish properties define the old target; retain it and create a separate WinUI project. |
-| `App.xaml`, `App.xaml.cs` | C | WPF Application resources, `StartupUri`, and `System.Windows.Application` lifecycle require native WinUI equivalents. |
-| `MainWindow.xaml`, `MainWindow.xaml.cs` | C | WPF Window, controls, routed events, visibility/brush APIs and visual-tree calls are framework-specific. |
-| `MainWindowViewModel.cs` | B | Useful data shaping and freshness logic exists, but dispatcher, timer and WPF dialog dependencies need extraction behind platform-neutral services. Do not copy wholesale. |
-| `JarvisApiClient.cs` | A | Uses BCL HTTP/JSON and fixed loopback endpoint policy; suitable for direct reuse after namespace/project reference review. |
-| Runtime snapshot/action contracts in `RuntimeSupervisorClient.cs` | A | Records and action/result data contracts are framework-neutral. |
-| Process launch, embedded PowerShell and repository discovery in `RuntimeSupervisorClient.cs` | B | Windows operations and repository-root access need an adapter boundary before reuse. |
-| `RepositoryRootValidator` | A | Filesystem and reparse-point validation uses framework-neutral .NET APIs. |
-| `JarvisListItem.cs`, `MetricBreakdown.cs`, `MetricBucket.cs` | A | Plain data records without WPF types. |
-| `app.manifest` | B | Execution identity may remain relevant, but WinUI packaging/runtime settings need review. |
-| `publish.ps1` | D | Current script publishes the WPF project; do not treat it as the WinUI release pipeline. |
-| `bin/`, `obj/`, `artifacts/` | D | Generated output, not source to migrate. |
+`WindowsApp/JarvisApiClient.cs` and `WindowsApp/RuntimeSupervisorClient.cs` sit outside the project folder and are linked into it; `JarvisApiClient` is used only behind `BackendHub`.
 
 The Lovable project remains a design/interaction reference only. Its React/Tailwind implementation is not a dependency of this project.
 
+### Legacy WPF client (removed)
+
+The earlier WPF Control Hub (`Jarvis.ControlHub.csproj`, `MainWindowViewModel`) is not part of this repository and is not a supported target. Its remaining test harness `tests/WindowsAppFreshness.Tests` referenced that missing project and could not build; the checks that still apply to the WinUI code were ported to `tests/WinUiBackendAdapters.Tests` (`VerifyPortedLegacyChecks`) before the harness was removed. WPF-only data records (`JarvisListItem`, `MetricBreakdown`, `MetricBucket`) that the WinUI client never used were removed with it.
+
 ## Backend wiring
 
-Contract source: branch `Sleepy-Aktuell-|-27.09` (reference commit `3ef09b2ec9d54f97485eaa0fa072dddc9b0de2c2`), `jarvis_web.py`. UI safepoint for this wiring: `49302e39e8844bd72d8bb9169c3449e6ef934400`. All requests are `GET`; the client has no write path.
+Contract source: `jarvis_web.py` on the integration branch (backend handoff `handoff/opus-backend-20260929-1821`). All requests are `GET`; the client has no write path.
+
+### Desktop mode and port
+
+- `python jarvis_web.py --desktop-mode` is the read-only second process for this client: fixed to `127.0.0.1:8091`, no TLS, no voice, only the nine `GET`/`HEAD` paths below (`_DESKTOP_READ_ALLOWLIST`); every other path, including all `/api/mail/*`, `/ws` and static files, is refused with HTTP 403 and `desktopMode: true`. Memory and context are opened read-only; calendar, news, weather, health scheduler and observation collector are not started.
+- The standard web process also listens on `127.0.0.1:8091` (`config.yaml` `web.port`). Only one of the two can run at a time; `scripts/runtime_status.py` reports which mode owns the port. The client works against either.
+- Authentication: the client sends `Authorization: Bearer <JARVIS_WEB_AUTH_TOKEN>` when that variable is set in the Windows environment. Desktop mode needs no token. The standard mode needs the same value as its own `JARVIS_WEB_AUTH_TOKEN` when a token is configured. HTTP 401 is reported as an authentication problem, HTTP 403 as a path outside the desktop allowlist.
+- No repository script starts the web process in either mode. Starting it, and reaching WSL's `127.0.0.1:8091` from Windows, is part of local verification.
+
+### Planner and lifecycle safety
+
+- `/api/agents/status`: the page shows the backend's `state` as reported. Step counts are shown only if the payload satisfies the invariants `agents_status_handler` itself guarantees (`paused` implies state `paused`; otherwise `awaitingConfirmation` implies `awaiting_confirmation`; otherwise `active` is true exactly for `running`; the five step counters sum to `stepCount`). A payload that breaks them is marked implausible on the client side (`PlannerInfo.Implausible`) and shown without numbers; this is a client presentation check, not a runtime state. `observedAt` is the backend's request time, so the client does not derive staleness from it. In desktop mode the planner is `BACKEND OWNED`.
+- Start, stop and restart are decided only from Runtime Supervisor facts: the client queries the supervisor for the selected checkout before the confirmation dialog and again after it, and runs the action only if both answers allow it for that same checkout (`Adapters/RuntimeActionGuard.cs`). There is no wall-clock comparison between the WSL-generated `updatedAt` and the Windows clock.
 
 ### Endpoints in use
 
@@ -40,12 +39,14 @@ Contract source: branch `Sleepy-Aktuell-|-27.09` (reference commit `3ef09b2ec9d5
 | `/api/events/recent?hours=24&limit=40` | Home (Recent Activity, Brain), Voice, Observability | Projection `timestamp`, `category`, `event`, `severity` only; event names outside the backend allowlist arrive as `unknown`. Newest first. |
 | `/api/events/aggregate?hours=24` | Observability | Counts only. |
 | `/api/memory/summary` | Home, Memory, Observability | Section errors are reduced to the section name. |
-| `/api/agents/status` | Automations | 503 with `available: false` when no planner exists. |
+| `/api/agents/status` | Automations | Desktop mode: `available: false`, `state: backend_owned`. Standard mode: validated as described above. |
 | `/api/automations/status` | Automations | System schedulers; no user rule engine. |
 | `/api/sessions?limit=1` | Chat | Only `total` is read. |
 | `/api/webcam/status` | Vision | `available`, `running`; no frames are requested. |
 
-Existing but not used: `/api/desktop/live`, `/api/events/{stt,tts,routing,speaker_id,watchdog,health}`, `/api/metrics/*`, `/api/history`, `/api/session/{id}`, `/api/memory/{facts,interactions,timeseries,db-health}`, `/api/governance/*`, `/api/observations/*`, `/api/gpu-status`, `/api/webcam/{stream,snapshot}`, `/ws`, `/ws/dashboard`. `/ws` is the web chat transport (write path); it is not a released desktop chat contract, so Chat stays `NOT_IMPLEMENTED`.
+`/api/sessions` counts the sessions of the backend's default user (`user`); the client does not pass a user.
+
+Existing but not used (and refused in desktop mode): `/api/desktop/live`, `/api/events/{stt,tts,routing,speaker_id,watchdog,health}`, `/api/metrics/*`, `/api/history`, `/api/session/{id}`, `/api/memory/{facts,interactions,timeseries,db-health}`, `/api/governance/*`, `/api/observations/*`, `/api/gpu-status`, `/api/webcam/{stream,snapshot}`, `/ws`, `/ws/dashboard`. `/ws` is the web chat transport (write path); it is not a released desktop chat contract, so Chat stays `NOT_IMPLEMENTED`.
 
 ### Areas without a backend contract
 
@@ -62,7 +63,7 @@ Pipeline: `/api/events/recent` -> `BrainEventCursor` -> `BrainEventMapping` -> `
 | `route_completed` (decision, info) | ModelRouting | `core/conversation_router.py` after routing |
 | `llm_call` (inference, info) | ModelInference | `core/llm_router.py` `_record_call`, `core/claude_consultation.py` |
 | `llm_call` (inference, error) | ErrorEvent | failed model call |
-| `tool_completed` (tool_execution, info) | ToolResult | `core/tool_registry.py`, `core/pipeline.py`, `jarvis_web.py`; emitted only when the privacy gate allows content logging |
+| `tool_completed` (tool_execution, info) | ToolResult | `core/tool_registry.py` (only when the privacy gate allows content logging), `core/pipeline.py`, `jarvis_web.py` (web search) |
 | `tool_completed` (tool_execution, error) | ErrorEvent | tool raised |
 | `watchdog_*` (error_recovery, warn) | DegradedEvent | `core/watchdog.py` `_emit_recovery` |
 
@@ -90,4 +91,4 @@ The title bar chooses its density from the available width of the navigation col
 
 ### Windows verification required
 
-Cloud runs cover the adapter test harness and a C# type check against the Windows App SDK reference assemblies. Real XAML compilation, app start, header spacing and overflow behaviour at several window widths, backend connection and recovery, and live brain animation must be verified on Windows.
+Cloud runs cover `tests/WinUiBackendAdapters.Tests` and a C# type check against the Windows App SDK reference assemblies. Real XAML compilation, app start, header spacing and overflow behaviour at several window widths, backend connection (desktop and standard mode) and recovery, supervisor lifecycle actions, and live brain animation must be verified on Windows.
