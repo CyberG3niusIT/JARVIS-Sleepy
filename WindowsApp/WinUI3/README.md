@@ -10,9 +10,9 @@ The shell reads the local runtime through `Adapters/BackendHub.cs` (JARVIS web A
 
 The Lovable project remains a design/interaction reference only. Its React/Tailwind implementation is not a dependency of this project.
 
-### Legacy WPF client (removed)
+### WPF is retired
 
-The earlier WPF Control Hub (`Jarvis.ControlHub.csproj`, `MainWindowViewModel`) is not part of this repository and is not a supported target. Its remaining test harness `tests/WindowsAppFreshness.Tests` referenced that missing project and could not build; the checks that still apply to the WinUI code were ported to `tests/WinUiBackendAdapters.Tests` (`VerifyPortedLegacyChecks`) before the harness was removed. WPF-only data records (`JarvisListItem`, `MetricBreakdown`, `MetricBucket`) that the WinUI client never used were removed with it.
+WPF is retired legacy and must not be reintroduced: no WPF project, reference or test in build, runtime or test paths. The former WPF Control Hub is not part of this repository. Its last test harness could not build any more; the checks that still apply to the WinUI code were re-validated against the current contracts and moved to `tests/WinUiBackendAdapters.Tests` (`VerifyPortedLegacyChecks`) before it was removed. `tests/unit/test_no_wpf_desktop.py` enforces this in CI. Decision record: `docs/DESKTOP_ARCHITECTURE.md`.
 
 ## Backend wiring
 

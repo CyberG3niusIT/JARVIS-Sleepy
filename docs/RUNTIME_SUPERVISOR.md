@@ -7,6 +7,12 @@ Native Control Plane für die Desktop/Tauri-Anbindung. Stand: uncommitted auf
 Tauri -> JARVIS-Runtime.ps1 -> JARVIS.Runtime.psm1 -> wsl.exe -> scripts/runtime_status.py -> Dienste
 ```
 
+> Aktueller Client (Integrationsstand 2026-09-29): die native WinUI-3-App `WindowsApp/WinUI3`. Sie bettet
+> `JARVIS-Runtime.ps1` aus dem Repository-Root ein und ruft es mit `JARVIS_REPOSITORY_ROOT` auf; das Modul kommt aus
+> dem Checkout. Lifecycle-Aktionen führt sie nur aus, wenn `getRuntime` direkt vor und erneut nach dem
+> Bestätigungsdialog die Aktion für denselben Checkout erlaubt. Tauri- und `UI/src/...`-Bezüge unten sind historisch.
+> Siehe `docs/DESKTOP_ARCHITECTURE.md` und `WindowsApp/WinUI3/README.md`.
+
 ## Bedienung
 
 | Aktion | Aufruf | Ausgabe |
