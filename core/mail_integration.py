@@ -270,7 +270,7 @@ class MailService:
                                "new_24h": recent.get(account, 0)})
             except (MailUnavailable, imaplib.IMAP4.error, OSError):
                 errors.append(account)
-        return {"accounts": result, "unavailable": errors}
+        return {"accounts": result, "unavailable": errors, "writable_accounts": sorted(SEND_ACCOUNTS)}
 
     def message(self, account: str, folder: str, uid: int) -> dict:
         account = self._account(account)

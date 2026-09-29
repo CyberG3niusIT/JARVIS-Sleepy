@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.mail_integration import MailDenied, MailService
+from core.mail_integration import SEND_ACCOUNTS, MailDenied, MailService
 
 
 class _AllowGate:
@@ -55,6 +55,21 @@ class MailIntegrationSafetyTests(unittest.TestCase):
         gate.start()
         self.addCleanup(gate.stop)
         self.service = MailService(path)
+
+    def test_status_names_writable_accounts_from_backend_policy(self):
+        with patch.object(self.service, "accounts", return_value=["alex@wiesenmaier.org"]), \
+                patch.object(self.service, "unread", return_value=3):
+            status = self.service.all_status()
+        self.assertEqual(status["writable_accounts"], sorted(SEND_ACCOUNTS))
+        self.assertEqual(status["accounts"], [{"account": "alex@wiesenmaier.org", "unread_inbox": 3, "new_24h": 0}])
+
+    def test_unauthenticated_dashboard_shell_has_no_mailbox_identifiers(self):
+        web = Path(__file__).resolve().parents[2] / "web"
+        for name in ("dashboard_mail.html", "dashboard_mail.js"):
+            text = (web / name).read_text(encoding="utf-8").lower()
+            for account in SEND_ACCOUNTS:
+                self.assertNotIn(account, text, name)
+                self.assertNotIn(account.split("@", 1)[1], text, name)
 
     def test_only_two_senders_and_reply_source_is_verified(self):
         with self.assertRaises(MailDenied):
