@@ -2,7 +2,7 @@
 
 ## 01.10.2026: Deutsche Owner-Ausgaben gehärtet
 
-Source-/Mock-Teständerung im Worktree `Main`, Branch `integration/desktop-backend-20260929`, Basis-HEAD `68da00ce056ee9bad9a41918c0a35c97002ef722`. Die Änderung wird als Safepoint-Commit auf demselben Branch gesichert (kein Branchwechsel, kein Merge/Rebase/Force-Push); die Runtime wurde dafür nicht gestartet. Vorhandene Dirty-Änderungen einschließlich der vom Owner autorisierten Dokumentationsverschiebungen wurden erhalten.
+Source-/Mock-Teständerung im Worktree `Main`, Branch `integration/desktop-backend-20260929`, Basis-HEAD `68da00ce056ee9bad9a41918c0a35c97002ef722`. Die Änderung ist als Safepoint-Commit `d43979c876db90dae201d1c3bc8c609f907efbdb` auf demselben Branch gesichert und normal gepusht (kein Branchwechsel, kein Merge/Rebase/Force-Push). Danach wurde die Runtime über `JARVIS-Runtime.ps1` gestartet: `READY`, Voice-Daemon und Desktop-API `READY`; Messwerte und Auffälligkeiten stehen in [12](12_TESTING_QA.md) und [13](13_KNOWN_ISSUES.md). Vorhandene Dirty-Änderungen einschließlich der vom Owner autorisierten Dokumentationsverschiebungen wurden erhalten.
 
 Die zentrale Dokumentation bleibt unter `JARVIS-Sleepy\Dokumentation` erreichbar: Das ist ein Junction auf `Main\Dokumentation` (in WSL als Symlink sichtbar, kein zweiter Bestand). Versioniert werden nur geprüfte Textdokumente; `Dokumentation/LEGACY/` (Binärdateien und Übergaben, ≈ 2,6 GB) ist per `.gitignore` ausgeschlossen. Die 33 aus Root, `docs/`, `governance/`, `reports/`, `systemd/` und `tests/` entfernten Dokumente liegen inhaltsgleich unter `Dokumentation/FINDLINGE/Main/`.
 

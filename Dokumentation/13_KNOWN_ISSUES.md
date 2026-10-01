@@ -13,7 +13,7 @@
 - `LLMRouter` nutzt einen fest codierten lokalen Chat-Completions-Endpunkt; ein separater `LLMServerClient` ist vorhanden, aber im Python-Quellbaum ohne sichtbaren Konstruktor-Aufruf. Die konfigurierten CLI-Pfade belegen nicht den aktiven Routertransport.
 - Der aktive `mcp_servers`-Configblock ist auskommentiert; MCP-Bridge-Code vorhanden, aber kein aktiver Runtime-Server konfiguriert belegt.
 - Ein zentrales ADR-Verzeichnis mit beschlossenen, versionsgebundenen Architekturentscheidungen war in den überprüften Git-Dateien nicht vorhanden.
-- Zentrales Doku-Verzeichnis liegt außerhalb der drei Projekt-Git-Roots; Änderungen dort werden nicht von Git versioniert.
+- Zentrales Doku-Verzeichnis: `JARVIS-Sleepy\Dokumentation` ist seit dem Safepoint vom 01.10.2026 ein Junction auf `Main\Dokumentation` und wird dort versioniert. `Dokumentation/LEGACY/` (Binärdateien, Übergaben) ist per `.gitignore` bewusst ausgeschlossen und nicht unter Git.
 
 ## Offene Punkte Modell-/Voice-Umbau (25.09.2026)
 
@@ -28,3 +28,14 @@
 - Kurze Fragmente <= 1.6 s, die einen Turn eröffnen, werden nicht aggregiert.
 - NPU: Live-Kamera auf NPU und NPU-Wake-Word NOT_IMPLEMENTED; Identitätsschwelle nicht kalibriert; MOTION-Event wird noch nicht emittiert.
 - Vision-Gate: CLOUD_LLM-Gate für Cloud-Route noch nicht verdrahtet.
+
+## Beobachtungen nach Runtime-Start (01.10.2026)
+
+Gemessen nach `JARVIS-Runtime.ps1 -Action start` auf Commit `d43979c`; Ursachen sind nicht der Sprachhärtung zugeordnet und nicht untersucht oder behoben.
+
+- Startup-Sprachausgabe: `speak()` um 18:44:12, Chatterbox meldete `completed in 48.89s` um 18:45:00. Chatterbox begann die Verarbeitung erst um 18:44:33; davor viele MIOpen-Workspace-Warnungen (ROCm-Kaltstart, erste Synthese). Hörbarkeit und Vollständigkeit der Ausgabe wurden nicht geprüft. [Wahrscheinlich: Kaltstart der ersten Synthese]
+- Chatterbox `/health` war von 16:44:34Z bis 16:44:51Z nicht erreichbar (Runtime kurz `DEGRADED`), danach wieder `READY`. [Wahrscheinlich: Health-Anfrage blockiert, solange der Server synthetisiert]; dazu zwei `BrokenPipeError` im Chatterbox-Journal.
+- Zwei `LLM streaming error: Read timed out (read timeout=90)` auf Port 8080 (18:46:23, 18:46:38). Das Primary-LLM hat einen Slot (`id 0`); im llama-Journal sind mehrere abgebrochene Tasks (u. a. ein Prompt mit 5283 Tokens) sichtbar. Auslöser nicht ermittelt; Umgebungssprache ohne Wake-Word wurde gleichzeitig als spekulative Direct-Audio-Turns verworfen. [Vermutung: Slot-Konkurrenz]
+- `Could not open visual report: /mnt/storage/jarvis/skills/system/developer_tools/_display.py` (Pfad außerhalb des Main-Worktrees; Herkunft nicht geprüft).
+- Embedding-Vorladen schlägt fehl (`No HIP GPUs are available`), NewsManager nutzt CPU-Fallback; Google-Calendar-Auth schlägt mit `PermissionError` fehl (Kalender-Sync deaktiviert), `OPENWEATHER_API_KEY`/`PEXELS_API_KEY` fehlen. Das sind Konfigurations-/Umgebungszustände, keine Änderungen dieses Auftrags.
+- Web-API (Port 8091) ist `OFFLINE`; NPU-Sensor `STOPPED`. Desktop-API war vor dem Start `ERROR` und nach dem Start `READY` (127.0.0.1:8092).
