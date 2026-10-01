@@ -162,14 +162,14 @@ def _survey_monitors() -> str:
                 label += " [PRIMARY]"
             lines.append(label)
     else:
-        lines.append("Could not query monitor layout.")
+        lines.append("Die Monitoranordnung konnte nicht abgefragt werden.")
 
     # Get window list from desktop manager
     if _desktop_manager:
         windows = _desktop_manager.list_windows()
         if windows:
             lines.append("")
-            lines.append("Open windows:")
+            lines.append("Geöffnete Fenster:")
             for win in windows:
                 title = win.get("title", "Unknown")
                 wm_class = win.get("wm_class", "")
@@ -181,11 +181,11 @@ def _survey_monitors() -> str:
                     label += f" [monitor {monitor}]"
                     lines.append(label)
         else:
-            lines.append("No windows found.")
+            lines.append("Keine Fenster gefunden.")
     else:
-        lines.append("Desktop manager not available — cannot list windows.")
+        lines.append("Die Desktopverwaltung ist nicht verfügbar; Fenster können nicht aufgelistet werden.")
 
-    return "\n".join(lines) if lines else "No monitor information available."
+    return "\n".join(lines) if lines else "Keine Monitorinformationen verfügbar."
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +199,7 @@ def _capture_screenshot(args: dict) -> dict | str:
 
     if not _desktop_manager:
         logger.error("Desktop manager not available for screenshot capture")
-        return "Error: Desktop manager not available — cannot capture screenshot."
+        return "Fehler: Die Desktopverwaltung ist nicht verfügbar; ein Bildschirmfoto kann nicht erstellt werden."
 
     # Specific monitor by output name: capture full desktop, crop with PIL
     if output_name:
@@ -213,13 +213,13 @@ def _capture_screenshot(args: dict) -> dict | str:
     if target == "all":
         screenshot_path = _desktop_manager.take_screenshot(target="all")
         if not screenshot_path:
-            return "Error: Screenshot capture failed."
+            return "Fehler: Das Bildschirmfoto konnte nicht erstellt werden."
         return _encode_and_cleanup(screenshot_path, "all monitors", max_width=1920)
 
     # Active window
     screenshot_path = _desktop_manager.take_screenshot(target=target)
     if not screenshot_path:
-        return "Error: Screenshot capture failed."
+        return "Fehler: Das Bildschirmfoto konnte nicht erstellt werden."
     return _encode_and_cleanup(screenshot_path, target)
 
 
@@ -232,7 +232,7 @@ def _capture_focused_monitor() -> dict | str:
     monitors = _parse_monitors()
     if not monitors:
         logger.error("Could not detect monitors via xrandr")
-        return "Error: Could not detect monitors."
+        return "Fehler: Die Monitore konnten nicht erkannt werden."
 
     # Try to get focused window's monitor index from GNOME D-Bus
     target_name = None
@@ -266,7 +266,7 @@ def _capture_specific_monitor(output_name: str) -> dict | str:
     if not target_mon:
         available = ", ".join(m["name"] for m in monitors)
         logger.error("Monitor '%s' not found. Available: %s", output_name, available)
-        return f"Error: Monitor '{output_name}' not found. Available: {available}"
+        return f"Fehler: Monitor '{output_name}' nicht gefunden. Verfügbar: {available}"
 
     # Capture full desktop
     full_path = f"/tmp/jarvis_screenshot_full_{int(time.time())}.png"
@@ -274,7 +274,7 @@ def _capture_specific_monitor(output_name: str) -> dict | str:
         target="all", output_path=full_path,
     )
     if not screenshot_path:
-        return "Error: Full desktop screenshot failed."
+        return "Fehler: Das Desktopbild konnte nicht erstellt werden."
 
     try:
         from PIL import Image
@@ -307,11 +307,11 @@ def _capture_specific_monitor(output_name: str) -> dict | str:
     except ImportError:
         _try_unlink(screenshot_path)
         logger.error("PIL not available for monitor crop")
-        return "Error: PIL not available — cannot crop to specific monitor."
+        return "Fehler: PIL ist nicht verfügbar; das Monitorbild kann nicht zugeschnitten werden."
     except Exception as e:
         _try_unlink(screenshot_path)
-        logger.error("Screenshot crop failed: %s", e)
-        return f"Error cropping screenshot: {e}"
+        logger.error("Screenshot crop failed: %s", type(e).__name__)
+        return f"Fehler: Das Bildschirmfoto konnte nicht zugeschnitten werden."
 
 
 def _encode_and_cleanup(screenshot_path: str, target: str,
@@ -359,8 +359,8 @@ def _encode_and_cleanup(screenshot_path: str, target: str,
         }
     except Exception as e:
         _try_unlink(screenshot_path)
-        logger.error("Screenshot encode failed: %s", e)
-        return f"Error reading screenshot: {e}"
+        logger.error("Screenshot encode failed: %s", type(e).__name__)
+        return f"Fehler: Das Bildschirmfoto konnte nicht gelesen werden."
 
 
 def _try_unlink(path: str):

@@ -48,10 +48,32 @@ wait_for_handover || exit 1   # before the EXIT trap: a refusal leaves the lifec
 trap finish_lifecycle EXIT
 if [[ "$lifecycle_action" == stop ]]; then record_lifecycle running; fi
 
+verify_stopped() {
+    local unit="$1" active result main_pid
+    if ! active="$(systemctl --user show "$unit" --property=ActiveState --value)" \
+            || ! result="$(systemctl --user show "$unit" --property=Result --value)" \
+            || ! main_pid="$(systemctl --user show "$unit" --property=MainPID --value)"; then
+        echo "ERROR: Stop-Zustand von $unit konnte nicht geprüft werden."
+        return 1
+    fi
+    if [[ "$active" != inactive || "$result" != success || "$main_pid" != 0 ]]; then
+        echo "ERROR: $unit ist nicht sauber gestoppt (ActiveState=$active, Result=$result, MainPID=$main_pid)."
+        return 1
+    fi
+}
+
 # The read-only desktop API goes first (it only reads what the voice daemon writes). Only this checkout's
 # unit is stopped; a foreign one is reported and left alone, and never blocks stopping the voice backend.
 desktop_unit=jarvis-desktop-api.service
-desktop_state="$(systemctl --user show $desktop_unit --property=LoadState --value 2>/dev/null || true)"
+stop_error=0
+desktop_state="$(systemctl --user show $desktop_unit --property=LoadState --value)" || {
+    echo "ERROR: Stop-Zustand von $desktop_unit konnte nicht geprüft werden."
+    exit 1
+}
+[[ "$desktop_state" == loaded || "$desktop_state" == not-found ]] || {
+    echo "ERROR: $desktop_unit ist nicht korrekt geladen."
+    exit 1
+}
 if [[ "$desktop_state" == loaded ]]; then
     desktop_fragment_real="$(readlink -f "$(systemctl --user show $desktop_unit --property=FragmentPath --value 2>/dev/null || true)" 2>/dev/null || true)"
     desktop_unit_real="$(readlink -f "$JARVIS_ROOT/systemd/$desktop_unit" 2>/dev/null || true)"
@@ -59,19 +81,22 @@ if [[ "$desktop_state" == loaded ]]; then
     if [[ -n "$desktop_unit_real" && "$desktop_fragment_real" == "$desktop_unit_real" \
           && "$desktop_exec" == *"$JARVIS_ROOT/jarvis_web.py"* && "$desktop_exec" == *"--desktop-mode"* ]]; then
         if systemctl --user is-active --quiet $desktop_unit; then
-            systemctl --user stop $desktop_unit
+            systemctl --user stop $desktop_unit || stop_error=1
         fi
-        if systemctl --user is-active --quiet $desktop_unit; then
-            echo "ERROR: $desktop_unit ist nach Stop weiterhin aktiv."
-            exit 1
-        fi
+        # A failed reader stop must remain an error, but must not leave
+        # the voice backend listening after the owner requested a stop.
+        verify_stopped "$desktop_unit" || stop_error=1
     else
         echo "WARN: $desktop_unit gehört nicht zu diesem Checkout; unverändert gelassen."
     fi
 fi
 
-state="$(systemctl --user show jarvis.service --property=LoadState --value 2>/dev/null || true)"
-if [[ "$state" == not-found || -z "$state" ]]; then
+state="$(systemctl --user show jarvis.service --property=LoadState --value)" || {
+    echo "ERROR: Stop-Zustand von jarvis.service konnte nicht geprüft werden."
+    exit 1
+}
+if [[ "$state" == not-found ]]; then
+    (( stop_error == 0 )) || exit 1
     echo "STOPPED: jarvis.service ist nicht installiert."
     exit 0
 fi
@@ -88,8 +113,6 @@ execstart="$(systemctl --user show jarvis.service --property=ExecStart --value 2
 if systemctl --user is-active --quiet jarvis.service; then
     systemctl --user stop jarvis.service
 fi
-if systemctl --user is-active --quiet jarvis.service; then
-    echo "ERROR: jarvis.service ist nach Stop weiterhin aktiv."
-    exit 1
-fi
+verify_stopped jarvis.service || exit 1
+(( stop_error == 0 )) || exit 1
 echo "STOPPED: JARVIS-Backend beendet; LLM, Chatterbox und VVS bleiben unverändert."

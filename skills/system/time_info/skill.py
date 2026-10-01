@@ -57,13 +57,13 @@ class TimeInfoSkill(BaseSkill):
                     return data['handler']()
             
             self.logger.error(f"Semantic handler not found: {handler_name}")
-            return "I'm sorry, I couldn't process that request."
+            return "Ich konnte diese Anfrage nicht verarbeiten."
         
         # Regular exact pattern match
         handler = self.intents.get(intent, {}).get("handler")
         if handler:
             return handler()
-        return "I'm sorry, I couldn't process that request."
+        return "Ich konnte diese Anfrage nicht verarbeiten."
     
     def get_time(self) -> str:
         """Get current time"""
@@ -90,7 +90,7 @@ class TimeInfoSkill(BaseSkill):
             
         except Exception as e:
             self.logger.error(f"Error getting time: {e}")
-            return self.respond("I'm sorry, I couldn't retrieve the time.")
+            return self.respond("Ich konnte die Uhrzeit nicht abrufen.")
     
     def get_date(self) -> str:
         """Get current date"""
@@ -114,7 +114,7 @@ class TimeInfoSkill(BaseSkill):
             
         except Exception as e:
             self.logger.error(f"Error getting date: {e}")
-            return self.respond("I'm sorry, I couldn't retrieve the date.")
+            return self.respond("Ich konnte das Datum nicht abrufen.")
 
 # BEGIN JARVIS DE-DE TIME
 def _de_get_time(self) -> str:

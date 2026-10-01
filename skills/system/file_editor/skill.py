@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import Optional
 
 from core.base_skill import BaseSkill
+from core.confirmation_matching import parse_confirmation
 from core.llm_router import LLMRouter
-from core.web_research import WebResearcher
+from core.web_research import WebResearcher, run_search
 
 
 def _import_sibling(name: str):
@@ -281,7 +282,7 @@ class FileEditorSkill(BaseSkill):
             handler = self.semantic_intents[intent]['handler']
             return handler(entities)
         self.logger.error(f"Unknown intent: {intent}")
-        return f"I'm sorry, I don't understand that command, {self.honorific}."
+        return f"Diese Anweisung habe ich nicht verstanden, {self.honorific}."
 
     # ------------------------------------------------------------------
     # Path safety
@@ -338,8 +339,8 @@ class FileEditorSkill(BaseSkill):
         # Check file count limit
         existing_count = len(list(SHARE_DIR.iterdir())) if SHARE_DIR.exists() else 0
         if existing_count >= MAX_FILES_IN_SHARE:
-            return (f"The share folder already has {existing_count} files, {self.honorific}. "
-                    "Please delete some before creating new ones.")
+            return (f"Der Freigabeordner enthält bereits {existing_count} Dateien, {self.honorific}. "
+                    "Bitte lösche zuerst einige Dateien.")
 
         # Step 1: Parse request — extract filename, filetype, description
         parse_prompt = (
@@ -357,12 +358,12 @@ class FileEditorSkill(BaseSkill):
         filename, filetype, description = self._parse_file_request(parse_result, user_text)
 
         if not filename:
-            return f"I couldn't determine a filename from your request, {self.honorific}. Could you specify one?"
+            return f"Ich konnte keinen Dateinamen aus deiner Anfrage bestimmen, {self.honorific}. Bitte nenne einen Dateinamen."
 
         # Check if file exists — ask for overwrite confirmation
         target = self._safe_path(filename)
         if not target:
-            return f"That filename isn't valid, {self.honorific}. Please use a simple name like 'script.py'."
+            return f"Dieser Dateiname ist ungültig, {self.honorific}. Bitte verwende einen einfachen Namen wie 'script.py'."
 
         if target.exists():
             self._pending_confirmation = ('overwrite', {
@@ -372,7 +373,7 @@ class FileEditorSkill(BaseSkill):
                 'user_text': user_text,
             }, time.time() + 30)
             self.conversation.request_follow_up = 30.0
-            return f"{filename} already exists in the share, {self.honorific}. Shall I overwrite it?"
+            return f"{filename} existiert bereits im Freigabeordner, {self.honorific}. Soll ich die Datei überschreiben?"
 
         # Step 2: Generate content
         return self._generate_and_save(filename, filetype, description, user_text)
@@ -410,7 +411,9 @@ class FileEditorSkill(BaseSkill):
 
     def _generate_and_save(self, filename: str, filetype: str, description: str, user_text: str) -> str:
         """Generate file content via LLM and save to share/."""
+        from core.persona import OWNER_LANGUAGE_RULE
         gen_prompt = (
+            f"{OWNER_LANGUAGE_RULE}\n"
             f"Generate the content for a {filetype or 'text'} file.\n\n"
             f"Description: {description}\n"
             f"Original request: {user_text}\n\n"
@@ -426,13 +429,13 @@ class FileEditorSkill(BaseSkill):
 
         # Check size limit
         if len(content.encode('utf-8')) > MAX_WRITE_BYTES:
-            return (f"The generated content exceeds the 50KB limit, {self.honorific}. "
-                    "Try a simpler request.")
+            return (f"Der erzeugte Inhalt überschreitet die Grenze von 50 KB, {self.honorific}. "
+                    "Versuche eine einfachere Anfrage.")
 
         # Save
         target = self._safe_path(filename)
         if not target:
-            return f"Invalid filename, {self.honorific}."
+            return f"Ungültiger Dateiname, {self.honorific}."
 
         target.write_text(content, encoding='utf-8')
 
@@ -443,8 +446,8 @@ class FileEditorSkill(BaseSkill):
         size = target.stat().st_size
         lines = content.count('\n') + 1
         self.logger.info(f"[file_editor] write_file → share/{filename} ({size} bytes, {lines} lines)")
-        return (f"Done, {self.honorific}. I've created {filename} in the share folder — "
-                f"{lines} lines, {self._human_size(size)}.")
+        return (f"Erledigt, {self.honorific}. Ich habe {filename} im Freigabeordner erstellt: "
+                f"{lines} Zeilen, {self._human_size(size)}.")
 
     # ------------------------------------------------------------------
     # Intent: edit_file
@@ -461,28 +464,30 @@ class FileEditorSkill(BaseSkill):
             files = [f.name for f in SHARE_DIR.iterdir() if f.is_file()] if SHARE_DIR.exists() else []
             if files:
                 file_list = ', '.join(files[:10])
-                return (f"Which file would you like me to edit, {self.honorific}? "
-                        f"I have: {file_list}")
-            return f"There are no files in the share folder to edit, {self.honorific}."
+                return (f"Welche Datei soll ich bearbeiten, {self.honorific}? "
+                        f"Verfügbar sind: {file_list}")
+            return f"Im Freigabeordner gibt es keine Dateien zum Bearbeiten, {self.honorific}."
 
         target = self._safe_path(filename)
         if not target or not target.exists():
-            return f"I can't find {filename} in the share folder, {self.honorific}."
+            return f"Ich kann {filename} im Freigabeordner nicht finden, {self.honorific}."
 
         # Check size limits
         stat = target.stat()
         if stat.st_size > MAX_EDIT_BYTES:
-            return (f"{filename} is too large to edit by voice ({self._human_size(stat.st_size)}), "
-                    f"{self.honorific}. The limit is 15KB.")
+            return (f"{filename} ist für die Sprachbearbeitung zu groß ({self._human_size(stat.st_size)}), "
+                    f"{self.honorific}. Die Grenze beträgt 15 KB.")
 
         content = target.read_text(encoding='utf-8', errors='replace')
         line_count = content.count('\n') + 1
         if line_count > MAX_EDIT_LINES:
-            return (f"{filename} has {line_count} lines, which exceeds the editing limit of "
+            return (f"{filename} hat {line_count} Zeilen und überschreitet die Bearbeitungsgrenze von "
                     f"{MAX_EDIT_LINES}, {self.honorific}.")
 
         # LLM rewrite
+        from core.persona import OWNER_LANGUAGE_RULE
         edit_prompt = (
+            f"{OWNER_LANGUAGE_RULE}\n"
             f"Here is the current content of {filename}:\n\n"
             f"{content}\n\n"
             f"Edit instruction: {user_text}\n\n"
@@ -502,8 +507,8 @@ class FileEditorSkill(BaseSkill):
         new_lines = new_content.count('\n') + 1
         new_size = target.stat().st_size
         self.logger.info(f"[file_editor] edit_file → {filename} ({new_size} bytes, {new_lines} lines)")
-        return (f"Done, {self.honorific}. I've updated {filename} — "
-                f"{new_lines} lines, {self._human_size(new_size)}.")
+        return (f"Erledigt, {self.honorific}. Ich habe {filename} aktualisiert: "
+                f"{new_lines} Zeilen, {self._human_size(new_size)}.")
 
     # ------------------------------------------------------------------
     # Intent: list_share
@@ -513,13 +518,13 @@ class FileEditorSkill(BaseSkill):
         """List files in the share/ directory."""
         self.logger.info("[file_editor] list_share_contents")
         if not SHARE_DIR.exists():
-            return f"The share folder is empty, {self.honorific}."
+            return f"Der Freigabeordner ist leer, {self.honorific}."
 
         files = sorted(SHARE_DIR.iterdir())
         files = [f for f in files if f.is_file()]
 
         if not files:
-            return f"The share folder is empty, {self.honorific}."
+            return f"Der Freigabeordner ist leer, {self.honorific}."
 
         entries = []
         for f in files:
@@ -528,7 +533,7 @@ class FileEditorSkill(BaseSkill):
 
         listing = '\n'.join(entries)
         count = len(files)
-        summary = f"There {'is' if count == 1 else 'are'} {count} file{'s' if count != 1 else ''} in the share folder"
+        summary = f"Im Freigabeordner liegen {count} Dateien"
 
         # Voice mode: just the summary
         # Console: summary + listing
@@ -584,12 +589,12 @@ class FileEditorSkill(BaseSkill):
             files = [f.name for f in SHARE_DIR.iterdir() if f.is_file()] if SHARE_DIR.exists() else []
             if files:
                 file_list = ', '.join(files[:10])
-                return (f"Which file would you like me to read, {self.honorific}? "
-                        f"I have: {file_list}")
-            return f"There are no files in the share folder, {self.honorific}."
+                return (f"Welche Datei soll ich lesen, {self.honorific}? "
+                        f"Verfügbar sind: {file_list}")
+            return f"Im Freigabeordner gibt es keine Dateien, {self.honorific}."
 
         if not target.exists():
-            return f"I can't find that file, {self.honorific}."
+            return f"Ich kann diese Datei nicht finden, {self.honorific}."
 
         content = target.read_text(encoding='utf-8', errors='replace')
         lines = content.count('\n') + 1
@@ -598,7 +603,7 @@ class FileEditorSkill(BaseSkill):
         # For voice mode: LLM summary. For console: show full content.
         # We return full content — the pipeline/console handles display.
         # Prefix with a spoken summary, then the raw content.
-        header = f"Here's {target.name}, {self.honorific} — {lines} lines, {size}:\n\n"
+        header = f"Hier ist {target.name}, {self.honorific}: {lines} Zeilen, {size}:\n\n"
         return header + content
 
     # ------------------------------------------------------------------
@@ -615,18 +620,18 @@ class FileEditorSkill(BaseSkill):
             files = [f.name for f in SHARE_DIR.iterdir() if f.is_file()] if SHARE_DIR.exists() else []
             if files:
                 file_list = ', '.join(files[:10])
-                return (f"Which file should I delete, {self.honorific}? "
-                        f"I have: {file_list}")
-            return f"The share folder is empty, {self.honorific}. Nothing to delete."
+                return (f"Welche Datei soll ich löschen, {self.honorific}? "
+                        f"Verfügbar sind: {file_list}")
+            return f"Der Freigabeordner ist leer, {self.honorific}. Es gibt nichts zu löschen."
 
         target = self._safe_path(filename)
         if not target or not target.exists():
-            return f"I can't find {filename} in the share folder, {self.honorific}."
+            return f"Ich kann {filename} im Freigabeordner nicht finden, {self.honorific}."
 
         # Always require confirmation for delete
         self._pending_confirmation = ('delete', {'filename': filename}, time.time() + 30)
         self.conversation.request_follow_up = 30.0
-        return f"Delete {filename} from the share, {self.honorific}? This cannot be undone."
+        return f"Soll ich {filename} aus dem Freigabeordner löschen, {self.honorific}? Das kann nicht rückgängig gemacht werden."
 
     # ------------------------------------------------------------------
     # Intent: create_presentation
@@ -668,7 +673,7 @@ class FileEditorSkill(BaseSkill):
         # Step 1: Parse the request
         params = self._parse_document_request(user_text)
         if not params:
-            return f"I couldn't understand that document request, {self.honorific}. Could you rephrase it?"
+            return f"Ich habe diese Dokumentanfrage nicht verstanden, {self.honorific}. Bitte formuliere sie anders."
 
         # Override to presentation type
         params["doc_type"] = "presentation"
@@ -713,8 +718,8 @@ class FileEditorSkill(BaseSkill):
         modified_structure = self._interpret_edit(
             cache.structure, user_text, cache.research_context)
         if not modified_structure:
-            return (f"I had trouble understanding that edit, {self.honorific}. "
-                    "Could you rephrase it?")
+            return (f"Ich habe diese Bearbeitungsanfrage nicht verstanden, {self.honorific}. "
+                    "Bitte formuliere sie anders.")
 
         # Re-render from modified structure
         theme_name = cache.params.get('theme', 'professional')
@@ -743,9 +748,9 @@ class FileEditorSkill(BaseSkill):
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
         if not output_path:
-            return (f"I encountered an error re-rendering the presentation, "
-                    f"{self.honorific}. The previous version is still in "
-                    "the share folder.")
+            return (f"Beim erneuten Erstellen der Präsentation ist ein Fehler aufgetreten, "
+                    f"{self.honorific}. Die vorige Version liegt weiterhin im "
+                    "Freigabeordner.")
 
         # Update cache with modified structure + reset TTL
         self._pipeline_cache = _PipelineCache(
@@ -759,8 +764,8 @@ class FileEditorSkill(BaseSkill):
         self._last_generated_file = output_path
 
         slide_count = len(modified_structure.get('slides', []))
-        return (f"Done, {self.honorific}. I've updated {filename} — "
-                f"{slide_count} slides. Want any other changes?")
+        return (f"Erledigt, {self.honorific}. Ich habe {filename} aktualisiert: "
+                f"{slide_count} Folien. Möchtest du weitere Änderungen?")
 
     def _interpret_edit(self, current_structure: dict, edit_request: str,
                         research_context: str = "") -> Optional[dict]:
@@ -778,7 +783,9 @@ class FileEditorSkill(BaseSkill):
 
         slide_types_str = ", ".join(VALID_SLIDE_TYPES)
 
+        from core.persona import OWNER_LANGUAGE_RULE
         edit_prompt = (
+            f"{OWNER_LANGUAGE_RULE}\n"
             "You are editing an existing presentation structure.\n\n"
             f"CURRENT STRUCTURE:\n{compact}\n\n"
             f"{research_block}"
@@ -841,7 +848,7 @@ class FileEditorSkill(BaseSkill):
         # Step 1: Parse the request
         params = self._parse_document_request(user_text)
         if not params:
-            return f"I couldn't understand that document request, {self.honorific}. Could you rephrase it?"
+            return f"Ich habe diese Dokumentanfrage nicht verstanden, {self.honorific}. Bitte formuliere sie anders."
 
         # Determine format
         text_lower = user_text.lower()
@@ -967,13 +974,14 @@ class FileEditorSkill(BaseSkill):
         key_points = params.get('key_points', 'auto')
         theme_name = params.get('theme', 'professional')
 
-        self.logger.info(f"[file_editor] generating {doc_type}: topic={topic!r}, "
-                         f"slides={slide_count}, file={filename}")
+        self.logger.info("[file_editor] generating %s: slides=%s", doc_type, slide_count)
 
         # Step 2: Web research (if needed)
         research_context = ""
         if params.get('research_needed', False):
             research_context = self._do_research(topic, key_points)
+            if not research_context:
+                return "Ich kann die benötigten aktuellen Informationen gerade nicht abrufen. Das Dokument wurde nicht erstellt."
 
         # Step 3: Generate structure via LLM
         structure = self._generate_structure(
@@ -981,8 +989,8 @@ class FileEditorSkill(BaseSkill):
             doc_type=doc_type,
         )
         if not structure:
-            return (f"I had trouble generating the document structure, {self.honorific}. "
-                    "Could you try rephrasing your request?")
+            return (f"Ich konnte die Dokumentstruktur nicht erstellen, {self.honorific}. "
+                    "Bitte formuliere deine Anfrage anders.")
 
         # Step 4: Search for images (Pexels)
         images = {}
@@ -1025,8 +1033,8 @@ class FileEditorSkill(BaseSkill):
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
         if not output_path:
-            return (f"I encountered an error creating the document, {self.honorific}. "
-                    "Please try again.")
+            return (f"Beim Erstellen des Dokuments ist ein Fehler aufgetreten, {self.honorific}. "
+                    "Bitte versuche es erneut.")
 
         # Remember for follow-up "open it" commands
         self._last_generated_file = output_path
@@ -1055,35 +1063,36 @@ class FileEditorSkill(BaseSkill):
 
         slide_count_actual = len(structure.get('slides', []))
         img_count = len(images)
-        img_note = f" with {img_count} images" if img_count > 0 else ""
+        img_note = f" mit {img_count} Bildern" if img_count > 0 else ""
 
         if doc_type == 'presentation':
-            return (f"Done, {self.honorific}. I've created {output_path.name} — "
-                    f"{slide_count_actual} slides{img_note} in the share folder.")
+            return (f"Erledigt, {self.honorific}. Ich habe {output_path.name} erstellt: "
+                    f"{slide_count_actual} Folien{img_note} im Freigabeordner.")
         elif doc_type == 'pdf':
             if output_path.suffix == '.pdf':
-                return (f"Done, {self.honorific}. I've created {output_path.name} — "
-                        f"{slide_count_actual} sections{img_note} in the share folder.")
+                return (f"Erledigt, {self.honorific}. Ich habe {output_path.name} erstellt: "
+                        f"{slide_count_actual} Abschnitte{img_note} im Freigabeordner.")
             else:
-                return (f"I couldn't convert to PDF, {self.honorific}, but I've saved it as "
-                        f"{output_path.name} — {slide_count_actual} sections{img_note} "
-                        "in the share folder.")
+                return (f"Ich konnte keine PDF erstellen, {self.honorific}, aber ich habe das Dokument gespeichert als "
+                        f"{output_path.name} — {slide_count_actual} Abschnitte{img_note} "
+                        "im Freigabeordner.")
         else:
-            return (f"Done, {self.honorific}. I've created {output_path.name} — "
-                    f"{slide_count_actual} sections{img_note} in the share folder.")
+            return (f"Erledigt, {self.honorific}. Ich habe {output_path.name} erstellt: "
+                    f"{slide_count_actual} Abschnitte{img_note} im Freigabeordner.")
 
     def _do_research(self, topic: str, key_points: str = "auto") -> str:
         """Perform web research on the topic and return formatted context."""
-        self.logger.info(f"[file_editor] researching: {topic}")
+        self.logger.info("[file_editor] researching")
 
         # Build search query
         search_query = topic
         if key_points and key_points != "auto":
             search_query += f" {key_points.split(',')[0].strip()}"
 
-        results = self._web_researcher.search(search_query, max_results=5)
-        if not results:
-            self.logger.warning(f"[file_editor] no search results for: {search_query}")
+        outcome = run_search(self._web_researcher, search_query, max_results=5)
+        results = outcome.results
+        if not outcome.has_results:
+            self.logger.warning("[file_editor] research incomplete: %s", outcome.status)
             return ""
 
         pages = self._web_researcher.fetch_pages_parallel(
@@ -1261,7 +1270,9 @@ class FileEditorSkill(BaseSkill):
 
         layout_json = json.dumps(layout, indent=2)
 
+        from core.persona import OWNER_LANGUAGE_RULE
         content_prompt = (
+            f"{OWNER_LANGUAGE_RULE}\n"
             f'Generate full presentation content for a {analysis_type} about "{topic}".\n'
             f'Today\'s date: March 2026.\n'
             f'{research_block}'
@@ -1379,7 +1390,9 @@ class FileEditorSkill(BaseSkill):
             '4. Use **bold lead phrases** at the start of bullets using **double asterisks**.\n'
         )
 
+        from core.persona import OWNER_LANGUAGE_RULE
         structure_prompt = (
+            f"{OWNER_LANGUAGE_RULE}\n"
             f'Create a structured outline for a {slide_count}-section '
             f'{analysis_type} about "{topic}".\n'
             f'Today\'s date: March 2026.\n'
@@ -1539,8 +1552,8 @@ class FileEditorSkill(BaseSkill):
         if self._last_generated_file and self._last_generated_file.exists():
             return self._open_file_with_app(self._last_generated_file)
 
-        return (f"I don't have a recent document to open, {self.honorific}. "
-                "Could you specify which file?")
+        return (f"Es gibt kein aktuelles Dokument zum Öffnen, {self.honorific}. "
+                "Welche Datei meinst du?")
 
     def _open_file_with_app(self, file_path: Path) -> str:
         """Open a file using xdg-open via the desktop manager."""
@@ -1548,7 +1561,7 @@ class FileEditorSkill(BaseSkill):
         desktop = get_desktop_manager()
         if desktop and desktop.open_file(str(file_path)):
             self.logger.info(f"[file_editor] opened {file_path.name}")
-            return f"Opening {file_path.name}, {self.honorific}."
+            return f"Ich öffne {file_path.name}, {self.honorific}."
         # Fallback: try subprocess directly
         try:
             import subprocess
@@ -1557,18 +1570,18 @@ class FileEditorSkill(BaseSkill):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            return f"Opening {file_path.name}, {self.honorific}."
+            return f"Ich öffne {file_path.name}, {self.honorific}."
         except Exception as e:
             self.logger.error(f"[file_editor] failed to open {file_path}: {e}")
-            return (f"I couldn't open {file_path.name}, {self.honorific}. "
-                    "You can find it in the share folder.")
+            return (f"Ich konnte {file_path.name} nicht öffnen, {self.honorific}. "
+                    "Du findest sie im Freigabeordner.")
 
     # ------------------------------------------------------------------
     # Intent: print_document
     # ------------------------------------------------------------------
 
     def print_document(self, entities: dict) -> str:
-        """Print a document from the share folder."""
+        """Print a document from Freigabeordner."""
         import subprocess
 
         user_text = entities.get('original_text', '')
@@ -1589,8 +1602,8 @@ class FileEditorSkill(BaseSkill):
             target = self._last_generated_file
 
         if not target:
-            return (f"I don't have a document to print, {self.honorific}. "
-                    "Could you specify which file?")
+            return (f"Es gibt kein Dokument zum Drucken, {self.honorific}. "
+                    "Welche Datei meinst du?")
 
         # Detect available printer
         try:
@@ -1611,12 +1624,12 @@ class FileEditorSkill(BaseSkill):
                         break
         except Exception as e:
             self.logger.error(f"[file_editor] printer detection failed: {e}")
-            return (f"I couldn't detect a printer, {self.honorific}. "
-                    "Please check that your printer is connected.")
+            return (f"Ich konnte keinen Drucker erkennen, {self.honorific}. "
+                    "Bitte prüfe, ob der Drucker angeschlossen ist.")
 
         if not printer:
-            return (f"No printers found on the system, {self.honorific}. "
-                    "Please check your printer connection.")
+            return (f"Keine Drucker auf dem System gefunden, {self.honorific}. "
+                    "Bitte prüfe die Druckerverbindung.")
 
         # Send to printer
         try:
@@ -1626,15 +1639,15 @@ class FileEditorSkill(BaseSkill):
             )
             if result.returncode == 0:
                 self.logger.info(f"[file_editor] sent {target.name} to {printer}")
-                return (f"Sent {target.name} to the printer, {self.honorific}.")
+                return (f"{target.name} an den Drucker gesendet, {self.honorific}.")
             else:
                 self.logger.error(f"[file_editor] lp failed: {result.stderr}")
-                return (f"The print command failed, {self.honorific}. "
+                return (f"Der Druckbefehl ist fehlgeschlagen, {self.honorific}. "
                         f"{result.stderr.strip()}")
         except Exception as e:
             self.logger.error(f"[file_editor] print failed: {e}")
-            return (f"I couldn't send the file to the printer, {self.honorific}. "
-                    f"Error: {e}")
+            return (f"Ich konnte die Datei nicht an den Drucker senden, {self.honorific}. "
+                    f"Fehler: {e}")
 
     # ------------------------------------------------------------------
     # Confirmation handler
@@ -1649,21 +1662,18 @@ class FileEditorSkill(BaseSkill):
 
         if time.time() > expiry:
             self._pending_confirmation = None
-            return f"That confirmation has expired, {self.honorific}. Please issue the command again."
+            return f"Diese Bestätigung ist abgelaufen, {self.honorific}. Bitte gib die Anweisung erneut."
 
-        text = entities.get('original_text', '').lower()
-        # German first (this is the active language) — English kept as a
-        # fallback since text may still arrive un-normalized.
-        affirmatives = {
-            'ja', 'jep', 'mach das', 'weiter', 'los', 'bestätigt', 'klar',
-            'yes', 'yeah', 'yep', 'go ahead', 'proceed', 'do it', 'confirmed', 'affirmative', 'sure',
-        }
-        negatives = {
-            'nein', 'abbrechen', 'stopp', 'stop', 'vergiss es', 'lass es',
-            'no', 'nope', 'cancel', 'abort', 'never mind', "don't",
-        }
+        decision = parse_confirmation(entities.get('original_text', ''))
+        if decision is False:
+            self._pending_confirmation = None
+            return random.choice([
+                f"Abgebrochen, {self.honorific}.",
+                f"Sehr gut, {self.honorific}. Vorgang abgebrochen.",
+                f"Verstanden, {self.honorific}. Ich lasse es.",
+            ])
 
-        if any(word in text for word in affirmatives):
+        if decision is True:
             self._pending_confirmation = None
 
             if action == 'delete':
@@ -1686,14 +1696,6 @@ class FileEditorSkill(BaseSkill):
                 )
 
             return f"Erledigt, {self.honorific}."
-
-        if any(word in text for word in negatives):
-            self._pending_confirmation = None
-            return random.choice([
-                f"Abgebrochen, {self.honorific}.",
-                f"Sehr gut, {self.honorific}. Vorgang abgebrochen.",
-                f"Verstanden, {self.honorific}. Ich lasse es.",
-            ])
 
         return f"Das habe ich nicht verstanden, {self.honorific}. Soll ich fortfahren oder abbrechen?"
 

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Callable
 
 from core.logger import get_logger
+from core.privacy_gate import Capability, get_privacy_gate
 from core.honorific import get_honorific, set_honorific
 
 
@@ -102,6 +103,8 @@ class ReminderManager:
 
         # Background thread state
         self._running = False
+        self._stop_event = threading.Event()
+        self._startup_timer = None
         self._poll_thread = None
         self._announcing_missed = False
         # Session #8 (agentic-audit): see NewsManager's identical field
@@ -242,14 +245,10 @@ class ReminderManager:
         time_str = reminder_time.strftime("%Y-%m-%d %H:%M:%S")
         event_time_str = event_time.strftime("%Y-%m-%d %H:%M:%S") if event_time else None
 
-        # Push to Google Calendar first (so we can store the event ID)
+        # Local reminders never implicitly mutate a remote calendar. Calendar
+        # changes require the existing explicit skill confirmation route.
+        get_privacy_gate().assert_allowed(Capability.MEMORY_WRITE)
         google_event_id = None
-        if not _skip_calendar_push and self._calendar_manager:
-            # Push the actual event time, not the offset reminder time
-            push_time = event_time if event_time else reminder_time
-            google_event_id = self._calendar_manager.create_event(
-                title, push_time, priority, description
-            )
 
         with self._db_lock:
             conn = self._conn()
@@ -268,12 +267,7 @@ class ReminderManager:
             finally:
                 conn.close()
 
-        self.logger.info(
-            f"Reminder #{rid} created: '{title}' at {time_str} "
-            f"{'(event at ' + event_time_str + ') ' if event_time_str else ''}"
-            f"(priority={priority}, type={reminder_type}, by={created_by}, via={origin_endpoint}"
-            f"{', gcal=' + google_event_id if google_event_id else ''})"
-        )
+        self.logger.info("Reminder operation: content suppressed")
         return rid
 
     def get_reminder(self, reminder_id: int) -> Optional[Dict]:
@@ -335,6 +329,20 @@ class ReminderManager:
             finally:
                 conn.close()
 
+    def list_range(self, start_str, end_str, created_by):
+        """Read actual pending/fired reminder times, including calendar copies."""
+        if not created_by:
+            return []
+        with self._db_lock:
+            conn = self._conn()
+            try:
+                return [dict(row) for row in conn.execute(
+                    "SELECT * FROM reminders WHERE status IN ('pending','fired') "
+                    "AND reminder_time >= ? AND reminder_time < ? AND created_by = ? "
+                    "ORDER BY reminder_time", (start_str, end_str, created_by)).fetchall()]
+            finally:
+                conn.close()
+
     def _query_rundown_reminders(self, start_str: str, end_str: str,
                                 created_by: str = None) -> List[Dict]:
         """Query reminders for rundown display over a date window.
@@ -351,9 +359,12 @@ class ReminderManager:
         with self._db_lock:
             conn = self._conn()
             try:
-                args = [start_str, end_str, start_str, end_str]
+                args = [start_str, end_str]
                 if created_by:
-                    args.extend([created_by, created_by])
+                    args.append(created_by)
+                args.extend([start_str, end_str])
+                if created_by:
+                    args.append(created_by)
                 rows = conn.execute(
                     "SELECT * FROM reminders WHERE ("
                     "  (google_event_id IS NOT NULL AND event_time IS NOT NULL"
@@ -371,7 +382,8 @@ class ReminderManager:
 
     def cancel_reminder(self, reminder_id: int) -> bool:
         """Cancel a reminder by ID."""
-        # Get reminder first so we can clean up Google Calendar
+        get_privacy_gate().assert_allowed(Capability.MEMORY_WRITE)
+        # Read the local reminder before cancellation
         reminder = self.get_reminder(reminder_id)
 
         with self._db_lock:
@@ -385,11 +397,6 @@ class ReminderManager:
                 conn.commit()
             finally:
                 conn.close()
-
-        # Remove from Google Calendar (strip composite offset suffix)
-        if reminder and self._calendar_manager and reminder.get("google_event_id"):
-            base_id = self._base_google_event_id(reminder["google_event_id"])
-            self._calendar_manager.delete_event(base_id)
 
         return True
 
@@ -418,7 +425,7 @@ class ReminderManager:
         for r in pending:
             if fragment_lower in r["title"].lower():
                 self.cancel_reminder(r["id"])
-                self.logger.info(f"Cancelled reminder #{r['id']}: {r['title']}")
+                self.logger.info("Reminder operation: content suppressed")
                 return r
 
         # Pass 2: token overlap — strip stop-words, match stems via prefix
@@ -453,12 +460,13 @@ class ReminderManager:
 
         if best_match:
             self.cancel_reminder(best_match["id"])
-            self.logger.info(f"Cancelled reminder #{best_match['id']} (token overlap={best_overlap}): {best_match['title']}")
+            self.logger.info("Reminder operation: content suppressed")
             return best_match
         return None
 
     def _update_status(self, reminder_id: int, status: str, **extra):
         """Update a reminder's status and any extra fields."""
+        get_privacy_gate().assert_allowed(Capability.MEMORY_WRITE)
         sets = ["status = ?", "updated_at = datetime('now', 'localtime')"]
         vals = [status]
         for k, v in extra.items():
@@ -493,6 +501,17 @@ class ReminderManager:
 
         text = text.strip().lower()
 
+        # Keep German voice times deterministic; do not fuzzy-parse the task text.
+        explicit_today = bool(re.match(r"heute\b", text))
+        translations = {"heute": "today", "morgen": "tomorrow", "früh": "morning",
+                        "morgens": "morning", "vormittags": "morning",
+                        "nachmittags": "afternoon", "abends": "evening", "um": "at"}
+        for german, english in translations.items():
+            text = re.sub(rf"\b{german}\b", english, text)
+        text = re.sub(r"\s*uhr\b", "", text)
+        text = re.sub(r"\bminuten?\b", "minutes", text)
+        text = re.sub(r"\bstunden?\b", "hours", text)
+
         # Handle relative expressions: "in X minutes/hours/days"
         m = re.match(r"in\s+(\d+)\s+(minute|min|hour|hr|day)s?", text)
         if m:
@@ -506,6 +525,9 @@ class ReminderManager:
                 return datetime.now() + timedelta(days=amount)
 
         now = datetime.now()
+        if text.startswith("today"):
+            explicit_today = True
+            text = text.replace("today", "", 1).strip()
 
         # Handle "tomorrow [morning/afternoon/evening] [at TIME]"
         tomorrow = False
@@ -592,10 +614,14 @@ class ReminderManager:
             except (ValueError, OverflowError):
                 return None
 
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
         result = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
         if tomorrow:
             result = result + timedelta(days=1)
+        elif explicit_today and result <= now:
+            return None
         elif result <= now:
             # Time is in the past today, assume tomorrow
             result += timedelta(days=1)
@@ -613,9 +639,16 @@ class ReminderManager:
         (prevents firing historical reminders that slipped through sync guards).
         Capped at 3 per poll cycle to prevent notification floods.
         """
+        if not get_privacy_gate().allow(Capability.MEMORY_WRITE):
+            return []
+        stop_event = getattr(self, "_stop_event", None)
+        if stop_event is not None and stop_event.is_set():
+            return []
         now = datetime.now()
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         stale_cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        retry_cutoff = (now - timedelta(seconds=max(1, getattr(self, "poll_interval", 30)))).strftime("%Y-%m-%d %H:%M:%S")
+        max_attempts = max(1, getattr(self, "nag_max_count", 5))
 
         with self._db_lock:
             conn = self._conn()
@@ -631,10 +664,7 @@ class ReminderManager:
                         "UPDATE reminders SET status = 'cancelled' WHERE id = ?",
                         (s["id"],)
                     )
-                    self.logger.warning(
-                        f"Auto-cancelled stale reminder #{s['id']}: "
-                        f"'{s['title']}' (due {s['reminder_time']})"
-                    )
+                    self.logger.warning("Reminder operation: content suppressed")
                 if stale:
                     conn.commit()
 
@@ -642,8 +672,9 @@ class ReminderManager:
                 rows = conn.execute(
                     "SELECT * FROM reminders WHERE status = 'pending' "
                     "AND reminder_time <= ? AND reminder_time >= ? "
+                    "AND fire_count < ? AND (last_fired_at IS NULL OR last_fired_at <= ?) "
                     "ORDER BY priority ASC, reminder_time ASC LIMIT 3",
-                    (now_str, stale_cutoff)
+                    (now_str, stale_cutoff, max_attempts, retry_cutoff)
                 ).fetchall()
                 return [dict(r) for r in rows]
             finally:
@@ -655,7 +686,7 @@ class ReminderManager:
         title = reminder["title"]
         rid = reminder["id"]
 
-        self.logger.info(f"Firing reminder #{rid}: '{title}' (priority={priority})")
+        self.logger.info("Reminder operation: content suppressed")
 
         # Set honorific for the reminder's creator (not hardcoded to owner)
         creator = reminder.get("created_by", "primary_user")
@@ -724,10 +755,14 @@ class ReminderManager:
             except (ValueError, TypeError):
                 pass
 
-        if time_phrase:
-            tts_ok = self.tts.speak(f"{prefix} {cap_title}, {time_phrase}.")
-        else:
-            tts_ok = self.tts.speak(f"{prefix} {cap_title}.")
+        try:
+            if time_phrase:
+                tts_ok = self.tts.speak(f"{prefix} {cap_title}, {time_phrase}.")
+            else:
+                tts_ok = self.tts.speak(f"{prefix} {cap_title}.")
+        except Exception as exc:
+            self.logger.warning("Reminder speech failed (%s)", type(exc).__name__)
+            tts_ok = False
 
         # Desktop notification (visual companion to voice)
         try:
@@ -753,9 +788,11 @@ class ReminderManager:
             self.logger.warning(
                 f"Reminder #{rid} TTS failed (attempt {new_fire_count}) — keeping pending for retry"
             )
-            self._update_status(rid, "fired",
+            self._update_status(rid, "pending",
                                 fire_count=new_fire_count,
                                 last_fired_at=now_str)
+            if new_fire_count >= max(1, getattr(self, "nag_max_count", 5)):
+                self.logger.error("Reminder speech retry limit reached; pending reminder requires attention")
             return
 
         # Track last announced for ack
@@ -797,7 +834,7 @@ class ReminderManager:
                 timeout=3
             )
         except Exception as e:
-            self.logger.error(f"Failed to play tone: {e}")
+            self.logger.error("Reminder operation: content suppressed")
 
     def _play_rundown_tone(self, kind: str = "daily"):
         """Play the appropriate rundown chime (daily or weekly)."""
@@ -813,7 +850,7 @@ class ReminderManager:
                 timeout=3
             )
         except Exception as e:
-            self.logger.error(f"Failed to play rundown tone: {e}")
+            self.logger.error("Reminder operation: content suppressed")
 
     # ------------------------------------------------------------------
     # Acknowledgment
@@ -861,11 +898,6 @@ class ReminderManager:
             # Recurring: advance to next occurrence
             self._advance_recurring(reminder)
 
-        # Remove from Google Calendar (strip composite offset suffix)
-        if self._calendar_manager and reminder.get("google_event_id"):
-            base_id = self._base_google_event_id(reminder["google_event_id"])
-            self._calendar_manager.delete_event(base_id)
-
         self.logger.info(f"Reminder #{reminder_id} acknowledged")
         return True
 
@@ -901,25 +933,21 @@ class ReminderManager:
         snooze_time = datetime.now() + timedelta(minutes=minutes)
         snooze_until = snooze_time.strftime("%Y-%m-%d %H:%M:%S")
         self._update_status(reminder_id, "snoozed", snooze_until=snooze_until)
-        self.logger.info(f"Reminder #{reminder_id} snoozed until {snooze_until}")
-
-        # Update Google Calendar event to new time (strip composite offset suffix)
-        reminder = self.get_reminder(reminder_id)
-        if reminder and self._calendar_manager and reminder.get("google_event_id"):
-            base_id = self._base_google_event_id(reminder["google_event_id"])
-            self._calendar_manager.update_event(base_id, start_time=snooze_time)
+        self.logger.info("Reminder operation: content suppressed")
 
         return True
 
-    def snooze_last(self, minutes: int = None) -> Optional[Dict]:
+    def snooze_last(self, minutes: int = None, created_by: str = None) -> Optional[Dict]:
         """Snooze the most recently announced reminder."""
         if self._last_announced_id:
             reminder = self.get_reminder(self._last_announced_id)
             if reminder and reminder["status"] == "fired":
+                if created_by and reminder.get("created_by") != created_by:
+                    return None
                 self.snooze_reminder(self._last_announced_id, minutes)
                 return reminder
 
-        pending = self.get_pending_acks()
+        pending = self.get_pending_acks(created_by=created_by)
         if pending:
             r = pending[0]
             self.snooze_reminder(r["id"], minutes)
@@ -960,6 +988,7 @@ class ReminderManager:
 
     def _advance_recurring(self, reminder: Dict):
         """Calculate and set the next fire time for a recurring reminder."""
+        get_privacy_gate().assert_allowed(Capability.MEMORY_WRITE)
         rule = reminder.get("recurrence_rule", "")
         if not rule:
             # No rule — just confirm it
@@ -981,7 +1010,7 @@ class ReminderManager:
                     conn.commit()
                 finally:
                     conn.close()
-            self.logger.info(f"Recurring reminder #{reminder['id']} advanced to {time_str}")
+            self.logger.info("Reminder operation: content suppressed")
         else:
             self._update_status(reminder["id"], "confirmed")
 
@@ -1198,7 +1227,7 @@ class ReminderManager:
                     if ev_gid:
                         seen_base_ids.add(ev_gid)
             except Exception as e:
-                self.logger.error(f"Failed to fetch calendar events for rundown: {e}")
+                self.logger.error("Reminder operation: content suppressed")
 
         if self._caldav_manager:
             try:
@@ -1212,14 +1241,14 @@ class ReminderManager:
                     except (ValueError, KeyError):
                         continue
             except Exception as e:
-                self.logger.error(f"Failed to fetch CalDAV events for rundown: {e}")
+                self.logger.error("Reminder operation: content suppressed")
 
         # Sort by time and format naturally
         if items:
             items.sort(key=lambda x: x["time"])
             rundown_text = self._format_items_naturally(items)
         else:
-            rundown_text = f"You have no reminders or events for today, {get_honorific()}."
+            rundown_text = f"Für heute sind keine Erinnerungen oder Termine eingetragen, {get_honorific()}."
 
         # Append news summary if available
         try:
@@ -1241,24 +1270,7 @@ class ReminderManager:
         Examples: "8:15 this morning", "2:30 this afternoon",
         "6 PM", "noon", "midnight"
         """
-        hour = t.hour
-        minute = t.minute
-
-        # Special cases
-        if hour == 12 and minute == 0:
-            return "noon"
-        if hour == 0 and minute == 0:
-            return "midnight"
-
-        # Format the base time
-        if minute == 0:
-            time_str = t.strftime("%-I %p")
-        else:
-            time_str = t.strftime("%-I:%M %p")
-
-        # Remove trailing :00 and make PM/AM lowercase-ish for speech
-        # Piper reads "PM" fine, but "6 PM sharp" sounds better than "6:00 PM"
-        return time_str
+        return f"{t.hour}:{t.minute:02d} Uhr"
 
     @staticmethod
     def _format_items_naturally(items: list, day_prefix: str = "") -> str:
@@ -1280,18 +1292,18 @@ class ReminderManager:
 
             if i == 0:
                 # First item: "At 8:15 AM you have XYZ"
-                prefix = f"{day_prefix}at " if day_prefix else "At "
-                parts.append(f"{prefix}{time_str} you have {title}")
+                prefix = f"{day_prefix}um " if day_prefix else "Um "
+                parts.append(f"{prefix}{time_str} steht {title} an")
             elif i == count - 1:
                 # Last item: "and finally 456 at 6 PM"
                 if count == 2:
-                    parts.append(f"and then {title} at {time_str}")
+                    parts.append(f"danach {title} um {time_str}")
                 else:
-                    parts.append(f"and finally {title} at {time_str}")
+                    parts.append(f"zum Abschluss {title} um {time_str}")
             else:
                 # Middle items: alternate connectors for variety
-                connector = "followed by" if i % 2 == 1 else "with"
-                parts.append(f"{connector} {title} at {time_str}")
+                connector = "danach" if i % 2 == 1 else "anschließend"
+                parts.append(f"{connector} {title} um {time_str}")
 
         return ", ".join(parts) + "."
 
@@ -1299,7 +1311,7 @@ class ReminderManager:
         """Proactively announce the daily rundown (non-interactive fallback)."""
         set_honorific("sir")
         rundown = self.get_daily_rundown()
-        self.logger.info(f"Daily rundown: {rundown}")
+        self.logger.info("Reminder operation: content suppressed")
         if self._pause_listener_callback:
             self._pause_listener_callback()
         self._play_rundown_tone("daily")
@@ -1377,7 +1389,7 @@ class ReminderManager:
         if is_weekly:
             self._last_weekly_rundown_date = datetime.now().date()
             rundown = self.get_weekly_rundown()
-            self.logger.info(f"Weekly rundown: {rundown}")
+            self.logger.info("Reminder operation: content suppressed")
             if self._pause_listener_callback:
                 self._pause_listener_callback()
             self.tts.speak(f"Hier ist Ihre wöchentliche Übersicht, {get_honorific()}. {rundown}")
@@ -1386,7 +1398,7 @@ class ReminderManager:
             # Weekly rundown covers today's events grouped by day — no separate daily needed
         else:
             rundown = self.get_daily_rundown()
-            self.logger.info(f"Daily rundown: {rundown}")
+            self.logger.info("Reminder operation: content suppressed")
             if self._pause_listener_callback:
                 self._pause_listener_callback()
             self.tts.speak(f"Hier ist Ihre Übersicht für heute, {get_honorific()}. {rundown}")
@@ -1425,8 +1437,8 @@ class ReminderManager:
         monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
         sunday = monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
 
-        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday",
-                     "Friday", "Saturday", "Sunday"]
+        day_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag",
+                     "Freitag", "Samstag", "Sonntag"]
 
         # Gather reminders for the week (by event_time for calendar events)
         monday_str = monday.strftime("%Y-%m-%d %H:%M:%S")
@@ -1440,7 +1452,7 @@ class ReminderManager:
             try:
                 cal_events = self._calendar_manager.get_primary_events_week()
             except Exception as e:
-                self.logger.error(f"Failed to fetch weekly calendar events: {e}")
+                self.logger.error("Reminder operation: content suppressed")
 
         # Group all items by day — dedup calendar events by base google_event_id
         days_with_items = {}  # day_offset -> list of {time, title}
@@ -1486,7 +1498,7 @@ class ReminderManager:
                 days_with_items[day_offset] = items
 
         if not days_with_items:
-            return f"You have a clear week ahead, {get_honorific()}. No reminders or events scheduled."
+            return f"Für diese Woche sind keine Erinnerungen oder Termine eingetragen, {get_honorific()}."
 
         # Build natural speech
         sentences = []
@@ -1499,9 +1511,9 @@ class ReminderManager:
 
             # Use relative names for today/tomorrow
             if day_date == today:
-                day_label = "Today"
+                day_label = "Heute"
             elif day_date == today + timedelta(days=1):
-                day_label = "Tomorrow"
+                day_label = "Morgen"
             else:
                 day_label = day_name
 
@@ -1517,20 +1529,20 @@ class ReminderManager:
                     # Single item: "On Wednesday you just have XYZ at 10:45 AM."
                     item = items[0]
                     time_str = self._format_time_spoken(item["time"])
-                    if day_label in ("Today", "Tomorrow"):
+                    if day_label in ("Heute", "Morgen"):
                         sentences.append(
-                            f"{day_label} you just have {item['title']} at {time_str}."
+                            f"{day_label} steht {item['title']} um {time_str} an."
                         )
                     else:
                         sentences.append(
-                            f"On {day_label} you just have {item['title']} at {time_str}."
+                            f"On {day_label} steht {item['title']} um {time_str} an."
                         )
                 else:
                     # Multiple items: use natural list formatting
-                    if day_label in ("Today", "Tomorrow"):
+                    if day_label in ("Heute", "Morgen"):
                         prefix = f"{day_label}, "
                     else:
-                        prefix = f"On {day_label}, "
+                        prefix = f"Am {day_label}, "
                     formatted = self._format_items_naturally(items, day_prefix=prefix)
                     sentences.append(formatted)
             else:
@@ -1544,9 +1556,9 @@ class ReminderManager:
         # Closing
         total = sum(len(v) for v in days_with_items.values())
         if total == 1:
-            sentences.append(f"That's all for the week, {get_honorific()}.")
+            sentences.append(f"Das ist alles für diese Woche, {get_honorific()}.")
         else:
-            sentences.append(f"That's the week's schedule so far, {get_honorific()}.")
+            sentences.append(f"Das ist der bisherige Wochenplan, {get_honorific()}.")
 
         return " ".join(sentences)
 
@@ -1566,30 +1578,30 @@ class ReminderManager:
         for offset in day_offsets:
             day_date = (monday + timedelta(days=offset)).date()
             if day_date == today:
-                labels.append("today")
+                labels.append("heute")
             elif day_date == today + timedelta(days=1):
-                labels.append("tomorrow")
+                labels.append("morgen")
             else:
                 labels.append(day_names[offset])
 
         # Collapse weekend
         if set(day_offsets) == {5, 6}:
-            sentences.append("The weekend is clear.")
+            sentences.append("Für das Wochenende ist nichts eingetragen.")
             return
 
         if len(labels) == 1:
-            if labels[0] in ("today", "tomorrow"):
-                sentences.append(f"There's nothing {labels[0]}.")
+            if labels[0] in ("heute", "morgen"):
+                sentences.append(f"Für {labels[0]} ist nichts eingetragen.")
             else:
-                sentences.append(f"There's nothing on {labels[0]}.")
+                sentences.append(f"Am {labels[0]} ist nichts eingetragen.")
         elif len(labels) == 2:
-            sentences.append(f"{labels[0].capitalize()} and {labels[1]} are clear.")
+            sentences.append(f"{labels[0].capitalize()} und {labels[1]} sind frei.")
         else:
             # Capitalize each day name (but not "today"/"tomorrow")
-            capped = [l if l in ("today", "tomorrow") else l.capitalize()
+            capped = [l if l in ("heute", "morgen") else l.capitalize()
                       for l in labels]
-            joined = ", ".join(capped[:-1]) + f", and {capped[-1]}"
-            sentences.append(f"{joined} are clear.")
+            joined = ", ".join(capped[:-1]) + f" und {capped[-1]}"
+            sentences.append(f"{joined} sind frei.")
 
     # ------------------------------------------------------------------
     # Background Thread
@@ -1622,10 +1634,10 @@ class ReminderManager:
         so multiple notifications for the same event each get their own reminder row.
         """
         # Skip past events — prevents notification storms from historical sync
-        self.logger.debug("Event→reminder: title='%.40s' start=%s offset=%smin priority=%s",
-                          title, start_time, reminder_minutes, priority)
+        get_privacy_gate().assert_allowed(Capability.MEMORY_WRITE)
+        self.logger.debug("Reminder operation: content suppressed")
         if start_time < datetime.now() - timedelta(hours=1):
-            self.logger.debug(f"Skipping past Google event: '{title}' @ {start_time}")
+            self.logger.debug("Reminder operation: content suppressed")
             return -1
 
         # Apply reminder offset: fire BEFORE the event, not at event time
@@ -1639,8 +1651,7 @@ class ReminderManager:
         # Skip if the computed reminder_time is already past (e.g., future event
         # with a large offset like 1 week — the notification window already passed)
         if reminder_time < datetime.now() - timedelta(hours=1):
-            self.logger.debug(f"Skipping past reminder time for '{title}': "
-                              f"reminder={reminder_time}, event={start_time}")
+            self.logger.debug("Reminder operation: content suppressed")
             return -1
 
         # Composite key: base_event_id:offset — allows multiple reminders per event
@@ -1672,7 +1683,7 @@ class ReminderManager:
         # Create new local reminder — no push-back; source is Google Calendar
         rid = self.add_reminder(title, reminder_time, priority,
                                 _skip_calendar_push=True, event_time=event_time,
-                                created_by='christopher',
+                                created_by=self.config.get("user_profiles.primary_user_id", "primary_user"),
                                 origin_endpoint='google_calendar')
         # Store the composite google_event_id
         with self._db_lock:
@@ -1683,8 +1694,7 @@ class ReminderManager:
                 conn.commit()
             finally:
                 conn.close()
-        self.logger.info(f"Created reminder #{rid} from Google Calendar event {google_event_id}"
-                         f"{f' (fires {reminder_minutes}min before event)' if reminder_minutes else ''}")
+        self.logger.info("Reminder operation: content suppressed")
         return rid
 
     def _on_google_cancel_event(self, google_event_id: str) -> bool:
@@ -1699,7 +1709,7 @@ class ReminderManager:
                 self._update_status(reminder["id"], "cancelled")
                 cancelled += 1
         if cancelled:
-            self.logger.info(f"Cancelled {cancelled} reminder(s) for Google event {google_event_id}")
+            self.logger.info("Reminder operation: content suppressed")
         return cancelled > 0
 
     @staticmethod
@@ -1761,28 +1771,44 @@ class ReminderManager:
 
     def start(self):
         """Start the reminder system: scan missed, then begin polling."""
+        if self._running:
+            return
         if not self.config.get("reminders.enabled", True):
             self.logger.info("Reminder system disabled in config")
             return
 
         self.logger.info("Starting reminder system")
+        self._stop_event.clear()
+        self._running = True
 
         # Scan for missed reminders (delayed to let audio initialize)
         missed = self.scan_missed_reminders()
         if missed:
             self.logger.info(f"Found {len(missed)} missed reminders, announcing in {self.startup_delay}s")
-            threading.Timer(self.startup_delay, self.announce_missed_reminders).start()
+            if not self._stop_event.is_set():
+                self._startup_timer = threading.Timer(self.startup_delay, self._announce_missed_after_startup)
+                self._startup_timer.daemon = True
+                self._startup_timer.start()
 
         # Start polling thread
-        self._running = True
+        if self._stop_event.is_set():
+            return
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True,
                                              name="reminder-poll")
         self._poll_thread.start()
         self.logger.info("Reminder polling started")
 
+    def _announce_missed_after_startup(self):
+        if self._running and not self._stop_event.is_set():
+            self.announce_missed_reminders()
+
     def stop(self):
         """Stop the polling thread."""
         self._running = False
+        self._stop_event.set()
+        if self._startup_timer is not None:
+            self._startup_timer.cancel()
+            self._startup_timer = None
         if self._poll_thread:
             self._poll_thread.join(timeout=10)
         try:
@@ -1831,7 +1857,8 @@ class ReminderManager:
                 # Skip if missed-reminder announcement is in progress
                 if self._announcing_missed:
                     self.logger.debug("Poll cycle: skipped (missed announcement in progress)")
-                    time.sleep(5)
+                    if self._stop_event.wait(5):
+                        return
                     continue
 
                 # 1. Check due reminders
@@ -1839,11 +1866,15 @@ class ReminderManager:
                 self.logger.debug("Poll cycle: %d due, %d awaiting ack",
                                   len(due), len(self.get_pending_acks()))
                 for reminder in due:
+                    if self._stop_event.is_set():
+                        return
                     self._fire_reminder(reminder)
 
                 # 2. Re-nag unacknowledged
                 unacked = self.get_pending_acks()
                 for reminder in unacked:
+                    if self._stop_event.is_set():
+                        return
                     if self._should_nag(reminder):
                         self._fire_reminder(reminder)
 
@@ -1855,13 +1886,10 @@ class ReminderManager:
                     self._poll_rundown()
 
             except Exception as e:
-                self.logger.error(f"Reminder poll error: {e}")
+                self.logger.error("Reminder operation: content suppressed")
 
-            # Sleep in small increments for responsive shutdown
-            for _ in range(self.poll_interval // 5):
-                if not self._running:
-                    break
-                time.sleep(5)
+            if self._stop_event.wait(self.poll_interval):
+                return
 
     def _poll_rundown(self):
         """Handle the interactive rundown state machine each poll cycle."""
@@ -1920,12 +1948,15 @@ class ReminderManager:
 
     def _check_snoozed(self):
         """Reactivate snoozed reminders whose snooze period has expired."""
+        if not get_privacy_gate().allow(Capability.MEMORY_WRITE):
+            return []
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._db_lock:
             conn = self._conn()
             try:
                 conn.execute(
                     "UPDATE reminders SET status = 'pending', snooze_until = NULL, "
+                    "fire_count = 0, last_fired_at = NULL, "
                     "updated_at = datetime('now', 'localtime') "
                     "WHERE status = 'snoozed' AND snooze_until <= ?",
                     (now_str,)

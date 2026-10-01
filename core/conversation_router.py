@@ -24,6 +24,7 @@ from typing import Optional
 
 from core import persona
 from core.conversation_state import ConversationState
+from core.confirmation_matching import parse_confirmation
 from core.honorific import set_honorific
 
 from core.logger import Logger as _Logger
@@ -34,6 +35,25 @@ logger = _Logger.get_logger("jarvis.router")
 # Allows properties (_user_id, _is_mobile, _is_guest) to resolve
 # per-connection values without changing 30+ internal method signatures.
 _router_thread_ctx = threading.local()
+
+
+def extract_explicit_search_query(command: str) -> str | None:
+    """Preserve the requested topic for an explicit, single web search."""
+    match = re.fullmatch(
+        r"\s*(?:bitte\s+)?(?:such(?:e)?|recherchiere)\s+"
+        r"(?:im\s+(?:web|internet)|in\s+dem\s+(?:web|internet))\s+nach\s+(.+?)\s*",
+        command, re.IGNORECASE,
+    )
+    if not match:
+        return None
+    topic = re.sub(
+        r"\s+und\s+erkläre\s+(?:sie|es|das)\s+kurz[.!?]*\s*$", "",
+        match.group(1), flags=re.IGNORECASE,
+    ).strip().rstrip(".!?")
+    # Additional actions require the ordinary, governed tool chain.
+    if re.search(r"\bund\b", topic, re.I):
+        return None
+    return topic or None
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +496,14 @@ class ConversationRouter:
             if result:
                 return result
 
+        if not guest and not (doc_buffer and doc_buffer.active):
+            calendar_write = self._handle_calendar_write(command)
+            if calendar_write:
+                return calendar_write
+            day_result = self._handle_day_overview(command)
+            if day_result:
+                return day_result
+
         # --- P4-LLM: Tool-calling path ---
         # Guests get filtered tools (weather + web_search only).
         if not (doc_buffer and doc_buffer.active):
@@ -592,6 +620,55 @@ class ConversationRouter:
     # -------------------------------------------------------------------
     # Priority handlers
     # -------------------------------------------------------------------
+
+    def _handle_day_overview(self, command: str) -> RouteResult | None:
+        normalized = command.lower().strip().rstrip(".?!")
+        planning = normalized in {"plane meinen tag", "plan meinen tag"}
+        normalized = {
+            "was steht heute in meinem kalender": "kalender heute",
+            "was steht morgen an": "kalender morgen",
+            "was habe ich diese woche": "kalender diese woche",
+            "welche erinnerungen habe ich heute": "erinnerungen heute",
+        }.get(normalized, normalized)
+        match = re.fullmatch(
+            r"(?:mein(?:e)?\s+)?(?:kalender|termine|erinnerungen|reminder)\s+"
+            r"(?:für\s+)?(heute|morgen|(?:diese\s+)?woche)", normalized,
+        )
+        if not planning and not match and normalized != "was steht heute an":
+            return None
+        period_word = match.group(1) if match else "heute"
+        period = "tomorrow" if period_word == "morgen" else (
+            "week" if "woche" in period_word else "today")
+        from core.day_partner import DayPartner
+        reminder_manager = getattr(self, "reminder_manager", None)
+        calendar_manager = getattr(self, "calendar_manager", None)
+        if calendar_manager is None:
+            calendar_manager = getattr(reminder_manager, "_calendar_manager", None)
+        helper = DayPartner(reminder_manager, calendar_manager=calendar_manager)
+        kwargs = dict(period=period, planning=planning, created_by=self._user_id)
+        if normalized.startswith(("reminder ", "erinnerungen ")):
+            kwargs["sources"] = "reminders"
+        text = helper.get_overview(**kwargs)
+        return RouteResult(text=text, handled=True, source="day_partner", intent="day_overview")
+
+    def _handle_calendar_write(self, command: str) -> RouteResult | None:
+        """Prepare an existing skill confirmation; never execute a write here."""
+        patterns = (
+            (r"(?:erstelle|trage)\b.*\btermin\b", "create_calendar_event"),
+            (r"lösche\b.*\btermin\b.*\bkalender\b", "delete_calendar_event"),
+            (r"verschiebe\b.*\btermin\b.*\bauf\b", "update_calendar_event"),
+        )
+        method = next((handler for pattern, handler in patterns
+                       if re.match(pattern, command.strip(), re.IGNORECASE)), None)
+        if not method:
+            return None
+        skill = getattr(self.skill_manager, "skills", {}).get("google_calendar")
+        if skill is None:
+            return RouteResult(text="Die Kalenderänderung ist derzeit nicht verfügbar.",
+                               handled=True, intent="calendar_write", source="unavailable")
+        skill._last_user_text = command
+        return RouteResult(text=getattr(skill, method)(), handled=True,
+                           source="calendar_confirmation", intent="calendar_write")
 
     def _route_greeting(self) -> RouteResult:
         """Handle wake-word-only or empty commands."""
@@ -726,7 +803,7 @@ class ConversationRouter:
 
         if pd is None:
             return RouteResult(
-                text="Face enrollment is not available — presence detection is not initialized.",
+                text="Die Gesichtserfassung ist nicht verfügbar, da die Anwesenheitserkennung nicht initialisiert ist.",
                 intent="enrollment_start", source="vision", handled=True,
             )
 
@@ -775,7 +852,7 @@ class ConversationRouter:
             pd._enrollment_state = None
             logger.info("Enrollment cancelled by user")
             return RouteResult(
-                text="Enrollment cancelled.", intent="enrollment_cancel",
+                text="Die Gesichtserfassung wurde abgebrochen.", intent="enrollment_cancel",
                 source="vision", handled=True,
                 match_info={"layer": "P2.55-enrollment", "skill_name": "enroll_face"},
             )
@@ -833,7 +910,7 @@ class ConversationRouter:
         from core.honorific import get_honorific
         h = get_honorific()
         return RouteResult(
-            text=f"Of course, {name}. I'll remember that, {h}.",
+            text=f"Natürlich, {name}. Ich merke mir das, {h}.",
             source="cal_l0",
             intent="self_identification",
             handled=True,
@@ -941,7 +1018,7 @@ class ConversationRouter:
                 )
             else:
                 h = get_honorific()
-                briefing_text = f"Nothing pressing at the moment, {h}."
+                briefing_text = f"Zurzeit liegt nichts Dringendes an, {h}."
                 logger.info("CAL briefing (user_asked): no items to surface")
 
             return RouteResult(
@@ -1098,13 +1175,12 @@ class ConversationRouter:
                         if _pending:
                             _count = len(_pending)
                             _note = (
-                                f" Also sir, I have {_count} proposal{'s' if _count > 1 else ''} "
-                                f"awaiting your review."
+                                f" Außerdem warten {_count} Vorschläge auf deine Prüfung, sir."
                             )
                             if briefing_text:
                                 briefing_text += _note
                             else:
-                                briefing_text = f"Good to see you, sir.{_note}"
+                                briefing_text = f"Schön, dich zu sehen, sir.{_note}"
                             logger.info("Governance: %d pending proposals noted in greeting", _count)
                 except Exception:
                     pass
@@ -1175,7 +1251,7 @@ class ConversationRouter:
                     self.conv_state.readback_completed_at = 0.0
                     return RouteResult(
                         handled=True, intent="readback_complete",
-                        text=f"That's everything, {get_honorific()}. Anything you'd like me to repeat?",
+                        text=f"Das war alles, {get_honorific()}. Soll ich etwas wiederholen?",
                     )
             else:
                 self.conv_state.readback_completed_at = 0.0
@@ -1363,6 +1439,7 @@ class ConversationRouter:
                 )
                 response = self.llm.chat(
                     user_message=(
+                        f"{persona.OWNER_LANGUAGE_RULE}\n"
                         f"The user is asking you to recall something. Here is what you found "
                         f"in your memory:\n\n{recall_context}\n\n"
                         f"Now answer their question naturally based on this context. "
@@ -1621,8 +1698,8 @@ class ConversationRouter:
 
         if target_idx < 0 or target_idx >= len(children):
             return RouteResult(
-                text=f"There are only {len(children)} steps. "
-                     f"Which step would you like?",
+                text=f"Es gibt nur {len(children)} Schritte. "
+                     f"Welchen Schritt möchtest du hören?",
                 intent="nav_out_of_range", source="cache",
                 handled=True, open_window=EXTENDED_WINDOW,
             )
@@ -1734,7 +1811,7 @@ class ConversationRouter:
         section_names = [c.summary for c in children]
         listing = ", ".join(section_names)
         return RouteResult(
-            text=f"Here are the sections: {listing}. Which section would you like?",
+            text=f"Die Abschnitte sind: {listing}. Welchen möchtest du hören?",
             intent="nav_drill_out", source="cache",
             handled=True, open_window=EXTENDED_WINDOW,
         )
@@ -1764,14 +1841,14 @@ class ConversationRouter:
                     if sibling_idx is not None and sibling_idx + 1 < len(siblings):
                         next_section = siblings[sibling_idx + 1]
                         return RouteResult(
-                            text=f"That's the end of {current_section.summary}. "
-                                 f"Next section is {next_section.summary}. "
-                                 f"Would you like me to continue with that?",
+                            text=f"Das ist das Ende von {current_section.summary}. "
+                                 f"Der nächste Abschnitt ist {next_section.summary}. "
+                                 f"Soll ich damit fortfahren?",
                             intent="nav_end_section", source="cache",
                             handled=True, open_window=EXTENDED_WINDOW,
                         )
             return RouteResult(
-                text="That's the last step. Would you like me to start over?",
+                text="Das ist der letzte Schritt. Soll ich von vorn beginnen?",
                 intent="nav_end", source="cache",
                 handled=True, open_window=EXTENDED_WINDOW,
             )
@@ -1799,7 +1876,7 @@ class ConversationRouter:
             if root_id:
                 return self._nav_drill_out(cache, wid)
             return RouteResult(
-                text="You're already at the beginning.",
+                text="Du bist bereits am Anfang.",
                 intent="nav_start", source="cache",
                 handled=True, open_window=EXTENDED_WINDOW,
             )
@@ -1820,7 +1897,7 @@ class ConversationRouter:
         self.conv_state.nav_cursor = 0
         if not children:
             return RouteResult(
-                text="I couldn't find the content to restart.",
+                text="Ich konnte den Inhalt zum erneuten Lesen nicht finden.",
                 intent="nav_reset", source="cache", handled=True,
             )
         child = children[0]
@@ -1845,15 +1922,15 @@ class ConversationRouter:
             parent_id = self.conv_state.nav_artifact_id
             cache = get_interaction_cache()
             section_art = cache.get_by_id(parent_id) if cache else None
-            section_name = section_art.summary if section_art else "this section"
+            section_name = section_art.summary if section_art else "diesem Abschnitt"
             if total:
-                text = f"You're on step {step_num} of {total} in {section_name}."
+                text = f"Du bist bei Schritt {step_num} von {total} in {section_name}."
             else:
-                text = f"You're on step {step_num} in {section_name}."
+                text = f"Du bist bei Schritt {step_num} in {section_name}."
         elif total:
-            text = f"You're on step {step_num} of {total}."
+            text = f"Du bist bei Schritt {step_num} von {total}."
         else:
-            text = f"You're on step {step_num}."
+            text = f"Du bist bei Schritt {step_num}."
 
         return RouteResult(
             text=text, intent="nav_position", source="cache",
@@ -1869,7 +1946,7 @@ class ConversationRouter:
             # Section-level: just show the section name + content
             prefix = f"{label}."
         elif total > 1:
-            prefix = f"{label} of {total}."
+            prefix = f"{label} von {total}."
         else:
             prefix = f"{label}."
         return f"{prefix} {content}"
@@ -1966,6 +2043,7 @@ class ConversationRouter:
         )
         response = self.llm.chat(
             user_message=(
+                f"{persona.OWNER_LANGUAGE_RULE}\n"
                 f'The user asked about a search result. Here is the full article '
                 f'content from "{title}":\n\n{content}\n\n'
                 f'Summarize the key information from this article, focusing on '
@@ -2096,6 +2174,7 @@ class ConversationRouter:
         )
         response = self.llm.chat(
             user_message=(
+                f"{persona.OWNER_LANGUAGE_RULE}\n"
                 f'The user is referring to earlier data from this conversation. '
                 f'Here is the cached content:\n\n{matched_art.content[:3000]}\n\n'
                 f'Answer the user\'s request using this context. '
@@ -2166,6 +2245,7 @@ class ConversationRouter:
         )
         response = self.llm.chat(
             user_message=(
+                f"{persona.OWNER_LANGUAGE_RULE}\n"
                 f'The user wants more detail about this article: "{title}"\n\n'
                 f'Full content:\n{content}\n\n'
                 f'Provide a thorough but spoken-word-friendly summary.'
@@ -2289,7 +2369,7 @@ class ConversationRouter:
                 tp.skip_current()
                 logger.info("Active plan step skipped via router")
                 return RouteResult(
-                    text="Skipping this step.",
+                    text="Ich überspringe diesen Schritt.",
                     intent="task_plan_skip",
                     source="planner",
                     handled=True,
@@ -2337,12 +2417,7 @@ class ConversationRouter:
         like a confirmation or denial, route to the skill directly instead of
         letting tool-calling capture it.
         """
-        text_lower = command.strip().lower()
-        confirm_words = {"yes", "yeah", "yep", "go ahead", "proceed", "do it",
-                         "confirmed", "affirmative", "sure",
-                         "no", "nope", "cancel", "abort", "never mind", "stop", "don't"}
-        words = set(re.findall(r'\b\w+\b', text_lower))
-        if not (words & confirm_words):
+        if parse_confirmation(command) is None:
             return None
 
         sm = self.skill_manager
@@ -2399,11 +2474,11 @@ class ConversationRouter:
             from core.task_planner import CONFIRMATION_REQUIRED_SKILLS
             destructive = [s for s in plan.steps
                            if s.skill_name in CONFIRMATION_REQUIRED_SKILLS]
-            desc = destructive[0].description if destructive else "a system command"
+            desc = destructive[0].description if destructive else "ein Systembefehl"
             tp.set_pending_confirmation(plan)
             logger.info(f"Plan requires confirmation (destructive step: {desc})")
             return RouteResult(
-                text=f"That involves running a command on your system: {desc}. Shall I proceed, {persona.get_honorific()}?",
+                text=f"Dafür müsste ich einen Befehl auf deinem System ausführen: {desc}. Soll ich fortfahren, {persona.get_honorific()}?",
                 intent="task_plan_confirm",
                 source="planner",
                 handled=True,
@@ -2469,48 +2544,48 @@ class ConversationRouter:
         # Determine which hardware aspect they're asking about
         if words & {"model", "llm"} and not words & {"cpu", "gpu", "ram"}:
             if state.llm_provider and state.llm_provider != "unknown":
-                text = f"I'm running the {state.llm_provider}"
+                text = f"Ich verwende {state.llm_provider}"
                 if state.llm_quant:
-                    text += f" with {state.llm_quant} quantization"
+                    text += f" mit {state.llm_quant}-Quantisierung"
                 text += f", {h}."
             else:
                 return None
 
         elif words & {"quantization", "quant"}:
             if state.llm_quant:
-                text = f"I'm using {state.llm_quant} quantization"
+                text = f"Ich verwende {state.llm_quant}-Quantisierung"
                 if state.llm_provider and state.llm_provider != "unknown":
-                    text += f" for the {state.llm_provider} model"
+                    text += f" für das Modell {state.llm_provider}"
                 text += f", {h}."
             else:
                 return None
 
         elif words & {"cpu", "processor"}:
             if state.cpu_model:
-                text = f"I'm running on an {state.cpu_model} with {state.cpu_cores} cores, {h}."
+                text = f"Ich laufe auf {state.cpu_model} mit {state.cpu_cores} Kernen, {h}."
             else:
                 return None
 
         elif words & {"gpu", "graphics"}:
             if state.gpu_model:
-                text = f"I'm running on a {state.gpu_model}"
+                text = f"Ich nutze {state.gpu_model}"
                 if state.gpu_vram_gb:
-                    text += f" with {state.gpu_vram_gb:.0f}GB of VRAM"
+                    text += f" mit {state.gpu_vram_gb:.0f} GB Grafikspeicher"
                 text += f", {h}."
             else:
                 return None
 
         elif words & {"ram"} and not words & {"cpu", "gpu"}:
             if state.ram_total_gb:
-                text = f"I have {state.ram_total_gb:.0f}GB of RAM, {h}."
+                text = f"Ich habe {state.ram_total_gb:.0f} GB Arbeitsspeicher, {h}."
             else:
                 return None
 
         elif words & {"vram"}:
             if state.gpu_vram_gb:
-                text = f"I have {state.gpu_vram_gb:.0f}GB of VRAM"
+                text = f"Ich habe {state.gpu_vram_gb:.0f} GB Grafikspeicher"
                 if state.gpu_model:
-                    text += f" on my {state.gpu_model}"
+                    text += f" auf {state.gpu_model}"
                 text += f", {h}."
             else:
                 return None
@@ -2519,21 +2594,21 @@ class ConversationRouter:
             # Broad specs question — list everything
             parts = []
             if state.cpu_model:
-                parts.append(f"an {state.cpu_model} with {state.cpu_cores} cores")
+                parts.append(f"{state.cpu_model} mit {state.cpu_cores} Kernen")
             if state.ram_total_gb:
-                parts.append(f"{state.ram_total_gb:.0f}GB of RAM")
+                parts.append(f"{state.ram_total_gb:.0f} GB Arbeitsspeicher")
             if state.gpu_model:
                 gpu = state.gpu_model
                 if state.gpu_vram_gb:
-                    gpu += f" with {state.gpu_vram_gb:.0f}GB of VRAM"
+                    gpu += f" mit {state.gpu_vram_gb:.0f} GB Grafikspeicher"
                 parts.append(gpu)
             if state.llm_provider and state.llm_provider != "unknown":
                 llm = state.llm_provider
                 if state.llm_quant:
                     llm += f" at {state.llm_quant}"
-                parts.append(f"running the {llm} model")
+                parts.append(f"Modell {llm}")
             if parts:
-                text = f"I'm running on {', '.join(parts)}, {h}."
+                text = f"Meine Ausstattung: {', '.join(parts)}, {h}."
             else:
                 return None
 
@@ -2985,7 +3060,11 @@ class ConversationRouter:
             r"\b(?:nicht|no|don't|do not)\b",
             command, re.IGNORECASE,
         )
-        if screenshot_request and not self._is_guest and not self._is_mobile:
+        explicit_query = extract_explicit_search_query(command)
+        if explicit_query:
+            from core.tool_registry import WEB_SEARCH_TOOL
+            tools = [WEB_SEARCH_TOOL]
+        elif screenshot_request and not self._is_guest and not self._is_mobile:
             from core.tool_registry import TAKE_SCREENSHOT_TOOL
             tools = [TAKE_SCREENSHOT_TOOL]
         else:
@@ -3048,6 +3127,8 @@ class ConversationRouter:
             "skill_name": ", ".join(tool_names),
         }
         result.use_tools = tools
+        if explicit_query and "web_search" in tool_names:
+            result.force_web_search = True
         if screenshot_request and any(
                 tool["function"]["name"] == "take_screenshot" for tool in tools):
             result.force_tool_call = "take_screenshot"

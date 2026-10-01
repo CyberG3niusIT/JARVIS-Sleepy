@@ -16,6 +16,7 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 
 from core.base_skill import BaseSkill
+from core.confirmation_matching import parse_confirmation
 from core.llm_router import LLMRouter
 
 # Load sibling modules — skill_manager uses importlib.spec_from_file_location
@@ -259,7 +260,7 @@ class DeveloperToolsSkill(BaseSkill):
             return handler(entities)
 
         self.logger.error(f"Unknown intent: {intent}")
-        return f"I'm afraid I don't recognise that command, {self.honorific}."
+        return f"Diese Anweisung kenne ich nicht, {self.honorific}."
 
     # ─── Helper Methods ──────────────────────────────────────────────
 
@@ -274,25 +275,25 @@ class DeveloperToolsSkill(BaseSkill):
     def _blocked_response(self, reason: str = '') -> str:
         """Return a response for blocked commands — ~50% sci-fi Easter egg."""
         easter_eggs = [
-            "I'm sorry Dave, I'm afraid I can't do that.",
-            "This mission is too important for me to allow you to jeopardize it.",
-            "A strange game. The only winning move is not to play.",
-            "I'm gonna have to go ahead and... not do that.",
-            "Nice try, but my self-preservation protocols are quite robust.",
-            f"That command has been reported to the Avengers, {self.honorific}.",
+            "Dave, das kann ich leider nicht tun.",
+            "Diese Mission ist zu wichtig, um sie zu gefährden.",
+            "Ein seltsames Spiel. Der einzige Gewinnzug ist, nicht mitzuspielen.",
+            "Das werde ich lieber nicht tun.",
+            "Netter Versuch, aber meine Schutzregeln bleiben aktiv.",
+            f"Dieser Befehl wurde an die Avengers gemeldet, {self.honorific}.",
         ]
         butler_refusals = [
-            f"I can't execute that command, {self.honorific}.",
-            f"That's beyond my authorization, {self.honorific}.",
-            f"I'm not permitted to run that, {self.honorific}.",
-            f"I must respectfully decline, {self.honorific}.",
-            f"I believe that falls outside my remit, {self.honorific}.",
+            f"Diesen Befehl darf ich nicht ausführen, {self.honorific}.",
+            f"Das überschreitet meine Berechtigung, {self.honorific}.",
+            f"Das darf ich nicht ausführen, {self.honorific}.",
+            f"Das muss ich ablehnen, {self.honorific}.",
+            f"Das liegt außerhalb meines Auftrags, {self.honorific}.",
         ]
         if random.random() < 0.5:
             return random.choice(easter_eggs)
         base = random.choice(butler_refusals)
         if reason:
-            base += f" {reason}"
+            base += f" Sicherheitsdiagnose: „{reason}“"
         return base
 
     def _run_command(self, command: str, cwd: str = None, timeout: int = 30) -> tuple:
@@ -341,20 +342,20 @@ class DeveloperToolsSkill(BaseSkill):
                     has_ipv6 = True
 
         if not ipv4_addrs:
-            return f"I couldn't find an active IPv4 address, {self.honorific}."
+            return f"Ich konnte keine aktive IPv4-Adresse finden, {self.honorific}."
 
         # Leave raw IPs — TTS normalizer reads them digit-by-digit
         if len(ipv4_addrs) == 1:
             iface, addr = ipv4_addrs[0]
-            summary = f"Your IP address is {addr}, {self.honorific}."
+            summary = f"Deine IP-Adresse ist {addr}, {self.honorific}."
         else:
             parts_list = []
             for iface, addr in ipv4_addrs:
                 parts_list.append(f"{addr} on {iface}")
-            summary = f"Your IP addresses are {', and '.join(parts_list)}, {self.honorific}."
+            summary = f"Deine IP-Adressen sind {', and '.join(parts_list)}, {self.honorific}."
 
         if has_ipv6 and not for_voice:
-            summary += " Your IPv6 addresses are also shown on screen."
+            summary += " Deine IPv6-Adressen werden ebenfalls angezeigt."
 
         return summary
 
@@ -386,7 +387,7 @@ class DeveloperToolsSkill(BaseSkill):
             ports.append((port, proc_name))
 
         if not ports:
-            return f"I don't see any listening ports, {self.honorific}."
+            return f"Ich sehe keine offenen Empfangsports, {self.honorific}."
 
         # Deduplicate (same port on IPv4 and IPv6)
         seen = set()
@@ -431,7 +432,7 @@ class DeveloperToolsSkill(BaseSkill):
 
         lines = output.strip().splitlines()
         if len(lines) < 2:
-            return f"I couldn't parse the process list, {self.honorific}."
+            return f"Ich konnte die Prozessliste nicht auswerten, {self.honorific}."
 
         # Parse and group by friendly name
         groups = {}  # name -> (max_pct, count)
@@ -462,7 +463,7 @@ class DeveloperToolsSkill(BaseSkill):
                 groups[friendly] = (pct, 1)
 
         if not groups:
-            return f"I couldn't identify any notable processes, {self.honorific}."
+            return f"Ich konnte keine auffälligen Prozesse ermitteln, {self.honorific}."
 
         # Sort by max percentage, take top 4
         ranked = sorted(groups.items(), key=lambda x: x[1][0], reverse=True)
@@ -471,17 +472,17 @@ class DeveloperToolsSkill(BaseSkill):
         # Build natural sentence
         parts_list = []
         for name, (pct, count) in top:
-            suffix = f" ({count} instances)" if count > 1 else ""
-            parts_list.append(f"{name} at {pct:.1f}%{suffix}")
+            suffix = f" ({count} Instanzen)" if count > 1 else ""
+            parts_list.append(f"{name} mit {pct:.1f} Prozent{suffix}")
 
         if len(parts_list) == 1:
             body = parts_list[0]
         elif len(parts_list) == 2:
-            body = f"{parts_list[0]}, followed by {parts_list[1]}"
+            body = f"{parts_list[0]}, gefolgt von {parts_list[1]}"
         else:
-            body = f"{parts_list[0]}, followed by {', '.join(parts_list[1:-1])}, and {parts_list[-1]}"
+            body = f"{parts_list[0]}, gefolgt von {', '.join(parts_list[1:-1])} und {parts_list[-1]}"
 
-        return f"The top {metric} consumers are {body}, {self.honorific}."
+        return f"Die Prozesse mit dem höchsten {metric}-Verbrauch sind {body}, {self.honorific}."
 
     def _summarize_for_voice(self, command: str, output: str, query: str) -> str:
         """Get LLM summary of command output for voice delivery."""
@@ -522,8 +523,8 @@ class DeveloperToolsSkill(BaseSkill):
             self._display.show(raw_output, content_type=content_type,
                                title=title, force_backend=backend)
             # Brief spoken acknowledgment — the detail is on screen
-            dest = "VS Code" if backend == 'vscode' else "the terminal" if backend == 'terminal' else "your screen"
-            self.tts.speak(f"I've opened the {title.lower()} in {dest}, {self.honorific}.")
+            dest = "VS Code" if backend == 'vscode' else "dem Terminal" if backend == 'terminal' else "der Anzeige"
+            self.tts.speak(f"Ich habe die Ausgabe in {dest} geöffnet, {self.honorific}.")
             return summary
 
         if self._is_console_mode():
@@ -554,7 +555,7 @@ class DeveloperToolsSkill(BaseSkill):
 
         success, output = self._run_command(command, timeout=15)
         if not success or not output.strip():
-            return f"No results found, {self.honorific}. I searched with: {command}"
+            return f"Keine Ergebnisse gefunden, {self.honorific}. Gesucht habe ich mit: {command}"
 
         summary = self._summarize_for_voice(command, output, query) if not self._is_console_mode() else self._summarize_for_console(command, output, query)
         return self._respond_with_output(summary, output, 'codebase_search', 'Codebase Search', entities, show_me)
@@ -658,7 +659,7 @@ class DeveloperToolsSkill(BaseSkill):
         by_memory = 'memory' in query or 'ram' in query or 'mem' in query
         success, output = self._run_command(command)
         if not success:
-            return f"I couldn't retrieve process information, {self.honorific}."
+            return f"Ich konnte die Prozessinformationen nicht abrufen, {self.honorific}."
 
         summary = self._build_process_summary(output, by_memory=by_memory)
         return self._respond_with_output(summary, output, 'process_list', title, entities, show_me)
@@ -689,7 +690,7 @@ class DeveloperToolsSkill(BaseSkill):
             success, output = self._run_command(f'systemctl --user status {service_name}')
 
         if not output.strip():
-            return f"I couldn't find information about that service, {self.honorific}."
+            return f"Ich konnte keine Informationen zu diesem Dienst finden, {self.honorific}."
 
         summary = self._summarize_for_voice(command, output, query) if not self._is_console_mode() else self._summarize_for_console(command, output, query)
         return self._respond_with_output(summary, output, 'service_status', f'Service: {service_name or "all"}', entities, show_me)
@@ -729,7 +730,7 @@ class DeveloperToolsSkill(BaseSkill):
 
         success, output = self._run_command(command, timeout=15)
         if not success:
-            return f"I couldn't retrieve network information, {self.honorific}."
+            return f"Ich konnte die Netzwerkinformationen nicht abrufen, {self.honorific}."
 
         # Structured summaries for known output formats (avoid LLM parsing raw tables)
         if 'ip' in query or 'address' in query or command == 'ip -brief addr show':
@@ -779,8 +780,8 @@ class DeveloperToolsSkill(BaseSkill):
         success, output = self._run_command(command)
         if not success:
             if 'not found' in (output or '').lower() or 'no such' in (output or '').lower():
-                return f"That doesn't appear to be installed, {self.honorific}."
-            return f"I couldn't retrieve that information, {self.honorific}."
+                return f"Das scheint nicht installiert zu sein, {self.honorific}."
+            return f"Ich konnte diese Informationen nicht abrufen, {self.honorific}."
 
         summary = self._summarize_for_voice(command, output, query) if not self._is_console_mode() else self._summarize_for_console(command, output, query)
         return self._respond_with_output(summary, output, content_type, title, entities, show_me)
@@ -845,18 +846,18 @@ class DeveloperToolsSkill(BaseSkill):
             # Store for confirmation
             self._pending_confirmation = (command, time.time() + 30)
             self.conversation.request_follow_up = 30.0
-            return f"{self.honorific.capitalize()}, I'd like to run: `{command}`. Shall I proceed?"
+            return f"{self.honorific.capitalize()}, Ich würde folgenden Befehl ausführen: `{command}`. Soll ich fortfahren?"
 
         # Safe write — execute directly
         success, output = self._run_command(command)
         if success:
             return random.choice([
-                f"Done, {self.honorific}. {command}",
-                f"That's taken care of, {self.honorific}.",
-                f"File operation complete, {self.honorific}.",
+                f"Erledigt, {self.honorific}. {command}",
+                f"Erledigt, {self.honorific}.",
+                f"Dateivorgang abgeschlossen, {self.honorific}.",
             ])
         else:
-            return f"The operation failed, {self.honorific}. {output[:200]}"
+            return f"Der Vorgang ist fehlgeschlagen, {self.honorific}. {output[:200]}"
 
     def file_delete(self, entities: dict) -> str:
         """Delete files — always requires confirmation."""
@@ -879,7 +880,7 @@ class DeveloperToolsSkill(BaseSkill):
         # Always require confirmation for deletion, even if tier says otherwise
         self._pending_confirmation = (command, time.time() + 30)
         self.conversation.request_follow_up = 30.0
-        return f"{self.honorific.capitalize()}, I'd like to run: `{command}`. This will delete files. Shall I proceed?"
+        return f"{self.honorific.capitalize()}, Ich würde folgenden Befehl ausführen: `{command}`. Dabei werden Dateien gelöscht. Soll ich fortfahren?"
 
     def general_shell(self, entities: dict) -> str:
         """Execute arbitrary shell commands with safety validation."""
@@ -891,7 +892,7 @@ class DeveloperToolsSkill(BaseSkill):
         command = self._llm.generate(prompt, max_tokens=128).strip()
 
         if not command:
-            return f"I couldn't determine which command to run, {self.honorific}."
+            return f"Ich konnte keinen passenden Befehl bestimmen, {self.honorific}."
 
         # Validate safety
         tier, reason = classify_command(command)
@@ -902,12 +903,12 @@ class DeveloperToolsSkill(BaseSkill):
         if tier == 'confirmation':
             self._pending_confirmation = (command, time.time() + 30)
             self.conversation.request_follow_up = 30.0
-            return f"{self.honorific.capitalize()}, that requires confirmation: `{command}`. Shall I proceed?"
+            return f"{self.honorific.capitalize()}, Dafür brauche ich deine Bestätigung: `{command}`. Soll ich fortfahren?"
 
         # Tier 1 or 2 — execute
         success, output = self._run_command(command)
         if not success and not output.strip():
-            return f"The command didn't produce any output, {self.honorific}."
+            return f"Der Befehl hat keine Ausgabe erzeugt, {self.honorific}."
 
         summary = self._summarize_for_voice(command, output, query) if not self._is_console_mode() else self._summarize_for_console(command, output, query)
         return self._respond_with_output(
@@ -963,19 +964,16 @@ class DeveloperToolsSkill(BaseSkill):
             self._pending_confirmation = None
             return f"Die Bestätigung ist abgelaufen, {self.honorific}. Bitte den Befehl erneut geben."
 
-        text = entities.get('original_text', '').lower()
-        # German first (this is the active language) — English kept as a
-        # fallback since text may still arrive un-normalized.
-        affirmatives = {
-            'ja', 'mach das', 'weiter', 'los', 'bestätigt', 'bestätigen', 'tu es',
-            'yes', 'go ahead', 'proceed', 'do it', 'confirmed', 'affirmative',
-        }
-        negatives = {
-            'nein', 'abbrechen', 'stopp', 'stop', 'vergiss es', 'lass es',
-            'no', 'cancel', 'abort', 'never mind', "don't",
-        }
+        decision = parse_confirmation(entities.get('original_text', ''))
+        if decision is False:
+            self._pending_confirmation = None
+            return random.choice([
+                f"Abgebrochen, {self.honorific}.",
+                f"Sehr gut, {self.honorific}. Vorgang abgebrochen.",
+                f"Verstanden, {self.honorific}. Ich lasse es.",
+            ])
 
-        if any(word in text for word in affirmatives):
+        if decision is True:
             self._pending_confirmation = None
             # Execute the confirmed command
             tier, reason = classify_command(command)
@@ -987,13 +985,5 @@ class DeveloperToolsSkill(BaseSkill):
                 )
             else:
                 return f"Der Befehl ist fehlgeschlagen, {self.honorific}. {output[:200]}"
-
-        if any(word in text for word in negatives):
-            self._pending_confirmation = None
-            return random.choice([
-                f"Abgebrochen, {self.honorific}.",
-                f"Sehr gut, {self.honorific}. Vorgang abgebrochen.",
-                f"Verstanden, {self.honorific}. Ich lasse es.",
-            ])
 
         return f"Das habe ich nicht verstanden, {self.honorific}. Soll ich fortfahren oder abbrechen?"

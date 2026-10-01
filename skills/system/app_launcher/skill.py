@@ -251,7 +251,7 @@ class AppLauncherSkill(BaseSkill):
             handler = self.semantic_intents[intent]['handler']
             return handler(entities=entities)
         self.logger.error(f"Unknown intent: {intent}")
-        return f"I'm not sure how to handle that, {self.honorific}."
+        return f"Diese Anweisung kann ich gerade nicht zuordnen, {self.honorific}."
 
     # ── App name extraction ────────────────────────────────────────────
 
@@ -273,8 +273,8 @@ class AppLauncherSkill(BaseSkill):
         alias = self._extract_app_name(text)
         if not alias:
             return (
-                f"I don't recognize that application, {self.honorific}. "
-                f"Say 'what apps can you launch' to see what's available."
+                f"Diese Anwendung kenne ich nicht, {self.honorific}. "
+                f"Frag nach den verfügbaren Anwendungen."
             )
 
         app = self.apps[alias]
@@ -294,35 +294,35 @@ class AppLauncherSkill(BaseSkill):
                 start_new_session=True,
             )
             self.logger.info(f"Launched {display_name}: {exec_cmd}")
-            return f"Launching {display_name}, {self.honorific}."
+            return f"Ich starte {display_name}, {self.honorific}."
         except FileNotFoundError:
             self.logger.error(f"Executable not found for {alias}: {exec_cmd}")
-            return f"I couldn't find the executable for {display_name}, {self.honorific}."
+            return f"Ich konnte die ausführbare Datei für {display_name} nicht finden, {self.honorific}."
         except Exception as e:
             self.logger.error(f"Failed to launch {alias}: {e}")
-            return f"Something went wrong launching {display_name}, {self.honorific}."
+            return f"Beim Starten von {display_name} ist ein Fehler aufgetreten, {self.honorific}."
 
     def close_app(self, entities: dict = None) -> str:
         """Close an application window gracefully via desktop manager."""
         text = (entities or {}).get('original_text', '')
         alias = self._extract_app_name(text)
         if not alias:
-            return f"Which application should I close, {self.honorific}?"
+            return f"Welche Anwendung soll ich schließen, {self.honorific}?"
 
         app = self.apps[alias]
         display_name = app.get("name", alias)
 
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
 
         win = self._find_app_window(alias)
         if not win:
-            return f"I don't see {display_name} running, {self.honorific}."
+            return f"{display_name} scheint nicht zu laufen, {self.honorific}."
 
         if self._desktop.close_window(window_id=win["id"]):
             self.logger.info(f"Closed {display_name} (window {win['id']})")
-            return f"Closing {display_name}, {self.honorific}."
-        return f"I couldn't close {display_name}, {self.honorific}."
+            return f"Ich schließe {display_name}, {self.honorific}."
+        return f"Ich konnte {display_name} nicht schließen, {self.honorific}."
 
     # ── Window management ──────────────────────────────────────────────
 
@@ -335,8 +335,8 @@ class AppLauncherSkill(BaseSkill):
 
         if self._desktop.fullscreen_window(window_id=win["id"]):
             self.logger.info(f"Fullscreened window {win['id']}")
-            return f"Done, {self.honorific}."
-        return f"I couldn't fullscreen that window, {self.honorific}."
+            return f"Erledigt, {self.honorific}."
+        return f"Ich konnte das Fenster nicht im Vollbild anzeigen, {self.honorific}."
 
     def minimize_app(self, entities: dict = None) -> str:
         """Minimize a window."""
@@ -347,8 +347,8 @@ class AppLauncherSkill(BaseSkill):
 
         if self._desktop.minimize_window(window_id=win["id"]):
             self.logger.info(f"Minimized window {win['id']}")
-            return f"Minimized, {self.honorific}."
-        return f"I couldn't minimize that window, {self.honorific}."
+            return f"Minimiert, {self.honorific}."
+        return f"Ich konnte das Fenster nicht minimieren, {self.honorific}."
 
     def maximize_app(self, entities: dict = None) -> str:
         """Maximize a window."""
@@ -359,13 +359,13 @@ class AppLauncherSkill(BaseSkill):
 
         if self._desktop.maximize_window(window_id=win["id"]):
             self.logger.info(f"Maximized window {win['id']}")
-            return f"Maximized, {self.honorific}."
-        return f"I couldn't maximize that window, {self.honorific}."
+            return f"Maximiert, {self.honorific}."
+        return f"Ich konnte das Fenster nicht maximieren, {self.honorific}."
 
     def list_apps(self, entities: dict = None) -> str:
         """List all configured applications."""
         if not self.apps:
-            return f"I don't have any applications configured, {self.honorific}."
+            return f"Es sind keine Anwendungen eingerichtet, {self.honorific}."
 
         names = [app.get("name", alias) for alias, app in self.apps.items()]
         if len(names) == 1:
@@ -375,7 +375,7 @@ class AppLauncherSkill(BaseSkill):
         else:
             app_list = ", ".join(names[:-1]) + f", and {names[-1]}"
 
-        return f"I can launch {app_list}, {self.honorific}."
+        return f"Ich kann folgende Anwendungen starten: {app_list}, {self.honorific}."
 
     # ── Volume control ──────────────────────────────────────────────────
 
@@ -389,51 +389,51 @@ class AppLauncherSkill(BaseSkill):
     def volume_up(self, entities: dict = None) -> str:
         """Increase the system volume."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
         text = (entities or {}).get('original_text', '')
         step = self._parse_volume_amount(text)
         current = self._desktop.get_volume()
         if current is None:
-            return f"I couldn't read the current volume, {self.honorific}."
+            return f"Ich konnte die aktuelle Lautstärke nicht auslesen, {self.honorific}."
         new_vol = min(150, current + step)
         if self._desktop.set_volume(new_vol):
-            return f"Volume up to {new_vol}%, {self.honorific}."
-        return f"I couldn't change the volume, {self.honorific}."
+            return f"Lautstärke auf {new_vol} Prozent erhöht, {self.honorific}."
+        return f"Ich konnte die Lautstärke nicht ändern, {self.honorific}."
 
     def volume_down(self, entities: dict = None) -> str:
         """Decrease the system volume."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
         text = (entities or {}).get('original_text', '')
         step = self._parse_volume_amount(text)
         current = self._desktop.get_volume()
         if current is None:
-            return f"I couldn't read the current volume, {self.honorific}."
+            return f"Ich konnte die aktuelle Lautstärke nicht auslesen, {self.honorific}."
         new_vol = max(0, current - step)
         if self._desktop.set_volume(new_vol):
-            return f"Volume down to {new_vol}%, {self.honorific}."
-        return f"I couldn't change the volume, {self.honorific}."
+            return f"Lautstärke auf {new_vol} Prozent verringert, {self.honorific}."
+        return f"Ich konnte die Lautstärke nicht ändern, {self.honorific}."
 
     def toggle_mute(self, entities: dict = None) -> str:
         """Toggle mute on/off."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
         if self._desktop.toggle_mute():
             muted = self._desktop.is_muted()
-            state = "muted" if muted else "unmuted"
+            state = "stummgeschaltet" if muted else "nicht stummgeschaltet"
             return f"Audio {state}, {self.honorific}."
-        return f"I couldn't toggle mute, {self.honorific}."
+        return f"Ich konnte die Stummschaltung nicht ändern, {self.honorific}."
 
     def get_volume(self, entities: dict = None) -> str:
         """Report the current volume level."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
         vol = self._desktop.get_volume()
         muted = self._desktop.is_muted()
         if vol is not None:
-            mute_note = " (muted)" if muted else ""
-            return f"Volume is at {vol}%{mute_note}, {self.honorific}."
-        return f"I couldn't check the volume, {self.honorific}."
+            mute_note = " (stummgeschaltet)" if muted else ""
+            return f"Die Lautstärke beträgt {vol} Prozent{mute_note}, {self.honorific}."
+        return f"Ich konnte die Lautstärke nicht abfragen, {self.honorific}."
 
     # ── Workspace + window focus ─────────────────────────────────────
 
@@ -463,17 +463,17 @@ class AppLauncherSkill(BaseSkill):
     def switch_workspace(self, entities: dict = None) -> str:
         """Switch to a workspace by number or next/previous."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
 
         text = (entities or {}).get('original_text', '')
         target = self._parse_workspace_index(text)
 
         if target is None:
-            return f"Which workspace, {self.honorific}?"
+            return f"Welcher Arbeitsbereich, {self.honorific}?"
 
         workspaces = self._desktop.list_workspaces()
         if not workspaces:
-            return f"I can't access workspace information, {self.honorific}. The desktop extension may not be active."
+            return f"Ich kann die Arbeitsbereichsdaten nicht abrufen, {self.honorific}. Möglicherweise ist die Desktop-Erweiterung nicht aktiv."
 
         active_idx = next((ws["index"] for ws in workspaces if ws.get("active")), 0)
         n_ws = len(workspaces)
@@ -484,45 +484,45 @@ class AppLauncherSkill(BaseSkill):
             target = max(active_idx - 1, 0)
 
         if not isinstance(target, int) or target < 0 or target >= n_ws:
-            return f"Workspace {target + 1} doesn't exist, {self.honorific}. There are {n_ws} workspaces."
+            return f"Arbeitsbereich {target + 1} existiert nicht, {self.honorific}. Es gibt {n_ws} Arbeitsbereiche."
 
         if target == active_idx:
-            return f"Already on workspace {target + 1}, {self.honorific}."
+            return f"Arbeitsbereich {target + 1} ist bereits aktiv, {self.honorific}."
 
         if self._desktop.switch_workspace(target):
-            return f"Switched to workspace {target + 1}, {self.honorific}."
-        return f"I couldn't switch workspaces, {self.honorific}."
+            return f"Zu Arbeitsbereich {target + 1} gewechselt, {self.honorific}."
+        return f"Ich konnte den Arbeitsbereich nicht wechseln, {self.honorific}."
 
     def move_to_workspace(self, entities: dict = None) -> str:
         """Move a window to a different workspace."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
 
         text = (entities or {}).get('original_text', '')
         target = self._parse_workspace_index(text)
 
         if target is None or target in ("next", "previous"):
-            return f"Which workspace should I move it to, {self.honorific}?"
+            return f"In welchen Arbeitsbereich soll ich das Fenster verschieben, {self.honorific}?"
 
         win = self._resolve_window(text)
         if not win:
-            return f"I couldn't find a window to move, {self.honorific}."
+            return f"Ich konnte kein Fenster zum Verschieben finden, {self.honorific}."
 
         workspaces = self._desktop.list_workspaces()
         n_ws = len(workspaces) if workspaces else 0
 
         if not isinstance(target, int) or target < 0 or target >= n_ws:
-            return f"Workspace {target + 1} doesn't exist, {self.honorific}."
+            return f"Arbeitsbereich {target + 1} existiert nicht, {self.honorific}."
 
         if self._desktop.move_window_to_workspace(win["id"], target):
             title = win.get("title", "window")[:30]
-            return f"Moved {title} to workspace {target + 1}, {self.honorific}."
-        return f"I couldn't move the window, {self.honorific}."
+            return f"{title} in Arbeitsbereich {target + 1} verschoben, {self.honorific}."
+        return f"Ich konnte das Fenster nicht verschieben, {self.honorific}."
 
     def focus_app(self, entities: dict = None) -> str:
         """Switch focus to a running application."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
 
         text = (entities or {}).get('original_text', '')
         alias = self._extract_app_name(text)
@@ -531,10 +531,10 @@ class AppLauncherSkill(BaseSkill):
             if win:
                 display_name = self.apps[alias].get("name", alias)
                 if self._desktop.focus_window(window_id=win["id"]):
-                    return f"Switching to {display_name}, {self.honorific}."
-                return f"I couldn't focus {display_name}, {self.honorific}."
+                    return f"Ich wechsle zu {display_name}, {self.honorific}."
+                return f"Ich konnte {display_name} nicht in den Vordergrund holen, {self.honorific}."
             display_name = self.apps[alias].get("name", alias)
-            return f"I don't see {display_name} running, {self.honorific}."
+            return f"{display_name} scheint nicht zu laufen, {self.honorific}."
 
         # Try fuzzy match against all windows
         search = text.lower()
@@ -549,18 +549,18 @@ class AppLauncherSkill(BaseSkill):
             if win:
                 if self._desktop.focus_window(window_id=win["id"]):
                     title = win.get("title", "window")[:30]
-                    return f"Switching to {title}, {self.honorific}."
+                    return f"Ich wechsle zu {title}, {self.honorific}."
 
-        return f"I couldn't find that application, {self.honorific}."
+        return f"Ich konnte diese Anwendung nicht finden, {self.honorific}."
 
     def list_windows(self, entities: dict = None) -> str:
         """List currently open windows."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
 
         windows = self._desktop.list_windows()
         if not windows:
-            return f"I don't see any windows open, {self.honorific}."
+            return f"Ich sehe keine offenen Fenster, {self.honorific}."
 
         # Group by wm_class for a cleaner summary
         seen = {}
@@ -573,31 +573,31 @@ class AppLauncherSkill(BaseSkill):
             names = list(seen.values())
         else:
             names = list(seen.values())[:5]
-            names.append(f"and {len(seen) - 5} more")
+            names.append(f"und {len(seen) - 5} weitere")
 
         app_list = ", ".join(names)
-        return f"You have {len(seen)} applications running: {app_list}, {self.honorific}."
+        return f"Es laufen {len(seen)} Anwendungen: {app_list}, {self.honorific}."
 
     # ── Clipboard ─────────────────────────────────────────────────────
 
     def read_clipboard(self, entities: dict = None) -> str:
         """Read the contents of the clipboard."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
         content = self._desktop.get_clipboard()
         if content is None:
-            return f"I couldn't read the clipboard, {self.honorific}. You may need to install wl-clipboard."
+            return f"Ich konnte die Zwischenablage nicht auslesen, {self.honorific}. Möglicherweise fehlt wl-clipboard."
         if not content.strip():
-            return f"The clipboard is empty, {self.honorific}."
+            return f"Die Zwischenablage ist leer, {self.honorific}."
         # Truncate for speech
         if len(content) > 200:
-            content = content[:200] + "... and more"
-        return f"On your clipboard: {content}"
+            content = content[:200] + "... und mehr"
+        return f"In deiner Zwischenablage: {content}"
 
     def write_clipboard(self, entities: dict = None) -> str:
         """Copy the last JARVIS response to the clipboard."""
         if not self._desktop:
-            return f"Desktop manager is not available, {self.honorific}."
+            return f"Die Desktop-Steuerung ist nicht verfügbar, {self.honorific}."
         # Get last assistant response from conversation history
         last_response = None
         if hasattr(self, 'conversation') and self.conversation:
@@ -607,10 +607,10 @@ class AppLauncherSkill(BaseSkill):
                     last_response = msg.get('content', '')
                     break
         if not last_response:
-            return f"I don't have a recent response to copy, {self.honorific}."
+            return f"Es gibt keine aktuelle Antwort zum Kopieren, {self.honorific}."
         if self._desktop.set_clipboard(last_response):
-            return f"Copied to clipboard, {self.honorific}."
-        return f"I couldn't copy to the clipboard, {self.honorific}. You may need to install wl-clipboard."
+            return f"In die Zwischenablage kopiert, {self.honorific}."
+        return f"Ich konnte den Text nicht in die Zwischenablage kopieren, {self.honorific}. Möglicherweise fehlt wl-clipboard."
 
     # ── Helpers ────────────────────────────────────────────────────────
 
@@ -663,7 +663,7 @@ class AppLauncherSkill(BaseSkill):
 
     def _no_window_response(self, action: str) -> str:
         """Response when no window can be found for the requested action."""
-        return f"I couldn't find a window to {action}, {self.honorific}."
+        return f"Ich konnte kein passendes Fenster für die Aktion {action} finden, {self.honorific}."
 
 # BEGIN JARVIS DE-DE APP RESPONSES
 _original_launch_app_de = AppLauncherSkill.launch_app

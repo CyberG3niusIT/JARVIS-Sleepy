@@ -50,12 +50,12 @@ def _stub_get_safety(monkeypatch):
 class TestSecondConfirmationDoesNotOverwriteFirst:
     def test_second_pending_command_is_refused_not_overwritten(self):
         first = devtools._devtools_run_command({"command": "rm first_file.txt"})
-        assert "CONFIRMATION REQUIRED" in first
+        assert "Bestätigung erforderlich" in first
         assert devtools._pending_command[0] == "rm first_file.txt"
 
         second = devtools._devtools_run_command({"command": "rm second_file.txt"})
 
-        assert "already awaiting confirmation" in second
+        assert "wartet bereits auf Bestätigung" in second
         assert "rm first_file.txt" in second
         # The pending slot must still hold the FIRST command, unchanged.
         assert devtools._pending_command[0] == "rm first_file.txt"
@@ -87,7 +87,7 @@ class TestSecondConfirmationDoesNotOverwriteFirst:
 
         second = devtools._devtools_run_command({"command": "rm second_file.txt"})
 
-        assert "CONFIRMATION REQUIRED" in second
+        assert "Bestätigung erforderlich" in second
         assert devtools._pending_command[0] == "rm second_file.txt"
 
     def test_new_command_accepted_after_first_expires(self):
@@ -97,10 +97,10 @@ class TestSecondConfirmationDoesNotOverwriteFirst:
 
         second = devtools._devtools_run_command({"command": "rm second_file.txt"})
 
-        assert "CONFIRMATION REQUIRED" in second
+        assert "Bestätigung erforderlich" in second
         assert devtools._pending_command[0] == "rm second_file.txt"
 
     def test_no_pending_command_accepts_normally(self):
         result = devtools._devtools_run_command({"command": "rm somefile.txt"})
-        assert "CONFIRMATION REQUIRED" in result
+        assert "Bestätigung erforderlich" in result
         assert "already awaiting" not in result

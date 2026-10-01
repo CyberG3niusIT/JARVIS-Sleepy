@@ -74,11 +74,11 @@ _PRIORITY_2_KEYWORDS = [
 
 # Category display names
 _CATEGORY_LABELS = {
-    "tech": "tech",
-    "politics": "politics",
-    "general": "general",
-    "cyber": "cybersecurity",
-    "local": "local",
+    "tech": "Technik",
+    "politics": "Politik",
+    "general": "Allgemeines",
+    "cyber": "Cybersicherheit",
+    "local": "Lokales",
 }
 
 
@@ -109,6 +109,7 @@ class NewsManager:
 
         # Background thread
         self._running = False
+        self._stop_event = threading.Event()
         self._poll_thread: Optional[threading.Thread] = None
         # Session #8 (agentic-audit): timestamp of the last poll-loop
         # ITERATION START, set before _poll_once() runs — lets
@@ -500,6 +501,8 @@ class NewsManager:
 
     def start(self):
         """Start background polling."""
+        if self._running:
+            return
         if not self.config.get("news.enabled", True):
             self.logger.info("News system disabled in config")
             return
@@ -510,6 +513,7 @@ class NewsManager:
         self.logger.info(f"Starting news monitor ({len(self.feeds)} feeds, "
                          f"interval={self.poll_interval}s)")
         self._running = True
+        self._stop_event.clear()
         self._poll_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name="news-poll"
         )
@@ -518,6 +522,7 @@ class NewsManager:
     def stop(self):
         """Stop the polling thread."""
         self._running = False
+        self._stop_event.set()
         if self._poll_thread:
             self._poll_thread.join(timeout=10)
         self.logger.info("News monitor stopped")
@@ -525,10 +530,8 @@ class NewsManager:
     def _poll_loop(self):
         """Main polling loop: fetch feeds, classify, dedup, store."""
         # Initial delay to let other systems initialize
-        for _ in range(6):  # 30 seconds
-            if not self._running:
-                return
-            time.sleep(5)
+        if self._stop_event.wait(30):
+            return
 
         while self._running:
             self._last_poll_ts = time.time()
@@ -537,11 +540,8 @@ class NewsManager:
             except Exception as e:
                 self.logger.error(f"News poll error: {e}", exc_info=True)
 
-            # Sleep in small increments for responsive shutdown
-            for _ in range(self.poll_interval // 5):
-                if not self._running:
-                    return
-                time.sleep(5)
+            if self._stop_event.wait(self.poll_interval):
+                return
 
     def _poll_once(self):
         """Single poll cycle: fetch, classify, dedup, store, queue critical."""
@@ -635,15 +635,15 @@ class NewsManager:
             h = get_honorific()
             if item["priority"] == 1:
                 text = random.choice([
-                    f"{h.capitalize()}, urgent {label} news. {source} is reporting {headline}.",
-                    f"{h.capitalize()}, I have a critical {label} alert. According to {source}, {headline}.",
-                    f"Pardon the interruption, {h}. {source} reports {headline}.",
+                    f"{h.capitalize()}, eine dringende Meldung aus {label}. {source} meldet: {headline}.",
+                    f"{h.capitalize()}, eine kritische Meldung aus {label}. Laut {source}: {headline}.",
+                    f"Entschuldige die Unterbrechung, {h}. {source} berichtet: {headline}.",
                 ])
             else:
                 text = random.choice([
-                    f"{h.capitalize()}, a {label} alert from {source}: {headline}.",
-                    f"{h.capitalize()}, {source} is reporting {headline}.",
-                    f"Worth noting, {h}. {source} reports {headline}.",
+                    f"{h.capitalize()}, eine {label} Meldung von {source}: {headline}.",
+                    f"{h.capitalize()}, {source} meldet: {headline}.",
+                    f"Beachtenswert, {h}. {source} berichtet: {headline}.",
                 ])
             self.tts.speak(text)
             ids_announced.append(item["id"])
@@ -683,18 +683,18 @@ class NewsManager:
         top_labels = [_CATEGORY_LABELS.get(cat, cat) for cat, _ in top_cats]
 
         if len(top_labels) == 1:
-            emphasis = f"mostly {top_labels[0]}"
+            emphasis = f"vor allem aus {top_labels[0]}"
         else:
-            emphasis = f"mostly {top_labels[0]} and {top_labels[1]}"
+            emphasis = f"vor allem aus {top_labels[0]} und {top_labels[1]}"
 
         if total < 20:
-            count_phrase = f"{total} new headlines"
+            count_phrase = f"{total} neue Schlagzeilen"
         elif total < 100:
-            count_phrase = f"around {(total // 10) * 10} headlines"
+            count_phrase = f"rund {(total // 10) * 10} Schlagzeilen"
         else:
-            count_phrase = f"over {(total // 50) * 50} headlines"
+            count_phrase = f"über {(total // 50) * 50} Schlagzeilen"
 
-        return f"On the news front, there are {count_phrase} waiting, {emphasis}. Just say the word if you'd like to hear them."
+        return f"Es gibt {count_phrase}, {emphasis}. Sag Bescheid, wenn du sie hören möchtest."
 
     # ------------------------------------------------------------------
     # Reading Headlines Aloud
@@ -711,13 +711,13 @@ class NewsManager:
         )
 
         # Build label fragments for speech
-        _PRIORITY_LABELS = {1: "critical", 2: "high-priority"}
+        _PRIORITY_LABELS = {1: "kritische", 2: "wichtige"}
         pri_label = _PRIORITY_LABELS.get(max_priority, "") if max_priority else ""
         cat_label = _CATEGORY_LABELS.get(category, category) if category else ""
 
         if not headlines:
-            qualifier = f"{pri_label} {cat_label}".strip() or "news"
-            return f"No new {qualifier} headlines at the moment, {get_honorific()}."
+            qualifier = f"{pri_label} {cat_label}".strip() or "Nachrichten"
+            return f"Zurzeit gibt es keine neuen Schlagzeilen zu {qualifier}, {get_honorific()}."
 
         ids_read = []
         lines = []
@@ -742,9 +742,9 @@ class NewsManager:
         # Build response
         qualifier = f"{pri_label} {cat_label}".strip()
         if qualifier:
-            intro = f"Here are the top {qualifier} headlines, {get_honorific()}. "
+            intro = f"Hier sind die wichtigsten Schlagzeilen zu {qualifier}, {get_honorific()}. "
         else:
-            intro = f"Here are the top headlines, {get_honorific()}. "
+            intro = f"Hier sind die wichtigsten Schlagzeilen, {get_honorific()}. "
 
         response = intro + " ".join(lines)
 
@@ -752,7 +752,7 @@ class NewsManager:
         remaining = self.get_unread_count()
         total_remaining = sum(remaining.values())
         if total_remaining > 0:
-            response += f" There are {total_remaining} more if you'd like to continue, {get_honorific()}."
+            response += f" Es gibt noch {total_remaining} weitere, falls du fortfahren möchtest, {get_honorific()}."
 
         return response
 
@@ -773,26 +773,26 @@ class NewsManager:
 
         # Source introduction patterns — varied for natural cadence
         _LEAD_INS = [
-            "{source} reports that {headline}.",
-            "{source} is reporting {headline}.",
-            "Over at {source}, {headline}.",
-            "According to {source}, {headline}.",
-            "From {source}, {headline}.",
+            "{source} berichtet: {headline}.",
+            "{source} meldet: {headline}.",
+            "Bei {source}: {headline}.",
+            "Laut {source}: {headline}.",
+            "Von {source}: {headline}.",
         ]
 
         _FOLLOW_INS = [
-            "Meanwhile, {source} reports {headline}.",
-            "{source} is also covering {headline}.",
-            "Over at {source}, {headline}.",
-            "{source} reports {headline}.",
-            "In other news, {source} says {headline}.",
-            "Separately, {source} reports {headline}.",
+            "Außerdem berichtet {source}: {headline}.",
+            "{source} berichtet auch: {headline}.",
+            "Bei {source}: {headline}.",
+            "{source} berichtet: {headline}.",
+            "Eine weitere Meldung von {source}: {headline}.",
+            "Außerdem meldet {source}: {headline}.",
         ]
 
         _FINAL_INS = [
-            "Finally, {source} reports {headline}.",
-            "Lastly, from {source}, {headline}.",
-            "Rounding things out, {source} has {headline}.",
+            "Abschließend berichtet {source}: {headline}.",
+            "Zuletzt von {source}: {headline}.",
+            "Abschließend meldet {source}: {headline}.",
         ]
 
         if index == 0:
@@ -874,7 +874,7 @@ class NewsManager:
         """Generate a spoken count of unread headlines by category."""
         counts = self.get_unread_count(user_id=user_id)
         if not counts:
-            return f"No new headlines at the moment, {get_honorific()}."
+            return f"Zurzeit gibt es keine neuen Schlagzeilen, {get_honorific()}."
 
         total = sum(counts.values())
         parts = []
@@ -885,12 +885,12 @@ class NewsManager:
         if len(parts) == 1:
             breakdown = parts[0]
         elif len(parts) == 2:
-            breakdown = f"{parts[0]} and {parts[1]}"
+            breakdown = f"{parts[0]} und {parts[1]}"
         else:
-            breakdown = ", ".join(parts[:-1]) + f", and {parts[-1]}"
+            breakdown = ", ".join(parts[:-1]) + f" und {parts[-1]}"
 
-        return (f"You have {total} new headlines, {get_honorific()}: {breakdown}. "
-                "Would you like to hear them?")
+        return (f"Du hast {total} neue Schlagzeilen, {get_honorific()}: {breakdown}. "
+                "Möchtest du sie hören?")
 
     # ------------------------------------------------------------------
     # "Pull That Up" Support

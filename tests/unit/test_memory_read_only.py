@@ -112,6 +112,17 @@ def test_read_only_never_changes_the_owners_files(owner, tmp_path):
     assert {name: _digest(path) for name, path in _stores(tmp_path).items()} == before
 
 
+def test_readonly_statistics_load_real_index_without_embedding_model(owner, tmp_path):
+    before = {name: _digest(path) for name, path in _stores(tmp_path).items()}
+    reader = MemoryManager(_config(tmp_path), conversation=None,
+                           embedding_model=None, read_only=True)
+    assert reader.faiss_index.ntotal == owner.faiss_index.ntotal == 1
+    assert reader.faiss_metadata == []
+    assert reader.search_history("synthetic query", top_k=1) == []
+    reader.save()
+    assert {name: _digest(path) for name, path in _stores(tmp_path).items()} == before
+
+
 def test_every_write_path_is_rejected_logged_and_counted(owner, tmp_path):
     before = {name: _digest(path) for name, path in _stores(tmp_path).items()}
     reader = _read_only(tmp_path)

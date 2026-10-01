@@ -91,6 +91,7 @@ class WeatherPoller:
 
         # Background thread
         self._running = False
+        self._stop_event = threading.Event()
         self._poll_thread: Optional[threading.Thread] = None
         # Session #8 (agentic-audit): see NewsManager's identical field
         # for why — lets core/watchdog.py distinguish a hung poll loop
@@ -143,6 +144,8 @@ class WeatherPoller:
 
     def start(self):
         """Start background polling thread."""
+        if self._running:
+            return
         if not self.owm_key:
             self.logger.warning("OPENWEATHER_API_KEY not set — weather polling disabled")
             return
@@ -152,6 +155,7 @@ class WeatherPoller:
 
         self.logger.info("Starting weather poller (interval=%ds)", self.poll_interval)
         self._running = True
+        self._stop_event.clear()
         self._poll_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name="weather-poll"
         )
@@ -160,6 +164,7 @@ class WeatherPoller:
     def stop(self):
         """Stop the polling thread."""
         self._running = False
+        self._stop_event.set()
         if self._poll_thread:
             self._poll_thread.join(timeout=10)
         self.logger.info("Weather poller stopped")
@@ -171,10 +176,8 @@ class WeatherPoller:
     def _poll_loop(self):
         """Main polling loop."""
         # Initial delay (30s) to let other systems initialize
-        for _ in range(6):
-            if not self._running:
-                return
-            time.sleep(5)
+        if self._stop_event.wait(30):
+            return
 
         # Check if sun_times needs pre-population
         try:
@@ -200,11 +203,8 @@ class WeatherPoller:
             if has_active:
                 self.logger.info("Active alerts detected — polling every %ds", interval)
 
-            # Sleep in small increments for responsive shutdown
-            for _ in range(interval // 5):
-                if not self._running:
-                    return
-                time.sleep(5)
+            if self._stop_event.wait(interval):
+                return
 
     def _poll_once(self):
         """Single poll cycle: current conditions, forecast, alerts."""

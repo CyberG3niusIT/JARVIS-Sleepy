@@ -134,7 +134,7 @@ def build_request(args: dict) -> ExpertRequest | None:
 def handler(args: dict) -> str:
     request = build_request(args or {})
     if request is None:
-        return "Error: 'reason' and 'task' are required"
+        return "Fehler: 'reason' und 'task' sind erforderlich"
     if _delegator is None:
         return UNAVAILABLE_TEXT
     try:

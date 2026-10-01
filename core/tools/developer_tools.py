@@ -189,11 +189,11 @@ def _run_cmd(cmd: str, cwd: str = None, timeout: int = 15) -> str:
         output = result.stdout.strip()
         if result.returncode != 0 and result.stderr.strip():
             output += f"\n{result.stderr.strip()}" if output else result.stderr.strip()
-        return output or "(no output)"
+        return output or "(keine Ausgabe)"
     except subprocess.TimeoutExpired:
-        return f"Error: command timed out after {timeout}s"
+        return f"Fehler: Der Befehl hat nach {timeout} s die Zeitgrenze überschritten."
     except Exception as e:
-        return f"Error: {e}"
+        return f"Fehler: Die Anfrage konnte nicht ausgeführt werden."
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +226,7 @@ def handler(args: dict) -> str:
     sub_handler = _DEVTOOLS_HANDLERS.get(action)
     if not sub_handler:
         available = ", ".join(sorted(_DEVTOOLS_HANDLERS.keys()))
-        return f"Unknown developer_tools action '{action}'. Available: {available}"
+        return f"Unbekannte developer_tools-Aktion '{action}'. Verfügbar: {available}"
     return sub_handler(args)
 
 
@@ -240,8 +240,8 @@ def _devtools_git_status(args: dict) -> str:
     lines = []
     for name, path in repos.items():
         output = _run_cmd("git status --short", cwd=path)
-        if output == "(no output)":
-            output = "clean"
+        if output == "(keine Ausgabe)":
+            output = "keine Änderungen"
         lines.append(f"[{name}] ({path}):\n{output}")
     return "\n\n".join(lines)
 
@@ -263,8 +263,8 @@ def _devtools_git_diff(args: dict) -> str:
     lines = []
     for name, path in repos.items():
         output = _run_cmd("git diff", cwd=path)
-        if output == "(no output)":
-            output = "no changes"
+        if output == "(keine Ausgabe)":
+            output = "keine Änderungen"
         lines.append(f"[{name}]:\n{output}")
     return "\n\n".join(lines)
 
@@ -283,7 +283,7 @@ def _devtools_git_branch(args: dict) -> str:
 def _devtools_codebase_search(args: dict) -> str:
     pattern = args.get("pattern", "").strip()
     if not pattern:
-        return "Error: 'pattern' is required for codebase search."
+        return "Fehler: Für die Codesuche ist 'pattern' erforderlich."
     search_dirs = [
         str(Path(_JARVIS_ROOT) / 'core'),
         str(Path(_JARVIS_ROOT) / 'skills'),
@@ -296,13 +296,13 @@ def _devtools_codebase_search(args: dict) -> str:
             f"-- {shlex.quote(pattern)} {d}",
             timeout=10,
         )
-        if output and output != "(no output)" and not output.startswith("Error"):
+        if output and output != "(keine Ausgabe)" and not output.startswith(("Error", "Fehler:")):
             all_matches.extend(output.split('\n'))
     if not all_matches:
-        return f"No matches found for '{pattern}'."
+        return f"Keine Treffer für '{pattern}' gefunden."
     if len(all_matches) > 30:
         truncated = all_matches[:30]
-        truncated.append(f"... ({len(all_matches) - 30} more matches)")
+        truncated.append(f"... ({len(all_matches) - 30} weitere Treffer)")
         return "\n".join(truncated)
     return "\n".join(all_matches)
 
@@ -372,15 +372,15 @@ def _devtools_package_info(args: dict) -> str:
     if package_name:
         lines = []
         which = _run_cmd(f"which {shlex.quote(package_name)}")
-        if which and not which.startswith("Error") and which != "(no output)":
-            lines.append(f"Location: {which}")
+        if which and not which.startswith(("Error", "Fehler:")) and which != "(keine Ausgabe)":
+            lines.append(f"Installationsort: {which}")
         version = _run_cmd(f"{shlex.quote(package_name)} --version 2>&1 | head -1")
-        if version and not version.startswith("Error") and version != "(no output)":
+        if version and not version.startswith(("Error", "Fehler:")) and version != "(keine Ausgabe)":
             lines.append(f"Version: {version}")
         pip_info = _run_cmd(f"pip show {shlex.quote(package_name)} 2>/dev/null")
-        if pip_info and not pip_info.startswith("Error") and pip_info != "(no output)":
-            lines.append(f"Pip info:\n{pip_info}")
-        return "\n".join(lines) if lines else f"Package '{package_name}' not found."
+        if pip_info and not pip_info.startswith(("Error", "Fehler:")) and pip_info != "(keine Ausgabe)":
+            lines.append(f"Pip-Informationen:\n{pip_info}")
+        return "\n".join(lines) if lines else f"Paket '{package_name}' nicht gefunden."
     # General info
     return _run_cmd("python3 --version && pip --version")
 
@@ -388,7 +388,7 @@ def _devtools_package_info(args: dict) -> str:
 @_register_devtool("system_health")
 def _devtools_system_health(args: dict) -> str:
     if not _config:
-        return "Error: config not initialized. Cannot run health check."
+        return "Fehler: Die Konfiguration ist nicht initialisiert. Die Zustandsprüfung ist nicht verfügbar."
     try:
         from core.health_check import get_full_health
         results = get_full_health(_config)
@@ -414,7 +414,7 @@ def _devtools_system_health(args: dict) -> str:
         from core.health_check import format_voice_brief
         return format_voice_brief(results)
     except Exception as e:
-        return f"Error running health check: {e}"
+        return f"Fehler: Die Zustandsprüfung konnte nicht ausgeführt werden."
 
 
 @_register_devtool("check_logs")
@@ -438,11 +438,11 @@ def _devtools_run_command(args: dict) -> str:
     global _pending_command
     command = args.get("command", "").strip()
     if not command:
-        return "Error: 'command' is required."
+        return "Fehler: 'command' ist erforderlich."
     safety = _get_safety()
     tier, reason = safety.classify_command(command)
     if tier == 'blocked':
-        return f"BLOCKED: {reason}. This command is not allowed."
+        return f"Gesperrt: Dieser Befehl ist nicht erlaubt."
     if tier == 'confirmation':
         with _pending_lock:
             # Session #7 fix (agentic-system audit finding #10): this is
@@ -459,13 +459,13 @@ def _devtools_run_command(args: dict) -> str:
                 existing_command, existing_expiry = _pending_command
                 if _time.time() <= existing_expiry:
                     return (
-                        f"A different command is already awaiting confirmation: "
-                        f"`{existing_command}`. Please confirm or dismiss that one "
-                        f"(it expires in {existing_expiry - _time.time():.0f}s) "
-                        f"before requesting a new one."
+                        f"Ein anderer Befehl wartet bereits auf Bestätigung: "
+                        f"`{existing_command}`. Bitte bestätigen oder verwerfen Sie ihn "
+                        f"(gültig für {existing_expiry - _time.time():.0f} s), "
+                        f"bevor Sie einen neuen anfragen."
                     )
             _pending_command = (command, _time.time() + 30)
-        return f"CONFIRMATION REQUIRED: `{command}` — {reason}. Shall I proceed?"
+        return f"Bestätigung erforderlich: `{command}`. Soll ich den Befehl ausführen?"
     # Tier 1 (allowed) or Tier 2 (safe_write) — execute
     output = _run_cmd(command, cwd=_JARVIS_ROOT, timeout=30)
     return safety.sanitize_output(output)
@@ -476,11 +476,11 @@ def _devtools_confirm_pending(args: dict) -> str:
     global _pending_command
     with _pending_lock:
         if _pending_command is None:
-            return "No pending command to confirm."
+            return "Es wartet kein Befehl auf Bestätigung."
         command, expiry = _pending_command
         if _time.time() > expiry:
             _pending_command = None
-            return "That confirmation has expired. Please issue the command again."
+            return "Diese Bestätigung ist abgelaufen. Bitte stellen Sie die Anfrage erneut."
         _pending_command = None
     safety = _get_safety()
     output = _run_cmd(command, cwd=_JARVIS_ROOT, timeout=30)

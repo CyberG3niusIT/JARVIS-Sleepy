@@ -81,7 +81,7 @@ class TestTimeoutActuallyCancelsTheCoroutine:
         handler = bridge._make_sync_handler("slow_server", "slow_tool")
         result = handler({})
 
-        assert "timed out" in result.lower()
+        assert "zeitgrenze überschritten" in result.lower()
         assert started.wait(timeout=1)
         assert cancelled.wait(timeout=2), (
             "the coroutine was never actually cancelled — it may still "

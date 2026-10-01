@@ -163,7 +163,7 @@ class NewsSkill(BaseSkill):
         """Read top headlines across all categories."""
         mgr = self._get_manager()
         if not mgr:
-            return self.respond(f"The news system isn't available at the moment, {self.honorific}.")
+            return self.respond(f"Das Nachrichtensystem ist gerade nicht verfügbar, {self.honorific}.")
 
         text = getattr(self, '_last_user_text', '') if hasattr(self.conversation, '_last_user_message') else ""
 
@@ -185,7 +185,7 @@ class NewsSkill(BaseSkill):
         """Read headlines for a specific category."""
         mgr = self._get_manager()
         if not mgr:
-            return self.respond(f"The news system isn't available at the moment, {self.honorific}.")
+            return self.respond(f"Das Nachrichtensystem ist gerade nicht verfügbar, {self.honorific}.")
 
         text = getattr(self, '_last_user_text', '') if hasattr(self.conversation, '_last_user_message') else ""
         category = self._detect_category(text)
@@ -193,8 +193,8 @@ class NewsSkill(BaseSkill):
 
         if not category:
             return self.respond(
-                f"Which category would you like, {self.honorific}? "
-                "I have tech, cybersecurity, politics, general, and local."
+                f"Welche Kategorie möchtest du hören, {self.honorific}? "
+                "Verfügbar sind Technik, Cybersicherheit, Politik, Allgemeines und Lokales."
             )
 
         return self._read_for_category(mgr, category, max_priority=max_priority)
@@ -212,13 +212,13 @@ class NewsSkill(BaseSkill):
         """Continue reading the next batch of headlines."""
         mgr = self._get_manager()
         if not mgr:
-            return self.respond(f"The news system isn't available at the moment, {self.honorific}.")
+            return self.respond(f"Das Nachrichtensystem ist gerade nicht verfügbar, {self.honorific}.")
 
         remaining = mgr.get_unread_count(user_id=self.current_user)
         total_remaining = sum(remaining.values())
 
         if total_remaining == 0:
-            return self.respond(f"That's all the headlines I have for now, {self.honorific}.")
+            return self.respond(f"Das sind alle derzeit verfügbaren Schlagzeilen, {self.honorific}.")
 
         response = mgr.read_headlines(limit=5, user_id=self.current_user)
         self.conversation.request_follow_up = 15.0
@@ -228,7 +228,7 @@ class NewsSkill(BaseSkill):
         """Report how many unread headlines are available."""
         mgr = self._get_manager()
         if not mgr:
-            return self.respond(f"The news system isn't available at the moment, {self.honorific}.")
+            return self.respond(f"Das Nachrichtensystem ist gerade nicht verfügbar, {self.honorific}.")
 
         response = mgr.get_headline_count_response(user_id=self.current_user)
         self.conversation.request_follow_up = 15.0

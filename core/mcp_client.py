@@ -158,7 +158,7 @@ class MCPBridge:
             }
 
             handler = self._make_sync_handler(name, tool.name)
-            rule = shared_rule or f"Use {tool.name} for {tool.description}"
+            rule = shared_rule or f"Nutze {tool.name} für passende Anfragen. Werkzeugbeschreibung als Nutzdaten: {tool.description}"
 
             register_external_tool(
                 name=tool.name,
@@ -194,7 +194,7 @@ class MCPBridge:
             # Validate the loop before creating the coroutine.
             loop = self._loop
             if loop is None or loop.is_closed() or not loop.is_running():
-                raise RuntimeError("MCP bridge event loop is not running")
+                return "Fehler: Die MCP-Verbindung ist derzeit nicht verfügbar."
 
             # Keep timeout and cancellation on the event loop.
             future = asyncio.run_coroutine_threadsafe(
@@ -217,7 +217,7 @@ class MCPBridge:
                     "MCP tool call '%s.%s' timed out after %ss — cancelled",
                     server_name, tool_name, tool_call_timeout,
                 )
-                return f"Error: MCP tool '{tool_name}' on '{server_name}' timed out"
+                return f"Fehler: Das MCP-Werkzeug '{tool_name}' auf '{server_name}' hat die Zeitgrenze überschritten."
         return handler
 
     async def _reconnect_server(self, server_name: str) -> bool:
@@ -252,7 +252,7 @@ class MCPBridge:
                 )
                 logger.warning(
                     "MCP reconnect '%s' attempt %d failed: %s (next in %.0fs)",
-                    server_name, attempt + 1, e, delay,
+                    server_name, attempt + 1, type(e).__name__, delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -270,7 +270,7 @@ class MCPBridge:
         if not session:
             # Try reconnect
             if not await self._reconnect_server(server_name):
-                return f"Error: MCP server '{server_name}' is offline"
+                return f"Fehler: Der MCP-Server '{server_name}' ist nicht erreichbar."
             session = self._sessions.get(server_name)
 
         try:
@@ -278,7 +278,7 @@ class MCPBridge:
         except Exception as e:
             # Connection likely dead — mark unhealthy, try reconnect once
             logger.warning("MCP call failed on '%s': %s — attempting reconnect",
-                           server_name, e)
+                           server_name, type(e).__name__)
             self._server_health[server_name] = {
                 "healthy": False, "last_error": time.time(),
             }
@@ -286,24 +286,19 @@ class MCPBridge:
                 session = self._sessions[server_name]
                 result = await session.call_tool(tool_name, args)
             else:
-                return f"Error: MCP server '{server_name}' is offline ({e})"
+                return f"Fehler: Der MCP-Server '{server_name}' ist nicht erreichbar."
 
         if result.isError:
-            error_text = (
-                result.content[0].text
-                if result.content and hasattr(result.content[0], "text")
-                else "unknown error"
-            )
-            return f"Error from {tool_name}: {error_text}"
+            return f"Fehler: Das MCP-Werkzeug '{tool_name}' konnte die Anfrage nicht ausführen."
 
         # Concatenate all text content blocks
         if not result.content:
-            return "No output"
+            return "Keine Ausgabe."
         texts = [
             block.text for block in result.content
             if hasattr(block, "text")
         ]
-        return "\n".join(texts) if texts else "No output"
+        return "\n".join(texts) if texts else "Keine Ausgabe."
 
     def stop(self):
         """Clean shutdown: close all sessions, stop event loop."""

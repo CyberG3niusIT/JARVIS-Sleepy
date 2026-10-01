@@ -25,6 +25,8 @@ class ReminderSkill(BaseSkill):
         # --- Set a one-time reminder ---
         self.register_semantic_intent(
             examples=[
+                "Erinnere mich heute um 17 Uhr an den Einkauf",
+                "Erinnere mich morgen früh an den Anruf",
                 "remind me to take out the trash tomorrow at 6",
                 "set a reminder for my meeting at 3 PM",
                 "remind me about the dentist appointment next Tuesday",
@@ -59,6 +61,8 @@ class ReminderSkill(BaseSkill):
         self.register_semantic_intent(
             examples=[
                 "what reminders do I have",
+                "Welche Erinnerungen habe ich heute",
+                "Zeige meine Erinnerungen",
                 "show my reminders",
                 "list my reminders",
                 "any upcoming reminders",
@@ -117,6 +121,7 @@ class ReminderSkill(BaseSkill):
         self.register_semantic_intent(
             examples=[
                 "what do I have today",
+                "Was steht heute an",
                 "daily rundown",
                 "what's on for today",
                 "morning briefing",
@@ -140,6 +145,12 @@ class ReminderSkill(BaseSkill):
     # ------------------------------------------------------------------
 
     @property
+    def current_user(self):
+        user = getattr(self.conversation, "current_user", None)
+        return user if isinstance(user, str) and user.strip() and user.casefold() not in {
+            "__guest__", "guest", "unknown", "anonymous", "none", "__unknown__"} else None
+
+    @property
     def manager(self):
         """Lazy access to the ReminderManager singleton."""
         if not hasattr(self, "_manager_ref") or self._manager_ref is None:
@@ -153,6 +164,8 @@ class ReminderSkill(BaseSkill):
 
     def set_reminder(self) -> str:
         """Handle 'remind me to X at Y' commands."""
+        if not self.current_user:
+            return self.respond("Bitte wählen Sie zuerst Ihr Nutzerprofil aus.")
         text = getattr(self, "_last_user_text", "")
         if not text:
             return self.respond("Das habe ich nicht ganz verstanden. Woran soll ich Sie erinnern?")
@@ -199,6 +212,8 @@ class ReminderSkill(BaseSkill):
 
     def set_recurring(self) -> str:
         """Handle recurring reminder commands."""
+        if not self.current_user:
+            return self.respond("Bitte wählen Sie zuerst Ihr Nutzerprofil aus.")
         text = getattr(self, "_last_user_text", "")
         if not text:
             return self.respond("Woran möchten Sie regelmäßig erinnert werden?")
@@ -233,6 +248,13 @@ class ReminderSkill(BaseSkill):
 
     def list_reminders(self) -> str:
         """List upcoming reminders."""
+        if not self.current_user:
+            return self.respond("Bitte wählen Sie zuerst Ihr Nutzerprofil aus.")
+        text = getattr(self, "_last_user_text", "").lower()
+        if "heute" in text:
+            from core.day_partner import DayPartner
+            return self.respond(DayPartner(self.manager, self.manager._calendar_manager).get_overview(
+                created_by=self.current_user, sources="reminders"))
         pending = self.manager.list_reminders("pending", limit=10, created_by=self.current_user)
         fired = self.manager.list_reminders("fired", limit=5, created_by=self.current_user)
         all_reminders = fired + pending  # Show fired (awaiting ack) first
@@ -257,6 +279,8 @@ class ReminderSkill(BaseSkill):
 
     def cancel_reminder(self) -> str:
         """Cancel a reminder by title match."""
+        if not self.current_user:
+            return self.respond("Bitte wählen Sie zuerst Ihr Nutzerprofil aus.")
         text = getattr(self, "_last_user_text", "")
 
         # Extract title fragment from command. German first (the active
@@ -279,7 +303,9 @@ class ReminderSkill(BaseSkill):
 
     def acknowledge_current(self) -> str:
         """Acknowledge the most recently fired reminder."""
-        if not self.manager.is_awaiting_ack():
+        if not self.current_user:
+            return self.respond("Bitte wählen Sie zuerst Ihr Nutzerprofil aus.")
+        if not self.manager.is_awaiting_ack(created_by=self.current_user):
             # No reminders awaiting ack — let this fall through to LLM
             return None
 
@@ -296,6 +322,8 @@ class ReminderSkill(BaseSkill):
 
     def snooze_current(self) -> str:
         """Snooze the most recently fired reminder."""
+        if not self.current_user:
+            return self.respond("Bitte wählen Sie zuerst Ihr Nutzerprofil aus.")
         text = self._normalize_numbers(getattr(self, "_last_user_text", ""))
 
         # Try to extract snooze duration
@@ -304,10 +332,10 @@ class ReminderSkill(BaseSkill):
         if m:
             minutes = int(m.group(1))
 
-        if not self.manager.is_awaiting_ack():
+        if not self.manager.is_awaiting_ack(created_by=self.current_user):
             return self.respond(f"Im Moment gibt es nichts zu verschieben, {self.honorific}.")
 
-        reminder = self.manager.snooze_last(minutes)
+        reminder = self.manager.snooze_last(minutes, created_by=self.current_user)
         if reminder:
             snooze_min = minutes or self.manager.default_snooze
             return self.respond(f"Verschoben, {self.honorific}. Ich erinnere Sie in {snooze_min} Minuten erneut.")
@@ -315,7 +343,9 @@ class ReminderSkill(BaseSkill):
 
     def daily_rundown(self) -> str:
         """Provide the daily rundown of today's reminders."""
-        rundown = self.manager.get_daily_rundown()
+        from core.day_partner import DayPartner
+        rundown = DayPartner(self.manager, self.manager._calendar_manager).get_overview(
+            created_by=self.current_user)
         return self.respond(rundown)
 
     # ------------------------------------------------------------------
@@ -375,6 +405,11 @@ class ReminderSkill(BaseSkill):
     def _parse_reminder_command(self, text: str) -> dict:
         """Parse 'remind me to X at/on/in Y' into title and time components."""
         text_clean = text.strip()
+        german = re.fullmatch(
+            r"erinnere\s+mich\s+(.+?)\s+(?:an|daran[,]?)\s+(.+?)[.!]?",
+            text_clean, re.I)
+        if german:
+            return {"time_text": german.group(1).strip(), "title": german.group(2).strip()}
 
         # Strip command prefix + priority words in one pass
         # Includes fuzzy Whisper variants: "urge your" for "urgent", etc.
@@ -447,7 +482,7 @@ class ReminderSkill(BaseSkill):
                     "title": title,
                     "rule": rule,
                     "first_time": parsed_time,
-                    "description": f"every day at {parsed_time.strftime('%-I:%M %p')}",
+                    "description": f"jeden Tag um {parsed_time:%H:%M} Uhr",
                 }
 
         # "every [day_name(s)] [at TIME] [to TITLE]"
@@ -474,12 +509,13 @@ class ReminderSkill(BaseSkill):
             parsed_time = self.manager.parse_natural_time(f"today at {time_text}")
             if parsed_time and days:
                 rule = f"weekly:{','.join(days)}:{parsed_time.hour:02d}:{parsed_time.minute:02d}"
-                days_desc = " and ".join([d.capitalize() for d in re.split(r"\s+and\s+", days_text)])
+                day_names = {"monday": "Montag", "tuesday": "Dienstag", "wednesday": "Mittwoch", "thursday": "Donnerstag", "friday": "Freitag", "saturday": "Samstag", "sunday": "Sonntag"}
+                days_desc = " und ".join(day_names[d] for d in re.split(r"\s+and\s+", days_text))
                 return {
                     "title": title,
                     "rule": rule,
                     "first_time": parsed_time,
-                    "description": f"every {days_desc} at {parsed_time.strftime('%-I:%M %p')}",
+                    "description": f"jeden {days_desc} um {parsed_time:%H:%M} Uhr",
                 }
 
         return None
@@ -502,24 +538,9 @@ class ReminderSkill(BaseSkill):
     def _format_time_natural(self, dt: datetime) -> str:
         """Format a datetime as natural speech."""
         now = datetime.now()
-        diff = dt - now
-
-        if diff.total_seconds() < 90:
-            return "in about a minute"
-        elif diff.total_seconds() < 3600:
-            minutes = int(diff.total_seconds() / 60)
-            return f"in {minutes} minute{'s' if minutes != 1 else ''}"
-        elif diff.total_seconds() < 7200:
-            return "in about an hour"
-
-        if dt.date() == now.date():
-            return f"today at {dt.strftime('%-I:%M %p')}"
-        elif (dt.date() - now.date()).days == 1:
-            return f"tomorrow at {dt.strftime('%-I:%M %p')}"
-        elif (dt.date() - now.date()).days < 7:
-            return f"{dt.strftime('%A')} at {dt.strftime('%-I:%M %p')}"
-        else:
-            return f"on {dt.strftime('%B %-d')} at {dt.strftime('%-I:%M %p')}"
+        day = "heute" if dt.date() == now.date() else (
+            "morgen" if (dt.date() - now.date()).days == 1 else dt.strftime("am %d.%m.%Y"))
+        return f"{day} um {dt:%H:%M} Uhr"
 
     def _format_reminder_time(self, time_str: str) -> str:
         """Format a stored reminder time for speech."""

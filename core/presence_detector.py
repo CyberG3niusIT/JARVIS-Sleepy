@@ -128,6 +128,7 @@ class PresenceDetector:
 
         # Thread control
         self._running = False
+        self._stop_event = threading.Event()
         self._poll_thread: Optional[threading.Thread] = None
 
         # Load existing face embeddings
@@ -250,6 +251,7 @@ class PresenceDetector:
         if self._running:
             return
         self._running = True
+        self._stop_event.clear()
         self._poll_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name="presence-detector"
         )
@@ -259,6 +261,7 @@ class PresenceDetector:
     def stop(self):
         """Stop the polling thread."""
         self._running = False
+        self._stop_event.set()
         if self._poll_thread:
             self._poll_thread.join(timeout=10)
         if isinstance(self._face_app, NpuFaceBackend):
@@ -294,13 +297,15 @@ class PresenceDetector:
     def _poll_loop(self):
         """Main loop: detect faces every interval seconds."""
         # Delay first check to let audio/webcam initialize
-        time.sleep(5)
+        if self._stop_event.wait(5):
+            return
 
         while self._running:
             try:
                 if self._should_skip():
                     self._publish_npu_sensor()
-                    time.sleep(self._interval)
+                    if self._stop_event.wait(self._interval):
+                        return
                     continue
 
                 self._check_presence()
@@ -309,7 +314,8 @@ class PresenceDetector:
                 self.logger.error(f"Presence poll error: {e}", exc_info=True)
 
             self._publish_npu_sensor()  # heartbeat for the runtime probe (skip/no-camera cycles too)
-            time.sleep(self._interval)
+            if self._stop_event.wait(self._interval):
+                return
 
     def _should_skip(self) -> bool:
         """Skip detection during active conversation or TTS playback."""

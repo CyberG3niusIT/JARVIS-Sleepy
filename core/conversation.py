@@ -13,7 +13,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 
 from core.logger import get_logger
-from core.privacy_gate import get_privacy_gate, Capability
+from core.privacy_gate import get_privacy_gate, Capability, persistence_allowed
 
 
 class ConversationManager:
@@ -132,9 +132,9 @@ class ConversationManager:
             time_part = msg_time.strftime("%-I:%M %p")
 
             if delta.days == 0 and msg_time.date() == now.date():
-                return f"today {time_part}"
+                return f"heute {time_part}"
             elif delta.days <= 1 and (now.date() - msg_time.date()).days == 1:
-                return f"yesterday {time_part}"
+                return f"gestern {time_part}"
             elif delta.days < 7:
                 day_name = msg_time.strftime("%A")
                 return f"{day_name} {time_part}"
@@ -181,7 +181,7 @@ class ConversationManager:
         if audio_turn_id is not None:
             message["audio_turn_id"] = audio_turn_id
         hint = None
-        if asr_hint and role == "user" and self._privacy_gate.allow(Capability.CONTENT_LOGGING):
+        if asr_hint and role == "user" and persistence_allowed(Capability.CONTENT_LOGGING, self._privacy_gate):
             hint = str(asr_hint).strip() or None
         if hint:
             message["asr_hint"] = hint
@@ -221,7 +221,7 @@ class ConversationManager:
             except Exception as e:
                 self.logger.warning(f"Context window hook failed (non-fatal): {e}")
 
-        if self._privacy_gate.allow(Capability.CONTENT_LOGGING):
+        if persistence_allowed(Capability.CONTENT_LOGGING, self._privacy_gate):
             self.logger.debug(f"Added {role} message: {content[:50]}...")
         else:
             # Found this session: this debug line went to core/logger.py's
@@ -235,7 +235,7 @@ class ConversationManager:
     
     def _append_to_history_file(self, message: Dict):
         """Append message to JSONL history file"""
-        if not self._privacy_gate.allow(Capability.CONTENT_LOGGING):
+        if not persistence_allowed(Capability.CONTENT_LOGGING, self._privacy_gate):
             # This is a durable plaintext log of conversation content —
             # exactly what CONTENT_LOGGING exists to block. Found this
             # session: previously written unconditionally on every

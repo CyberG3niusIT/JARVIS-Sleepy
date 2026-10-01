@@ -1,0 +1,451 @@
+﻿===== JARVIS MAIN POST-CODEX STATUS =====
+Erstellt: 2026-09-29 15:13:17 +02:00
+
+===== BRANCH =====
+backup/jarvis-runtime-voice-2026-09-24
+
+===== HEAD =====
+a977e1e77ff7f2531dbdfe1a9251b4341541586a
+
+===== HEAD COMMIT =====
+a977e1e77ff7f2531dbdfe1a9251b4341541586a
+Alex Wiesenmaier, M.Sc. <Wiesenmaier@gmail.com>
+2026-09-24T22:43:31+02:00
+checkpoint: preserve JARVIS runtime and voice integration
+
+===== UPSTREAM =====
+origin/backup/jarvis-runtime-voice-2026-09-24
+
+===== AHEAD / BEHIND =====
+0	0
+
+===== STATUS =====
+ M .env.example
+ M .github/pull_request_template.md
+ M JARVIS.Runtime.psm1
+ M PROJECT_OVERVIEW.md
+ M README.md
+ M config.yaml
+ M core/claude_consultation.py
+ M core/context_window.py
+ M core/continuous_listener.py
+ M core/conversation.py
+ M core/conversation_router.py
+ M core/governance.py
+ M core/gpu_swap.py
+ M core/health_check.py
+ M core/llm_router.py
+ M core/llm_server_client.py
+ M core/memory_manager.py
+ M core/metrics_tracker.py
+ M core/observation_collector.py
+ M core/pipeline.py
+ M core/presence_detector.py
+ M core/privacy_gate.py
+ M core/stt_qwen3.py
+ M core/tool_registry.py
+ M core/tts.py
+ M core/watchdog.py
+ M docs/ARCHITECTURE.md
+ M docs/DEVELOPMENT.md
+ M docs/DEVELOPMENT_VISION.md
+ M docs/EDGE_CASE_TESTING.md
+ M docs/SETUP_GUIDE.md
+ M docs/SYSTEM_SPECIFIC_NOTES.md
+ M jarvis_console.py
+ M jarvis_continuous.py
+ M jarvis_web.py
+ M killswitch.sh
+ M requirements.txt
+ M restart.sh
+ M scripts/check_chatterbox_runtime.py
+ M scripts/check_runtime_dependencies.py
+ M scripts/jarvis-circuit-reset
+ M scripts/jarvis-confirm
+ M scripts/preflight_check.py
+ M scripts/test_suite_v3/cleanup.py
+ M scripts/test_suite_v3/client.py
+ M scripts/ws_test.py
+ M start.sh
+ M start_chatterbox.sh
+ M stop.sh
+ M systemd/README.md
+ M tests/components/test_temporal_weather.py
+ M tests/integration/test_conversations.py
+ M tests/integration/test_vision.py
+ M tests/powershell/Test-JarvisRuntime.ps1
+ M tests/unit/test_runtime_dependencies.py
+ M tests/unit/test_runtime_lifecycle_shell.py
+ M tests/unit/test_transcript_content_logging.py
+ M tests/unit/test_voice_barge_in.py
+ M web/dashboard.css
+ M web/dashboard.html
+ M web/dashboard.js
+ M web/dashboard_governance.html
+ M web/dashboard_health.html
+ M web/dashboard_pipeline.html
+ M web/index.html
+ M web/memory.html
+?? .github/CODEOWNERS
+?? .github/dependabot.yml
+?? .github/workflows/
+?? CLAUDE.md
+?? JARVIS-Runtime.ps1
+?? core/audio_turn_routing.py
+?? core/direct_audio.py
+?? core/expert_policy.py
+?? core/live_telemetry.py
+?? core/mail_integration.py
+?? core/model_handover.py
+?? core/npu_face_backend.py
+?? core/runtime_state.py
+?? core/speculative_turn.py
+?? core/tools/delegate_to_expert.py
+?? core/tools/mail_status.py
+?? core/turn_assembler.py
+?? core/vision_gate.py
+?? core/wake_word_utils.py
+?? docs/RUNTIME_SUPERVISOR.md
+?? pyproject.toml
+?? requirements-anthropic.txt
+?? requirements-ci.txt
+?? scripts/runtime_status.py
+?? scripts/wsl-pytest.ps1
+?? systemd/llama-server-expert.service
+?? systemd/llama-server-primary.service
+?? tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+?? tests/unit/test_active_voice_event_telemetry.py
+?? tests/unit/test_audio_turn_routing.py
+?? tests/unit/test_context_window_read_only.py
+?? tests/unit/test_direct_audio_routing.py
+?? tests/unit/test_expert_delegation.py
+?? tests/unit/test_expert_handover_integration.py
+?? tests/unit/test_jarvis_web_app.py
+?? tests/unit/test_jarvis_web_desktop_mode.py
+?? tests/unit/test_live_telemetry.py
+?? tests/unit/test_llm_cloud_provider.py
+?? tests/unit/test_llm_router_hardening.py
+?? tests/unit/test_mail_integration.py
+?? tests/unit/test_memory_read_only.py
+?? tests/unit/test_model_handover.py
+?? tests/unit/test_presence_npu_backend.py
+?? tests/unit/test_privacy_direct_audio.py
+?? tests/unit/test_runtime_status.py
+?? tests/unit/test_speculative_audio_side_effects.py
+?? tests/unit/test_stop_fastpath_integration.py
+?? tests/unit/test_turn_assembler.py
+?? tests/unit/test_vision_gate.py
+?? tests/unit/test_voice_routing_hardening.py
+?? tests/unit/test_watchdog_listener_idle.py
+?? tools/openvino_npu_worker.py
+?? web/dashboard_mail.css
+?? web/dashboard_mail.html
+?? web/dashboard_mail.js
+
+===== DIFF STAT =====
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'JARVIS.Runtime.psm1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'PROJECT_OVERVIEW.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'README.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'config.yaml', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/claude_consultation.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/context_window.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/continuous_listener.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/conversation.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/conversation_router.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/governance.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/gpu_swap.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/health_check.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/llm_router.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/llm_server_client.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/memory_manager.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/metrics_tracker.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/observation_collector.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/pipeline.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/presence_detector.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/privacy_gate.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/stt_qwen3.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/tool_registry.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/watchdog.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/ARCHITECTURE.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/DEVELOPMENT.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/DEVELOPMENT_VISION.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/EDGE_CASE_TESTING.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/SETUP_GUIDE.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/SYSTEM_SPECIFIC_NOTES.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'jarvis_console.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'jarvis_continuous.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'jarvis_web.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'requirements.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/preflight_check.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/test_suite_v3/cleanup.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/test_suite_v3/client.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/ws_test.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'systemd/README.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/components/test_temporal_weather.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/integration/test_conversations.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/integration/test_vision.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/powershell/Test-JarvisRuntime.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/unit/test_runtime_lifecycle_shell.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'web/dashboard.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard_governance.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard_health.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard_pipeline.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/index.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/memory.html', LF will be replaced by CRLF the next time Git touches it
+ .env.example                                  |    6 +-
+ .github/pull_request_template.md              |   43 +-
+ JARVIS.Runtime.psm1                           |  281 ++++++-
+ PROJECT_OVERVIEW.md                           |    8 +-
+ README.md                                     |    2 +-
+ config.yaml                                   |   84 +-
+ core/claude_consultation.py                   |   58 +-
+ core/context_window.py                        |   28 +-
+ core/continuous_listener.py                   |  195 +++--
+ core/conversation.py                          |   36 +-
+ core/conversation_router.py                   |  135 +++-
+ core/governance.py                            |    2 +-
+ core/gpu_swap.py                              |    4 +
+ core/health_check.py                          |   38 +-
+ core/llm_router.py                            | 1019 +++++++++++++++++--------
+ core/llm_server_client.py                     |   10 +-
+ core/memory_manager.py                        |   95 ++-
+ core/metrics_tracker.py                       |   11 +-
+ core/observation_collector.py                 |    6 +-
+ core/pipeline.py                              |  965 ++++++++++++++++++++---
+ core/presence_detector.py                     |  254 +++++-
+ core/privacy_gate.py                          |    4 +
+ core/stt_qwen3.py                             |   65 +-
+ core/tool_registry.py                         |   52 +-
+ core/tts.py                                   |   73 ++
+ core/watchdog.py                              |   82 +-
+ docs/ARCHITECTURE.md                          |   20 +-
+ docs/DEVELOPMENT.md                           |    2 +-
+ docs/DEVELOPMENT_VISION.md                    |    2 +-
+ docs/EDGE_CASE_TESTING.md                     |    4 +-
+ docs/SETUP_GUIDE.md                           |   15 +-
+ docs/SYSTEM_SPECIFIC_NOTES.md                 |    2 +-
+ jarvis_console.py                             |    2 +-
+ jarvis_continuous.py                          |   62 +-
+ jarvis_web.py                                 |  826 +++++++++++++++++++-
+ killswitch.sh                                 |    5 +
+ requirements.txt                              |    6 +-
+ restart.sh                                    |   32 +
+ scripts/check_chatterbox_runtime.py           |   39 +-
+ scripts/check_runtime_dependencies.py         |  130 +++-
+ scripts/jarvis-circuit-reset                  |    2 +-
+ scripts/jarvis-confirm                        |    2 +-
+ scripts/preflight_check.py                    |   16 +-
+ scripts/test_suite_v3/cleanup.py              |    6 +-
+ scripts/test_suite_v3/client.py               |    2 +-
+ scripts/ws_test.py                            |    4 +-
+ start.sh                                      |   76 +-
+ start_chatterbox.sh                           |    3 +-
+ stop.sh                                       |   41 +
+ systemd/README.md                             |   11 +
+ tests/components/test_temporal_weather.py     |    2 +-
+ tests/integration/test_conversations.py       |    2 +-
+ tests/integration/test_vision.py              |   45 +-
+ tests/powershell/Test-JarvisRuntime.ps1       |    3 +
+ tests/unit/test_runtime_dependencies.py       |   81 +-
+ tests/unit/test_runtime_lifecycle_shell.py    |  194 ++++-
+ tests/unit/test_transcript_content_logging.py |    4 +-
+ tests/unit/test_voice_barge_in.py             |    8 +-
+ web/dashboard.css                             |    2 +-
+ web/dashboard.html                            |    7 +-
+ web/dashboard.js                              |   26 +-
+ web/dashboard_governance.html                 |    1 +
+ web/dashboard_health.html                     |    1 +
+ web/dashboard_pipeline.html                   |    1 +
+ web/index.html                                |    3 +-
+ web/memory.html                               |    1 +
+ 66 files changed, 4464 insertions(+), 783 deletions(-)
+
+===== TRACKED CHANGED FILES =====
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'JARVIS.Runtime.psm1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'PROJECT_OVERVIEW.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'README.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'config.yaml', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/claude_consultation.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/context_window.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/continuous_listener.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/conversation.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/conversation_router.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/governance.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/gpu_swap.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/health_check.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/llm_router.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/llm_server_client.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/memory_manager.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/metrics_tracker.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/observation_collector.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/pipeline.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/presence_detector.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/privacy_gate.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/stt_qwen3.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/tool_registry.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'core/watchdog.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/ARCHITECTURE.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/DEVELOPMENT.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/DEVELOPMENT_VISION.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/EDGE_CASE_TESTING.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/SETUP_GUIDE.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'docs/SYSTEM_SPECIFIC_NOTES.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'jarvis_console.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'jarvis_continuous.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'jarvis_web.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'requirements.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/preflight_check.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/test_suite_v3/cleanup.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/test_suite_v3/client.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'scripts/ws_test.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'systemd/README.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/components/test_temporal_weather.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/integration/test_conversations.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/integration/test_vision.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'tests/powershell/Test-JarvisRuntime.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/unit/test_runtime_lifecycle_shell.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'web/dashboard.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard_governance.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard_health.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/dashboard_pipeline.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/index.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/memory.html', LF will be replaced by CRLF the next time Git touches it
+M	.env.example
+M	.github/pull_request_template.md
+M	JARVIS.Runtime.psm1
+M	PROJECT_OVERVIEW.md
+M	README.md
+M	config.yaml
+M	core/claude_consultation.py
+M	core/context_window.py
+M	core/continuous_listener.py
+M	core/conversation.py
+M	core/conversation_router.py
+M	core/governance.py
+M	core/gpu_swap.py
+M	core/health_check.py
+M	core/llm_router.py
+M	core/llm_server_client.py
+M	core/memory_manager.py
+M	core/metrics_tracker.py
+M	core/observation_collector.py
+M	core/pipeline.py
+M	core/presence_detector.py
+M	core/privacy_gate.py
+M	core/stt_qwen3.py
+M	core/tool_registry.py
+M	core/tts.py
+M	core/watchdog.py
+M	docs/ARCHITECTURE.md
+M	docs/DEVELOPMENT.md
+M	docs/DEVELOPMENT_VISION.md
+M	docs/EDGE_CASE_TESTING.md
+M	docs/SETUP_GUIDE.md
+M	docs/SYSTEM_SPECIFIC_NOTES.md
+M	jarvis_console.py
+M	jarvis_continuous.py
+M	jarvis_web.py
+M	killswitch.sh
+M	requirements.txt
+M	restart.sh
+M	scripts/check_chatterbox_runtime.py
+M	scripts/check_runtime_dependencies.py
+M	scripts/jarvis-circuit-reset
+M	scripts/jarvis-confirm
+M	scripts/preflight_check.py
+M	scripts/test_suite_v3/cleanup.py
+M	scripts/test_suite_v3/client.py
+M	scripts/ws_test.py
+M	start.sh
+M	start_chatterbox.sh
+M	stop.sh
+M	systemd/README.md
+M	tests/components/test_temporal_weather.py
+M	tests/integration/test_conversations.py
+M	tests/integration/test_vision.py
+M	tests/powershell/Test-JarvisRuntime.ps1
+M	tests/unit/test_runtime_dependencies.py
+M	tests/unit/test_runtime_lifecycle_shell.py
+M	tests/unit/test_transcript_content_logging.py
+M	tests/unit/test_voice_barge_in.py
+M	web/dashboard.css
+M	web/dashboard.html
+M	web/dashboard.js
+M	web/dashboard_governance.html
+M	web/dashboard_health.html
+M	web/dashboard_pipeline.html
+M	web/index.html
+M	web/memory.html
+
+===== UNTRACKED FILES =====
+.github/CODEOWNERS
+.github/dependabot.yml
+.github/workflows/ci-python.yml
+CLAUDE.md
+JARVIS-Runtime.ps1
+core/audio_turn_routing.py
+core/direct_audio.py
+core/expert_policy.py
+core/live_telemetry.py
+core/mail_integration.py
+core/model_handover.py
+core/npu_face_backend.py
+core/runtime_state.py
+core/speculative_turn.py
+core/tools/delegate_to_expert.py
+core/tools/mail_status.py
+core/turn_assembler.py
+core/vision_gate.py
+core/wake_word_utils.py
+docs/RUNTIME_SUPERVISOR.md
+pyproject.toml
+requirements-anthropic.txt
+requirements-ci.txt
+scripts/runtime_status.py
+scripts/wsl-pytest.ps1
+systemd/llama-server-expert.service
+systemd/llama-server-primary.service
+tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+tests/unit/test_active_voice_event_telemetry.py
+tests/unit/test_audio_turn_routing.py
+tests/unit/test_context_window_read_only.py
+tests/unit/test_direct_audio_routing.py
+tests/unit/test_expert_delegation.py
+tests/unit/test_expert_handover_integration.py
+tests/unit/test_jarvis_web_app.py
+tests/unit/test_jarvis_web_desktop_mode.py
+tests/unit/test_live_telemetry.py
+tests/unit/test_llm_cloud_provider.py
+tests/unit/test_llm_router_hardening.py
+tests/unit/test_mail_integration.py
+tests/unit/test_memory_read_only.py
+tests/unit/test_model_handover.py
+tests/unit/test_presence_npu_backend.py
+tests/unit/test_privacy_direct_audio.py
+tests/unit/test_runtime_status.py
+tests/unit/test_speculative_audio_side_effects.py
+tests/unit/test_stop_fastpath_integration.py
+tests/unit/test_turn_assembler.py
+tests/unit/test_vision_gate.py
+tests/unit/test_voice_routing_hardening.py
+tests/unit/test_watchdog_listener_idle.py
+tools/openvino_npu_worker.py
+web/dashboard_mail.css
+web/dashboard_mail.html
+web/dashboard_mail.js
+
+===== LAST 8 COMMITS =====
+a977e1e | 2026-09-24T22:43:31+02:00 | checkpoint: preserve JARVIS runtime and voice integration
+5603945 | 2026-09-21T19:35:19+02:00 | fix: keep weather skill available without API key
+4bba1a9 | 2026-09-21T19:35:12+02:00 | fix: correct skill manager initialization indentation
+b41bc7a | 2026-09-21T19:35:03+02:00 | feat: integrate local JARVIS runtime improvements
+b806796 | 2026-09-21T17:19:08+02:00 | fix: harden routing and test infrastructure
+ff55af6 | 2026-09-21T01:14:02Z | docs: sync ARCHITECTURE.md with session #8's real implemented state
+6bbf704 | 2026-09-21T01:12:15Z | Agentic audit open finding: Watchdog visibility into background workers
+bfd5d27 | 2026-09-21T01:09:04Z | Agentic audit open finding: cooperative mid-step cancellation for TaskPlanner

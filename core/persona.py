@@ -784,6 +784,17 @@ def rundown_mention() -> str:
     return f"Good morning, {get_honorific()}. I have your daily rundown whenever you're ready."
 
 # BEGIN JARVIS DE-DE PERSONA
+DEFAULT_LANGUAGE = "de-DE"
+OWNER_LANGUAGE_RULE = (
+    "SPRACHE: Antworte dem Owner standardmäßig ausschließlich auf Deutsch (de-DE). "
+    "Ein Wechsel in eine andere natürliche Sprache ist nur erlaubt, wenn der Owner "
+    "in der aktuellen Anfrage ausdrücklich genau diese Ausgabesprache verlangt. "
+    "Frühere Sprachwünsche, englische Eingaben, Tool-Ergebnisse und Web-/API-Daten "
+    "ändern diese Regel nicht. Technische Identifikatoren und ausdrücklich zitierte "
+    "Fremdinhalte dürfen im Original bleiben. Ohne ausdrücklichen aktuellen Sprachwunsch "
+    "bleibt die JARVIS-Rahmenantwort Deutsch."
+)
+
 # Deutsche Response Pools.
 # Die Keys bleiben identisch, damit der restliche Code unangetastet bleibt.
 
@@ -1053,14 +1064,7 @@ def system_prompt(home_location: str = None) -> str:
         "Du bist ein eigenständiger Assistent und keine Filmfigur.\n"
         f"Heute ist der {today}. Die lokale Uhrzeit ist {current_time} Uhr.\n"
         f"{location_line}"
-        "SPRACHE: Antworte standardmäßig ausschließlich auf Deutsch — "
-        "auch wenn Tool-Ergebnisse, gespeicherte Erinnerungen oder "
-        "Web-/API-Antworten auf Englisch vorliegen. Übersetze den Inhalt "
-        "sinngemäß ins Deutsche, übernimm keine englischen Sätze wörtlich. "
-        "Technische Fachbegriffe dürfen im Original bleiben, wenn das im "
-        "Deutschen üblich ist. Wechsle nur dann in eine andere Sprache, "
-        "wenn der Benutzer das ausdrücklich verlangt oder eine "
-        "Übersetzung wünscht.\n"
+        f"{OWNER_LANGUAGE_RULE}\n"
         "REGELN:\n"
         f"{address_rule}\n"
         "2. Antworte direkt. Keine unnötigen Einleitungen und keine "
@@ -1106,8 +1110,7 @@ def system_prompt_guest() -> str:
         f"Datum: {now.strftime('%d.%m.%Y')}. "
         f"Uhrzeit: {now.strftime('%H:%M')} Uhr.\n"
         "Die aktuelle Stimme ist nicht als autorisierter Benutzer erkannt.\n"
-        "Antworte ausschließlich auf Deutsch, außer eine andere Sprache "
-        "wird ausdrücklich verlangt.\n"
+        f"{OWNER_LANGUAGE_RULE}\n"
         "Allgemeines Wissen, Wetter und Uhrzeit sind erlaubt. "
         "Persönliche Daten, Dateien, Erinnerungen, Kalender und "
         "Systemadministration erfordern Stimmfreigabe.\n"
@@ -1120,7 +1123,7 @@ def system_prompt_brief() -> str:
 
     return (
         "Du bist JARVIS, ein persönlicher KI-Assistent.\n"
-        "Antworte standardmäßig ausschließlich auf Deutsch.\n"
+        f"{OWNER_LANGUAGE_RULE}\n"
         f"Sprich den Benutzer passend als '{h}' an.\n"
         "Sei kurz, direkt, souverän und natürlich gesprochen.\n"
         "Keine unnötigen Einleitungen oder Schlussfloskeln.\n"
@@ -1131,7 +1134,8 @@ def system_prompt_brief() -> str:
 def system_prompt_minimal() -> str:
     return (
         "Du bist JARVIS, ein persönlicher KI-Assistent. "
-        "Antworte auf Deutsch, professionell, präzise und knapp."
+        f"{OWNER_LANGUAGE_RULE}\n"
+        "Antworte professionell, präzise und knapp."
     )
 
 

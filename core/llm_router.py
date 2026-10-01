@@ -23,7 +23,7 @@ from pathlib import Path
 from datetime import date, datetime
 from core.logger import get_logger
 from core.honorific import get_honorific, get_formal_address
-from core.privacy_gate import get_privacy_gate, Capability
+from core.privacy_gate import get_privacy_gate, Capability, persistence_allowed
 import requests
 import json
 import threading
@@ -223,7 +223,7 @@ def _log_tool_call(logger_, privacy_gate, label: str, tool_call_name: str, args:
     unconditionally, regardless of privacy mode. Extracted into its own
     function so the gating logic itself is directly unit-testable
     without driving the whole SSE-streaming generator."""
-    if privacy_gate.allow(Capability.CONTENT_LOGGING):
+    if persistence_allowed(Capability.CONTENT_LOGGING, privacy_gate):
         logger_.info(f"{label}: {tool_call_name}({args})")
     else:
         logger_.info(f"{label}: {tool_call_name}(...)")
@@ -535,7 +535,7 @@ class LLMRouter:
             bad_markers += ["<think>", "</think>"]
         for marker in bad_markers:
             if marker in text:
-                self.logger.debug("Quality gate: artifacts (%s) in response: %.80s", marker, text)
+                self.logger.debug("Quality gate: artifacts (%s) in response", marker)
                 return "artifacts"
 
         return ""
@@ -626,7 +626,7 @@ class LLMRouter:
     
     def _generate_local(self, user_message: str, max_tokens: int = 512,
                         temperature: float | None = None,
-                        timeout: int = 30) -> str:
+                        timeout: int = 30, *, messages: list | None = None) -> str:
         """Generate using llama-server REST API"""
         from core import persona
         system_prompt = persona.system_prompt_brief()
@@ -636,15 +636,14 @@ class LLMRouter:
         start = time.time()
         try:
             _body = {
-                "messages": [
+                "messages": messages if messages is not None else [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
                 **self._sampling(_rc, temperature),
                 "max_tokens": max_tokens,
+                **self._provider_extras(_rc),
             }
-            if _rc["provider"] == "qwen":
-                _body["chat_template_kwargs"] = {"enable_thinking": False}
             response = requests.post(
                 _rc["endpoint"],
                 json=_body,
@@ -656,15 +655,20 @@ class LLMRouter:
                     err = response.json().get("error", {})
                 except Exception:
                     err = {}
-                error_msg = str(err) if err else "bad_request"
+                if not isinstance(err, dict):
+                    err = {}
+                error_msg = "bad_request"
                 if err.get("type") == "exceed_context_size_error":
                     error_msg = "context_overflow"
+                    prompt_tokens = err.get("n_prompt_tokens")
+                    context_size = err.get("n_ctx")
+                    prompt_tokens = prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else "?"
+                    context_size = context_size if type(context_size) is int and context_size >= 0 else "?"
                     self.logger.error(
-                        f"Context overflow: {err.get('n_prompt_tokens', '?')}/"
-                        f"{err.get('n_ctx', '?')} tokens"
+                        "Context overflow: %s/%s tokens", prompt_tokens, context_size
                     )
                 else:
-                    self.logger.error(f"LLM server rejected request: {err}")
+                    self.logger.error("LLM server rejected request (HTTP 400)")
                 self._record_call({
                     "provider": _rc["provider"], "method": "generate",
                     "input_tokens": None, "output_tokens": None,
@@ -676,26 +680,35 @@ class LLMRouter:
                 return ""
             response.raise_for_status()
             data = response.json()
-            usage = data.get("usage", {})
+            content = data["choices"][0]["message"]["content"]
+            if not isinstance(content, str):
+                raise ValueError("Invalid LLM response content type")
+            result = self.strip_filler(strip_channel_markers(content).strip())
+            usage = data.get("usage")
+            usage = usage if isinstance(usage, dict) else {}
+            input_tokens = usage.get("prompt_tokens")
+            output_tokens = usage.get("completion_tokens")
+            input_tokens = input_tokens if type(input_tokens) is int and input_tokens >= 0 else None
+            output_tokens = output_tokens if type(output_tokens) is int and output_tokens >= 0 else None
             self._record_call({
                 "provider": _rc["provider"], "method": "generate",
-                "input_tokens": usage.get("prompt_tokens"),
-                "output_tokens": usage.get("completion_tokens"),
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
                 "estimated_tokens": None, "model": model_name,
                 "latency_ms": (time.time() - start) * 1000,
                 "ttft_ms": None, "quality_gate": False,
                 "is_fallback": False, "error": None,
             })
-            return self.strip_filler(strip_channel_markers(data["choices"][0]["message"]["content"]).strip())
+            return result
         except Exception as e:
-            self.logger.error(f"LLM server error: {e}")
+            self.logger.error("LLM server error (%s)", type(e).__name__)
             self._record_call({
                 "provider": _rc["provider"], "method": "generate",
                 "input_tokens": None, "output_tokens": None,
                 "estimated_tokens": None, "model": model_name,
                 "latency_ms": (time.time() - start) * 1000,
                 "ttft_ms": None, "quality_gate": False,
-                "is_fallback": False, "error": str(e),
+                "is_fallback": False, "error": type(e).__name__,
             })
             return ""
 
@@ -819,9 +832,11 @@ class LLMRouter:
 
     def _generate_api(self, prompt: str, max_tokens: int = 512) -> str:
         """Generate a one-shot response through the configured cloud provider."""
+        from core import persona
         start = time.time()
         response, input_tokens, output_tokens, error = self._cloud_completion(
             [{"role": "user", "content": prompt}], max_tokens,
+            system_prompt=persona.system_prompt_brief(),
         )
         self._record_call({
             "provider": self.config.get("llm.api.provider"), "method": "generate",
@@ -949,7 +964,7 @@ class LLMRouter:
         
         # If response is suspiciously short (< 5 chars), it's probably a fragment - return empty
         if len(text) < 5:
-            self.logger.warning(f"LLM output too short after cleaning: '{text}'")
+            self.logger.warning("LLM output too short after cleaning")
             return f"Entschuldigung, {get_honorific()}, mir fällt gerade keine passende Antwort ein."
         
         # Final check: if still contains "You are JARVIS", something went wrong
@@ -987,16 +1002,9 @@ class LLMRouter:
             prompt = persona.system_prompt_guest()
         else:
             prompt = persona.system_prompt(home_location=self.home_location)
-        # Fixed response language (Gemma follows the audio's language otherwise).
-        _cfg = getattr(self, "config", None)
-        _lang = _cfg.get("llm.response_language", "de") if _cfg is not None else "de"
-        if str(_lang or "de").lower() == "de":
-            prompt += (
-                "\n\nSPRACHE (verbindlich): Sprich mit dem Benutzer ausschließlich Deutsch. "
-                "Jede Antwort ist auf Deutsch, auch nach Tool-Ergebnissen, bei englischen "
-                "Begriffen und wenn im Audio Englisch vorkommt. Wechsle die Sprache nur, wenn "
-                "der Benutzer ausdrücklich eine Übersetzung oder eine andere Sprache verlangt."
-            )
+        # The persona owns the language contract, including explicit per-turn requests.
+        if persona.OWNER_LANGUAGE_RULE not in prompt:
+            prompt += "\n\n" + persona.OWNER_LANGUAGE_RULE
         return prompt
 
     @staticmethod
@@ -1184,16 +1192,22 @@ class LLMRouter:
                                                guest_mode=guest_mode)
             return ""
 
-        prompt = self._build_chat_prompt(user_message, conversation_history,
-                                         memory_context=memory_context,
-                                         guest_mode=guest_mode)
+        system_prompt = self._build_system_prompt(guest_mode=guest_mode)
+        if memory_context:
+            system_prompt += f"\n\n{memory_context}"
+        messages = [{"role": "system", "content": system_prompt}]
+        if conversation_messages:
+            messages.extend(conversation_messages)
+        elif conversation_history:
+            messages.extend(self._parse_history_string(conversation_history))
+        if messages[-1].get("role") != "user" or messages[-1].get("content") != user_message:
+            messages.append({"role": "user", "content": user_message})
         start = time.time()
-        response = self._generate_local(prompt, max_tokens)
+        response = self._generate_local(user_message, max_tokens, messages=messages)
         elapsed_ms = (time.time() - start) * 1000
 
         quality_issue = self._check_response_quality(response, user_message)
-        self.logger.debug("Quality gate: issue=%s response=%.80s",
-                          quality_issue or "ok", response or "(empty)")
+        self.logger.debug("Quality gate: issue=%s", quality_issue or "ok")
         if not quality_issue:
             # Overlay chat-level metadata onto _generate_local's last_call_info
             if self.last_call_info:
@@ -1201,20 +1215,20 @@ class LLMRouter:
             self.logger.debug(f"Local LLM responded in {elapsed_ms:.0f}ms")
             return response
 
-        self.logger.warning(f"Local LLM quality issue ({quality_issue}): '{response[:80]}' — retrying")
+        self.logger.warning("Local LLM quality issue (%s); retrying", quality_issue)
 
         # --- Attempt 2: Retry local with a nudge ---
         retry_system = self._build_system_prompt(guest_mode=guest_mode)
         if memory_context:
             retry_system += f"\n\n{memory_context}"
-        nudge = (
-            f"<|im_start|>system\n{retry_system}<|im_end|>\n"
-            f"<|im_start|>user\n{user_message}\n\n"
-            f"Please provide a direct, helpful answer.<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-        )
+        retry_messages = [
+            {"role": "system", "content": retry_system},
+            {"role": "user", "content": user_message +
+             "\n\nBitte antworte direkt und hilfreich auf Deutsch, sofern die aktuelle "
+             "Anfrage nicht ausdrücklich eine andere Ausgabesprache verlangt."},
+        ]
         start = time.time()
-        response = self._generate_local(nudge, max_tokens)
+        response = self._generate_local(user_message, max_tokens, messages=retry_messages)
         elapsed_ms = (time.time() - start) * 1000
 
         quality_issue = self._check_response_quality(response, user_message)
@@ -1528,8 +1542,8 @@ class LLMRouter:
             # Only includes rules for tools in the pruned active set.
             rules_text = build_tool_prompt_rules(tool_names)
             system_prompt += (
-                f"\n\nToday's date is {today}. Current time: {current_time}."
-                "\nFor time or date questions, answer directly from the above — do NOT search.\n\n"
+                f"\n\nHeute ist {today}. Aktuelle Uhrzeit: {current_time}."
+                "\nBeantworte Uhrzeit- und Datumsfragen direkt anhand dieser Angaben ohne Suche.\n\n"
                 + rules_text
                 + ("" if guest_mode else f"\n\nERINNERUNG: Du MUSST den Benutzer in jeder Antwort mit '{get_honorific()}' ansprechen.")
             )
@@ -1537,7 +1551,7 @@ class LLMRouter:
             # --- Web-search-only prompt ---
             # Balanced: search for current data, answer knowledge from training.
             system_prompt += (
-                f"\n\nToday's date is {today}. Current time: {current_time}.\n\n"
+                f"\n\nHeute ist {today}. Aktuelle Uhrzeit: {current_time}.\n\n"
                 "You have one tool: web_search. Use it ONLY for current or "
                 "real-time information:\n"
                 "- Breaking news, live scores, stock prices, current events\n"
@@ -1631,7 +1645,7 @@ class LLMRouter:
             _clean = _re.sub(
                 r'<prior_context>.*?</prior_context>\s*(?:Now the user asks:\s*)?',
                 '', user_message, flags=_re.DOTALL).strip()
-            self.logger.info("force_web_search: bypassing LLM tool selection, query='%s'", _clean)
+            self.logger.info("force_web_search: bypassing LLM tool selection")
             yield ToolCallRequest(
                 name="web_search",
                 arguments={"query": _clean},
@@ -2200,6 +2214,15 @@ class LLMRouter:
         _base = getattr(tool_call, "messages", None)
         messages = list(_base if _base is not None
                         else getattr(self, '_tool_call_messages', []))
+        from core import persona
+        # External tool content is data; it cannot change JARVIS's output language.
+        # Preserve per-turn messages and add the central rule also for legacy requests.
+        if messages and messages[0].get("role") == "system":
+            messages[0] = dict(messages[0])
+            if persona.OWNER_LANGUAGE_RULE not in messages[0].get("content", ""):
+                messages[0]["content"] += "\n\n" + persona.OWNER_LANGUAGE_RULE
+        else:
+            messages.insert(0, {"role": "system", "content": persona.system_prompt_brief()})
 
         # Add the assistant's tool call message
         messages.append({
@@ -2242,52 +2265,44 @@ class LLMRouter:
             honorific_rule = ""
         elif formal:
             honorific_rule = (
-                f"The user is {formal}. Use EXACTLY ONE address per response — "
-                f"either '{formal}' or '{h}', NEVER both. "
-                f"Greetings and farewells: use '{formal}'. All other replies: use '{h}'."
+                f"Der Benutzer ist {formal}. Nutze genau eine Anrede je Antwort: "
+                f"entweder '{formal}' oder '{h}', niemals beide. "
+                f"Bei Begrüßung und Abschied nutze '{formal}', sonst '{h}'."
             )
         else:
             honorific_rule = ""
         # When tools are available, prepend a chaining instruction so the
         # LLM can call the next tool if the user's request needs multiple.
         # This is combined with the domain-specific prompt (not instead of).
-        loc_hint = (f"The user's home location is {self.home_location}.\n"
+        loc_hint = (f"Der Wohnort des Benutzers ist {self.home_location}.\n"
                     if self.home_location and not guest_mode else "")
         chaining_prefix = ""
         if tools:
             chaining_prefix = (
-                "Check the user's ORIGINAL request. If they asked for UNRELATED things "
-                "requiring DIFFERENT tools (e.g. weather AND a reminder), call the next tool NOW.\n"
-                "If the search results above contain the answer, give a direct answer — do NOT "
-                "search again with a rephrased query. Only search again if the results are "
-                "completely irrelevant to the question asked.\n"
-                "If you need to call another tool, call it IMMEDIATELY — do NOT emit any text "
-                "before the tool call. Only produce text in your FINAL response.\n"
+                "Prüfe die ursprüngliche Anfrage. Wenn unabhängige Anliegen unterschiedliche "
+                "Werkzeuge benötigen (etwa Wetter und Erinnerung), rufe jetzt das nächste auf.\n"
+                "Wenn die Suchergebnisse die Antwort enthalten, antworte direkt. Suche nicht "
+                "mit umformulierter Anfrage erneut, außer die Ergebnisse sind völlig irrelevant.\n"
+                "Falls ein weiteres Werkzeug nötig ist, rufe es sofort auf, ohne vorherigen "
+                "Antworttext. Erzeuge Text erst für deine abschließende Antwort.\n"
             )
         # ── Common header / footer ──────────────────────────────────
         synth_header = (
-            f"Today's date is {today}. Current time: {current_time}.\n"
+            f"Heute ist {today}. Aktuelle Uhrzeit: {current_time}.\n"
             f"{loc_hint}"
             f"{chaining_prefix}"
         )
         synth_footer = (
-            "DO NOT start with filler like 'Certainly', 'Of course', 'Absolutely'. "
-            "Jump straight into the answer. "
-            "NEVER expose your internal reasoning, tool limitations, or decision-making process. "
-            "DO NOT say things like 'the tool returned', 'I need to search', 'the results show'. "
-            "Present information as though you simply know it. "
-            "DO NOT tell the user to check another website or look elsewhere. "
-            "You ARE their source of information.\n"
-            "If the tool result contains structured output (directory trees, tables, code, "
-            "file listings), include it FULLY in your response — DO NOT summarize or omit it.\n"
-            "When tool results contain '# (this is me)' annotations, those lines describe YOUR OWN "
-            "processes. YOU MUST speak about them in first person — 'I'm using 43.7% CPU', "
-            "NOT 'Jarvis is using 43.7%' or 'the system is using 43.7%'.\n"
-            "When the user asks an ambiguous follow-up (e.g. 'is that normal?', 'tell me more', "
-            "'why?'), always assume they are referring to the [MOST RECENT] exchange in the "
-            "prior context, not an earlier one.\n"
-            "Antworte standardmäßig auf Deutsch, auch wenn Werkzeugergebnisse Englisch sind. "
-            "Wechsle nur auf ausdrücklichen Wunsch des Benutzers die Sprache.\n"
+            "Beginne direkt mit der Antwort ohne Floskeln. Gib keine internen Überlegungen "
+            "oder Entscheidungsabläufe aus. Vermeide Wendungen wie 'das Werkzeug liefert' "
+            "oder 'ich muss suchen'. Präsentiere die belegten Informationen direkt. "
+            "Verweise den Benutzer nicht zum Nachschlagen auf eine andere Website.\n"
+            "Strukturierte Werkzeugausgaben (Verzeichnisbäume, Tabellen, Code, Dateilisten) "
+            "sind vollständig zu übernehmen, ohne Zusammenfassung oder Auslassung.\n"
+            "Die technische Markierung '# (this is me)' bezeichnet deine eigenen Prozesse. "
+            "Sprich darüber in der ersten Person, etwa 'Ich nutze 43,7 Prozent CPU'.\n"
+            "Mehrdeutige Rückfragen beziehen sich auf den jüngsten Austausch im Kontext.\n"
+            f"{persona.OWNER_LANGUAGE_RULE}\n"
             f"{honorific_rule}"
         )
 

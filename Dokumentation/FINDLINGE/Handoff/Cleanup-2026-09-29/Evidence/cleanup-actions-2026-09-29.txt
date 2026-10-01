@@ -1,0 +1,83 @@
+﻿===== JARVIS CLEANUP 2026-09-29 =====
+Start: 2026-09-29 16:30:01 +02:00
+MOVED: C:\Users\Alex\Projekte\JARVIS-Sleepy\ui-comparison-aeb7ec8.txt -> C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\ui-comparison-aeb7ec8.txt
+MOVED: C:\Users\Alex\Projekte\JARVIS-Sleepy\project-inventory-mobile-docs-handoff.txt -> C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\project-inventory-mobile-docs-handoff.txt
+MOVED: C:\Users\Alex\Projekte\JARVIS-Sleepy\main-post-codex-status.txt -> C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\main-post-codex-status.txt
+MOVED: C:\Users\Alex\Projekte\JARVIS-Sleepy\main-mailcow-audit.txt -> C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\main-mailcow-audit.txt
+MOVED: C:\Users\Alex\Projekte\JARVIS-Sleepy\mailcow-runtime-safety-status-v2.txt -> C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\mailcow-runtime-safety-status-v2.txt
+MOVED: C:\Users\Alex\Projekte\JARVIS-Sleepy\final-cleanup-inventory.txt -> C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\final-cleanup-inventory.txt
+MOVED: C:\Users\Alex\Projekte\JARVIS-Sleepy\inventory-final-cleanup.ps1 -> C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\inventory-final-cleanup.ps1
+DELETED FAILED REPORT: C:\Users\Alex\Projekte\JARVIS-Sleepy\mailcow-runtime-safety-status.txt
+DELETED GENERATED: C:\Users\Alex\Projekte\JARVIS-Sleepy\.vs
+DELETED UI GENERATED: WindowsApp\WinUI3\bin
+DELETED UI GENERATED: WindowsApp\WinUI3\obj
+DELETED UI GENERATED: tests\WinUiBackendAdapters.Tests\bin
+DELETED UI GENERATED: tests\WinUiBackendAdapters.Tests\obj
+
+===== DOCS-STAGE REACHABILITY =====
+Branches containing commit:
+Tags containing commit:
+
+===== WORKTREES AFTER CLEANUP =====
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/.git-store
+bare
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/Architecture
+HEAD 833bcebd74e1c0da506c3c5e71bf93b8625190a8
+branch refs/heads/claude/jarvis-architecture
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/Backend-RC
+HEAD b8067965fe0514c8359b46807b8d97f187229b18
+branch refs/heads/claude/jarvis-sleepy-backend-rc-nhtfgm
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/Main
+HEAD a977e1e77ff7f2531dbdfe1a9251b4341541586a
+branch refs/heads/backup/jarvis-runtime-voice-2026-09-24
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/Mobile-App
+HEAD a5b87137926c81e205e7036e1cd89150f43cb03f
+branch refs/heads/J.A.R.V.I.S-Mobile-App
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/UI
+HEAD 1f533e703925c639b307991d641ad2e02161429f
+branch refs/heads/claude/jarvis-ui
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/UI-Push
+HEAD aeb7ec821f9e4fd3905009acc05e7c153c4dfb91
+branch refs/heads/J.A.R.V.I.S-UI
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy-docs-stage-20260927
+HEAD b7146c840286eb82752efb3243c1f7148d9aeba9
+detached
+
+
+===== UI-PUSH STATUS AFTER CLEANUP =====
+
+===== ROOT AFTER CLEANUP =====
+
+Name                                    Mode  
+----                                    ----  
+.agents                                 d-----
+.claude                                 d-----
+.claude-flow                            d-----
+.codex                                  d-----
+.git-store                              d-----
+.swarm                                  d-----
+AGENTS.md                               -a----
+Architecture                            d-----
+backend-local-delta.txt                 -a----
+Backend-RC                              d-----
+Chatverlauf-2026-09-28.zip              -a----
+CLAUDE.md                               -a----
+Dokumentation                           d-----
+Handoff                                 d-----
+Main                                    d-----
+Mobile-App                              d-----
+runtime-status-local.zip                -a----
+School-Mobility-Realtime-Git-Diff.patch -a----
+UI                                      d-----
+UI-Push                                 d-----
+
+
+
+Ende: 2026-09-29 16:30:02 +02:00

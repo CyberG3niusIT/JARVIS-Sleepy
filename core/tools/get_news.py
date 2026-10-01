@@ -64,7 +64,7 @@ def handler(args: dict) -> str:
     from core.news_manager import get_news_manager
     mgr = get_news_manager()
     if not mgr:
-        return "News system is not available."
+        return "Das Nachrichtensystem ist derzeit nicht verfügbar."
     action = args.get("action", "read")
     category = args.get("category")
     max_priority = args.get("max_priority")

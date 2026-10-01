@@ -23,7 +23,7 @@ Flow:
 4. If "Jarvis" found in transcription, process as command
 5. Respond naturally
 
-This allows natural phrases like "Good morning Jarvis" to work!
+This allows natural phrases like "Guten Morgen Jarvis" to work!
 """
 
 import re
@@ -54,6 +54,7 @@ from core.news_manager import get_news_manager
 from core.weather_db import get_weather_db
 from core.weather_poller import get_weather_poller
 from core.honorific import get_honorific
+from core import persona
 from core.speech_chunker import SpeechChunker
 from core.events import Event, EventType
 from core.pipeline import (
@@ -571,7 +572,7 @@ class JarvisContinuous:
         # --- Parse the input ---
         if in_conversation:
             self.logger.info(f"💬 Conversation continues: {full_text}")
-            print(f"\n💬 You said: {full_text}")
+            print(f"\n💬 Ihre Eingabe: {full_text}")
             # If wake word appears mid-conversation, extract command from it
             if self.wake_word in full_text.lower():
                 command = self._extract_command(full_text)
@@ -579,7 +580,7 @@ class JarvisContinuous:
                 command = full_text
         else:
             self.logger.info(f"🟡 Command detected: {full_text}")
-            print(f"\n🟡 Command detected: {full_text}")
+            print(f"\n🟡 Anfrage erkannt: {full_text}")
             command = self._extract_command(full_text)
 
         # Pause listening while we process and respond
@@ -603,18 +604,9 @@ class JarvisContinuous:
             # Check if there's a pending rundown mention
             if self.reminder_manager and self.reminder_manager.has_rundown_mention():
                 self.reminder_manager.clear_rundown_mention()
-                response = f"Good morning, {get_honorific()}. I have your daily rundown whenever you're ready."
+                response = persona.rundown_mention()
             else:
-                h = get_honorific()
-                responses = [
-                    f"At your service, {h}.",
-                    f"How may I assist you, {h}?",
-                    f"You rang, {h}?",
-                    f"I'm listening, {h}.",
-                    f"Ready when you are, {h}.",
-                    f"Standing by, {h}.",
-                ]
-                response = random.choice(responses)
+                response = persona.pick("greeting")
 
             # Record in history
             self.conversation.add_message("user", "jarvis")
@@ -629,7 +621,7 @@ class JarvisContinuous:
             return
 
         # --- Process real command ---
-        print(f"📝 Processing: {command}")
+        print(f"📝 Bearbeitung: {command}")
         self.logger.info(f"Processing command: {command}")
 
         self.conversation.add_message("user", command)
@@ -649,7 +641,7 @@ class JarvisContinuous:
             )
             if negative:
                 self.reminder_manager.defer_rundown()
-                response = f"Very well, {get_honorific()}. Just say 'daily rundown' whenever you're ready."
+                response = persona.rundown_defer()
                 skill_handled = True
                 self._speak_response(response)
             else:
@@ -663,19 +655,13 @@ class JarvisContinuous:
             # Any speech after a fired reminder counts as acknowledgment
             self.logger.info("Treating response as reminder acknowledgment")
             self.reminder_manager.acknowledge_last()
-            h = get_honorific()
-            response = random.choice([
-                f"Very good, {h}.",
-                f"Noted, {h}.",
-                f"Of course, {h}.",
-                f"Absolutely, {h}.",
-            ])
+            response = persona.pick("reminder_ack")
             skill_handled = True
             self._speak_response(response)
 
         # Priority 3: Skill routing
         if not skill_handled:
-            print("🔍 Checking skills...")
+            print("🔍 Skills werden geprüft...")
             skill_response = self.skill_manager.execute_intent(command)
             if skill_response:
                 response = skill_response
@@ -693,12 +679,7 @@ class JarvisContinuous:
                 import subprocess as _sp
                 _sp.Popen([browser_cmd, url])
                 self.news_manager.clear_last_read()
-                h = get_honorific()
-                response = random.choice([
-                    f"Right away, {h}.",
-                    f"Pulling that up now, {h}.",
-                    f"Opening that article for you, {h}.",
-                ])
+                response = persona.pick("news_pullup")
                 skill_handled = True
                 self._speak_response(response)
 
@@ -717,7 +698,7 @@ class JarvisContinuous:
 
         # Priority 6: LLM fallback (streaming)
         if not skill_handled:
-            print("🤖 Thinking...")
+            print("🤖 Antwort wird vorbereitet...")
             history = self.conversation.format_history_for_llm(include_system_prompt=False)
             response = self._stream_llm_response(command, history)
             if not response:
@@ -739,7 +720,7 @@ class JarvisContinuous:
 
         # Stats and resume
         stats = self.conversation.get_conversation_stats()
-        print(f"\n📊 Session: {stats['session_user_messages']} user, {stats['session_assistant_messages']} assistant messages\n")
+        print(f"\n📊 Sitzung: {stats['session_user_messages']} Benutzer- und {stats['session_assistant_messages']} Assistentennachrichten\n")
         self.listener.resume_listening()
 
     def _speak_response(self, response: str):
@@ -951,9 +932,9 @@ class JarvisContinuous:
             if issues:
                 h = get_honorific()
                 if len(issues) == 1:
-                    msg = f"{h.capitalize()}, there was an issue found during initialization. I'm putting it on screen for you."
+                    msg = f"{h.capitalize()}, bei der Initialisierung wurde ein Problem gefunden. Ich zeige Ihnen den Bericht."
                 else:
-                    msg = f"{h.capitalize()}, there were {len(issues)} issues found during initialization. I'm putting them on screen for you."
+                    msg = f"{h.capitalize()}, bei der Initialisierung wurden {len(issues)} Probleme gefunden. Ich zeige Ihnen den Bericht."
                 self.tts.speak(msg)
 
                 # Display visual report
@@ -965,7 +946,7 @@ class JarvisContinuous:
                     _display_mod = importlib.util.module_from_spec(_spec)
                     _spec.loader.exec_module(_display_mod)
                     display = _display_mod.DisplayRouter(self.config)
-                    display.show(report, content_type='health_check', title='Startup Health Report')
+                    display.show(report, content_type='health_check', title='Startdiagnose')
                 except Exception as e:
                     self.logger.warning(f"Could not open visual report: {e}")
             else:
@@ -1004,7 +985,7 @@ class JarvisContinuous:
         
         # Combine (prefer after, but include before if meaningful)
         if after:
-            # Command comes after wake word: "Jarvis, what time is it?"
+            # Command comes after wake word: "Jarvis, wie spät ist es?"
             return after
         elif before:
             # Command comes before wake word: "What time is it, Jarvis?"
@@ -1017,16 +998,16 @@ class JarvisContinuous:
         """Run Jarvis"""
         print("\n" + "="*60)
         if self.event_mode:
-            print("🟢 JARVIS - EVENT PIPELINE MODE")
+            print("🟢 JARVIS - EREIGNISPIPELINE")
         else:
-            print("🟢 JARVIS - CONTINUOUS LISTENING MODE")
+            print("🟢 JARVIS - KONTINUIERLICHER SPRACHMODUS")
         print("="*60)
-        print(f"\nWake word: '{self.wake_word}'")
-        print("\nSay the wake word anywhere in your sentence:")
-        print("  - 'Good morning Jarvis'")
-        print("  - 'Jarvis, what time is it?'")
-        print("  - 'Tell me the weather, Jarvis'")
-        print("\nPress Ctrl+C to stop.\n")
+        print(f"\nAktivierungswort: '{self.wake_word}'")
+        print("\nSagen Sie das Aktivierungswort in Ihrem Satz:")
+        print("  - 'Guten Morgen Jarvis'")
+        print("  - 'Jarvis, wie spät ist es?'")
+        print("  - 'Wie wird das Wetter, Jarvis'")
+        print("\nZum Beenden Strg+C drücken.\n")
 
         self.logger.info("🟢 Jarvis starting in continuous mode...")
 
@@ -1036,22 +1017,22 @@ class JarvisContinuous:
         if not mic_ok:
             h = get_honorific()
             self.tts.speak(
-                f"Microphone not detected, {h}. "
-                "I'll continue running without voice input. "
-                "I'll let you know when the microphone becomes available."
+                f"Kein Mikrofon erkannt, {h}. "
+                "Ich arbeite ohne Spracheingabe weiter. "
+                "Ich melde mich, sobald das Mikrofon verfügbar ist."
             )
             self.logger.warning("DEGRADED MODE: No microphone — voice input disabled")
-            print("⚠️  DEGRADED MODE: No microphone detected")
-            print("    JARVIS is running (TTS, skills, reminders active)")
-            print("    Voice input will resume when mic is reconnected")
+            print("⚠️  EINGESCHRÄNKTER MODUS: Kein Mikrofon erkannt")
+            print("    JARVIS läuft (Sprachausgabe, Skills und Erinnerungen aktiv)")
+            print("    Die Spracheingabe wird nach erneutem Verbinden fortgesetzt")
 
         # Set up mic state change announcements and start device monitor
         def _on_mic_state_change(available: bool):
             h = get_honorific()
             if available:
-                self.tts.speak(f"Microphone reconnected, {h}. Voice input is active.")
+                self.tts.speak(f"Mikrofon wieder verbunden, {h}. Die Spracheingabe ist aktiv.")
             else:
-                self.tts.speak(f"Microphone disconnected, {h}. Voice input is suspended.")
+                self.tts.speak(f"Mikrofon getrennt, {h}. Die Spracheingabe ist pausiert.")
 
         self.listener._on_mic_state_change = _on_mic_state_change
         self.listener.start_device_monitor()
@@ -1069,7 +1050,9 @@ class JarvisContinuous:
             # Startup health check (delayed to let external services finish loading)
             if self.config.get("health_check.run_on_startup", True):
                 import threading
-                threading.Timer(30, self._run_startup_health_check).start()
+                self._startup_health_timer = threading.Timer(30, self._run_startup_health_check)
+                self._startup_health_timer.daemon = True
+                self._startup_health_timer.start()
 
             # Internal watchdog — proactive self-healing for stuck pipeline
             if self.config.get("watchdog.enabled", True):
@@ -1109,9 +1092,12 @@ class JarvisContinuous:
                 # Coordinator event loop runs on main thread
                 self.coordinator.run()
             except KeyboardInterrupt:
-                print("\n\nShutdown signal received...")
+                print("\n\nSignal zum Beenden empfangen...")
                 self.logger.info("Shutdown requested")
             finally:
+                timer = getattr(self, '_startup_health_timer', None)
+                if timer is not None:
+                    timer.cancel()
                 self.coordinator.shutdown()
                 if hasattr(self, 'watchdog') and self.watchdog:
                     # Was started above but never stopped — the thread is
@@ -1196,7 +1182,7 @@ class JarvisContinuous:
                 while True:
                     time.sleep(0.1)
             except KeyboardInterrupt:
-                print("\n\nShutdown signal received...")
+                print("\n\nSignal zum Beenden empfangen...")
                 self.logger.info("Shutdown requested")
             finally:
                 if hasattr(self, 'privacy_control_watcher') and self.privacy_control_watcher:
@@ -1236,7 +1222,7 @@ def main():
     
     # Setup signal handlers
     def signal_handler(sig, frame):
-        print("\n\nShutdown signal received...")
+        print("\n\nSignal zum Beenden empfangen...")
         sys.exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)

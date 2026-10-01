@@ -220,8 +220,8 @@ class SocialIntroductionsSkill(BaseSkill):
             # Ask for phonetic correction
             self._state = IntroState.AWAITING_PRONUNCIATION_CORRECTION
             self._state_expiry = time.time() + 60
-            return (f"How should I say it, {self.honorific}? "
-                    f"Say it slowly and I'll try to match.")
+            return (f"Wie soll ich den Namen aussprechen, {self.honorific}? "
+                    f"Sprich ihn bitte langsam vor, dann versuche ich es erneut.")
 
         # Ambiguous — treat as a pronunciation correction attempt
         return self._handle_pronunciation_correction(command)
@@ -252,7 +252,7 @@ class SocialIntroductionsSkill(BaseSkill):
         """User provides additional facts or signals done."""
         # Check for done signals
         if words & self._DONE or cmd_lower in self._DONE_PHRASES:
-            rel = self._pending_rel or "contact"
+            rel = self._pending_rel or "Kontakt"
             response = persona.intro_complete(self._pending_name, rel)
             self._reset_state()
             return response
@@ -263,7 +263,7 @@ class SocialIntroductionsSkill(BaseSkill):
 
         # Ask for more
         self._state_expiry = time.time() + 60
-        return f"Got it. Anything else about {self._pending_name}, {self.honorific}?"
+        return f"Verstanden. Gibt es noch etwas über {self._pending_name}, {self.honorific}?"
 
     # ------------------------------------------------------------------
     # Intent handlers (entry points from semantic matching)
@@ -282,24 +282,24 @@ class SocialIntroductionsSkill(BaseSkill):
         if m:
             name = m.group(1).capitalize()
             return self.respond(
-                f"Pleased to meet you, {name}. I'll remember that, {self.honorific}.",
+                f"Freut mich, {name}. Ich merke mir das, {self.honorific}.",
             )
 
         name, rel = self._extract_name_and_relationship(text)
 
         if not name:
             return self.respond(
-                f"I didn't quite catch the name, {self.honorific}. "
-                f"Who would you like me to meet?",
+                f"Ich habe den Namen nicht verstanden, {self.honorific}. "
+                f"Wen möchtest du mir vorstellen?",
             )
 
         # Check if person already exists
         existing = self.manager.get_person_by_name(name, user_id=self.current_user)
         if existing:
-            existing_rel = existing.get("relationship") or "contact"
+            existing_rel = existing.get("relationship") or "Kontakt"
             return self.respond(
-                f"I already know {name}, {self.honorific}. "
-                f"Your {existing_rel}. Would you like to update anything?",
+                f"Ich kenne {name} bereits, {self.honorific}. "
+                f"Beziehung: {existing_rel}. Möchtest du etwas aktualisieren?",
             )
 
         # Start the multi-turn introduction flow
@@ -308,7 +308,7 @@ class SocialIntroductionsSkill(BaseSkill):
         self._state = IntroState.AWAITING_NAME_CONFIRM
         self._state_expiry = time.time() + 60
 
-        return self.respond(persona.intro_name_confirm(rel or "friend"))
+        return self.respond(persona.intro_name_confirm(rel or "bekannte Person"))
 
     def who_is(self, entities: dict = None) -> str:
         """Handle 'who is Arya' queries."""
@@ -316,7 +316,7 @@ class SocialIntroductionsSkill(BaseSkill):
         name = self._extract_name_from_query(text)
         if not name:
             return self.respond(
-                f"Who are you asking about, {self.honorific}?",
+                f"Nach wem fragst du, {self.honorific}?",
             )
 
         person = self.manager.get_person_with_facts(name, user_id=self.current_user)
@@ -324,8 +324,8 @@ class SocialIntroductionsSkill(BaseSkill):
             return self.respond(persona.intro_unknown(name))
 
         # Build natural response
-        rel = person.get("relationship") or "someone you know"
-        response = f"{person['name']} is your {rel}, {self.honorific}."
+        rel = person.get("relationship") or "eine bekannte Person"
+        response = f"{person['name']}, Beziehung: {rel}, {self.honorific}."
         facts = person.get("facts", [])
         if facts:
             fact_strs = [f["content"] for f in facts[:5]]
@@ -345,11 +345,11 @@ class SocialIntroductionsSkill(BaseSkill):
                 self._state = IntroState.AWAITING_PRONUNCIATION_CORRECTION
                 self._state_expiry = time.time() + 60
                 return self.respond(
-                    f"Alright, {self.honorific}. "
-                    f"How should I say {person['name']}?",
+                    f"Gut, {self.honorific}. "
+                    f"Wie soll ich {person['name']} aussprechen?",
                 )
         return self.respond(
-            f"Which name are you referring to, {self.honorific}?",
+            f"Welchen Namen meinst du, {self.honorific}?",
         )
 
     def list_people(self, entities: dict = None) -> str:
@@ -357,24 +357,24 @@ class SocialIntroductionsSkill(BaseSkill):
         people = self.manager.get_all_people()
         if not people:
             return self.respond(
-                f"I don't know anyone yet, {self.honorific}. "
-                f"Introduce someone by saying 'meet my friend Sarah'.",
+                f"Ich kenne noch keine Kontakte, {self.honorific}. "
+                f"Du kannst mir eine Person vorstellen, zum Beispiel deine Freundin Sarah.",
             )
 
         if len(people) == 1:
             p = people[0]
-            rel = p.get("relationship") or "contact"
+            rel = p.get("relationship") or "Kontakt"
             return self.respond(
-                f"I know one person: {p['name']}, your {rel}.",
+                f"Ich kenne eine Person: {p['name']}, Beziehung: {rel}.",
             )
 
         names = []
         for p in people:
-            rel = p.get("relationship") or "contact"
-            names.append(f"{p['name']}, your {rel}")
-        joined = ", ".join(names[:-1]) + f", and {names[-1]}"
+            rel = p.get("relationship") or "Kontakt"
+            names.append(f"{p['name']}, Beziehung: {rel}")
+        joined = ", ".join(names[:-1]) + f" und {names[-1]}"
         return self.respond(
-            f"I know {len(people)} people, {self.honorific}: {joined}.",
+            f"Ich kenne {len(people)} Personen, {self.honorific}: {joined}.",
         )
 
     # ------------------------------------------------------------------

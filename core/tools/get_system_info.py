@@ -64,7 +64,7 @@ def handler(args: dict) -> str:
     sub_handler = _SYSTEM_INFO_HANDLERS.get(category)
     if not sub_handler:
         available = ", ".join(sorted(_SYSTEM_INFO_HANDLERS.keys()))
-        return f"Unknown category '{category}'. Available: {available}"
+        return f"Unbekannte Kategorie '{category}'. Verfügbar: {available}"
     return sub_handler()
 
 
@@ -84,8 +84,8 @@ def _sysinfo_cpu() -> str:
             break
     core_count = subprocess.check_output(["nproc"], text=True).strip()
     if model:
-        return f"CPU: {model}, {core_count} cores."
-    return f"CPU: {core_count} cores (model unknown)."
+        return f"CPU: {model}, {core_count} Kerne."
+    return f"CPU: {core_count} Kerne (Modell unbekannt)."
 
 
 @_register_sysinfo("memory")
@@ -109,10 +109,10 @@ def _sysinfo_memory() -> str:
                 used_gb = used_mb / 1024
                 pct = (used_gb / total_gb) * 100
                 return (
-                    f"RAM: {total_gb:.1f} GB total, {used_gb:.1f} GB used "
-                    f"({pct:.0f}% utilization)."
+                    f"RAM: {total_gb:.1f} GB insgesamt, {used_gb:.1f} GB belegt "
+                    f"({pct:.0f}% Auslastung)."
                 )
-    return f"RAM: {total_gb:.1f} GB total."
+    return f"RAM: {total_gb:.1f} GB insgesamt."
 
 
 @_register_sysinfo("disk")
@@ -123,8 +123,8 @@ def _sysinfo_disk() -> str:
     free_gb = usage.free / (1024**3)
     pct = (usage.used / usage.total) * 100
     return (
-        f"Root partition: {used_gb:.1f} GB used / {total_gb:.1f} GB total "
-        f"({free_gb:.1f} GB free, {pct:.0f}% used)."
+        f"Systempartition: {used_gb:.1f} GB belegt / {total_gb:.1f} GB insgesamt "
+        f"({free_gb:.1f} GB frei, {pct:.0f}% belegt)."
     )
 
 
@@ -152,7 +152,7 @@ def _sysinfo_gpu() -> str:
                         info = parts[2].strip()
                         info = info.replace("[AMD/ATI]", "AMD").replace("[NVIDIA]", "NVIDIA")
                         return f"GPU: {info}."
-    return "GPU: unable to detect."
+    return "GPU: nicht erkannt."
 
 
 @_register_sysinfo("uptime")
@@ -165,23 +165,23 @@ def _sysinfo_uptime() -> str:
     minutes, _ = divmod(remainder, 60)
     parts = []
     if days > 0:
-        parts.append(f"{days} day{'s' if days != 1 else ''}")
+        parts.append(f"{days} Tag{'e' if days != 1 else ''}")
     if hours > 0:
-        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+        parts.append(f"{hours} Stunde{'n' if hours != 1 else ''}")
     if minutes > 0:
-        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
-    return f"Uptime: {', '.join(parts) if parts else 'less than a minute'}."
+        parts.append(f"{minutes} Minute{'n' if minutes != 1 else ''}")
+    return f"Laufzeit: {', '.join(parts) if parts else 'weniger als eine Minute'}."
 
 
 @_register_sysinfo("hostname")
 def _sysinfo_hostname() -> str:
-    return f"Hostname: {platform.node()}."
+    return f"Rechnername: {platform.node()}."
 
 
 @_register_sysinfo("username")
 def _sysinfo_username() -> str:
     username = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
-    return f"Username: {username}."
+    return f"Benutzername: {username}."
 
 
 @_register_sysinfo("all_drives")
@@ -191,7 +191,7 @@ def _sysinfo_all_drives() -> str:
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        return "Error listing drives."
+        return "Fehler beim Auflisten der Laufwerke."
     drives = []
     for line in result.stdout.strip().split("\n"):
         parts = line.split(None, 3)
@@ -203,5 +203,5 @@ def _sysinfo_all_drives() -> str:
                 model = "Unknown"
             drives.append(f"{name}: {size} {model}")
     if not drives:
-        return "No drives detected."
-    return "Drives:\n" + "\n".join(f"  - {d}" for d in drives)
+        return "Keine Laufwerke erkannt."
+    return "Laufwerke:\n" + "\n".join(f"  - {d}" for d in drives)

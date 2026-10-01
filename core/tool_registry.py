@@ -192,11 +192,9 @@ def register_external_tool(name, schema, handler, system_prompt_rule, skill_name
 # ---------------------------------------------------------------------------
 
 _GLOBAL_RULES_PREFIX = [
-    "If a tool matches the user's request, call the tool. When in doubt "
-    "about whether information is current, SEARCH — do not guess from "
-    "training data. Only answer without tools for timeless knowledge "
-    "(definitions, science, math, how things work) or follow-ups to "
-    "your own previous answers.",
+    "Wenn ein Werkzeug zur Anfrage passt, rufe es auf. Bei unklarer Aktualität "
+    "recherchiere statt zu raten. Zeitloses Wissen und Rückfragen zu eigenen "
+    "Antworten kannst du direkt beantworten.",
 ]
 
 _GLOBAL_RULES_SUFFIX = [
@@ -227,7 +225,8 @@ def build_tool_prompt_rules(active_tool_names: set) -> str:
     Returns:
         Complete rules block including preamble, per-tool rules, and suffix.
     """
-    rules = list(_GLOBAL_RULES_PREFIX)
+    from core.persona import OWNER_LANGUAGE_RULE
+    rules = [OWNER_LANGUAGE_RULE, *_GLOBAL_RULES_PREFIX]
 
     # Per-tool rules — only for tools that are active
     for mod in _tool_modules:
@@ -244,7 +243,7 @@ def build_tool_prompt_rules(active_tool_names: set) -> str:
     rules.extend(_GLOBAL_RULES_SUFFIX)
 
     numbered = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(rules))
-    return "Tool usage guidelines:\n" + numbered
+    return "Werkzeugrichtlinien:\n" + numbered
 
 
 # ---------------------------------------------------------------------------
@@ -317,11 +316,11 @@ def execute_tool(tool_name: str, arguments: dict) -> str | dict:
     if not _REGISTRY_READY:
         logger.warning("execute_tool called before inject_dependencies(): %s",
                         tool_name)
-        return f"Error: tool registry not initialized yet"
+        return "Fehler: Die Werkzeugverwaltung ist noch nicht initialisiert."
     handler = TOOL_HANDLERS.get(tool_name)
     if not handler:
         logger.warning(f"Unknown tool: {tool_name}")
-        return f"Error: unknown tool '{tool_name}'"
+        return f"Fehler: Das Werkzeug '{tool_name}' ist unbekannt."
     _trunc_args = {k: (str(v)[:80] + "..." if len(str(v)) > 80 else v) for k, v in arguments.items()}
     # Session #8 fix (agentic-audit finding #3): this line logged
     # truncated tool ARGUMENTS via plain logger.debug — content-bearing
@@ -376,7 +375,7 @@ def execute_tool(tool_name: str, arguments: dict) -> str | dict:
                 logger.warning("tool_completed event emit failed: %s", _evt_err)
         return result
     except Exception as e:
-        logger.error(f"Tool execution error ({tool_name}): {e}")
+        logger.error("Tool execution error (%s): %s", tool_name, type(e).__name__)
         # Structured event: tool failure (CONTENT_LOGGING-gated, see the
         # success path above for why).
         if get_privacy_gate().allow(Capability.CONTENT_LOGGING):
@@ -388,7 +387,7 @@ def execute_tool(tool_name: str, arguments: dict) -> str | dict:
                     el.emit(
                         category="tool_execution",
                         event="tool_completed",
-                        message=f"{tool_name} FAILED: {e}",
+                        message=f"{tool_name} FAILED: {type(e).__name__}",
                         severity="error",
                         source="tool_registry",
                         stage="tool",
@@ -397,12 +396,12 @@ def execute_tool(tool_name: str, arguments: dict) -> str | dict:
                         metadata={
                             "tool_name": tool_name,
                             "arguments": _trunc_args,
-                            "error": str(e),
+                            "error": type(e).__name__,
                         },
                     )
             except Exception:
                 pass
-        return f"Error executing {tool_name}: {e}"
+        return f"Fehler: Das Werkzeug '{tool_name}' konnte die Anfrage nicht ausführen."
 
 
 # ---------------------------------------------------------------------------

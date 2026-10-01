@@ -18,6 +18,7 @@ import subprocess
 import threading
 import time
 import logging
+from contextlib import nullcontext
 from difflib import SequenceMatcher
 from core.wake_word_utils import find_wake_word, strip_wake_word
 from typing import Optional
@@ -34,7 +35,7 @@ from core.logger import get_logger
 from core.honorific import set_honorific
 from core import persona
 from core.conversation_state import ConversationState
-from core.conversation_router import ConversationRouter, RouteResult
+from core.conversation_router import ConversationRouter, RouteResult, extract_explicit_search_query
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ def _detect_show_me(text):
             return 'auto'
     return None
 from core.llm_router import ToolCallRequest, _cloud_credential_matches_provider
-from core.web_research import WebResearcher, format_search_results
+from core.web_research import WebResearcher, format_search_results, run_search
 from core.self_awareness import SelfAwareness
 from core.task_planner import TaskPlanner
 
@@ -197,6 +198,7 @@ class STTWorker(threading.Thread):
                 break
             audio_turn = None
             deferred_command = None
+            timings = {}
 
             def _dispatch_deferred():
                 nonlocal deferred_command
@@ -212,6 +214,8 @@ class STTWorker(threading.Thread):
                     audio = item["audio"]
                     generation = item.get("capture_generation")
                     during_tts = bool(item.get("during_tts"))
+                    if isinstance(item.get("speech_end"), (int, float)):
+                        timings["speech_end"] = item["speech_end"]
                 else:
                     audio, generation, during_tts = item, None, False
 
@@ -260,6 +264,7 @@ class STTWorker(threading.Thread):
                 if during_tts:
                     # Global stop must not wait for, or depend on, speaker ID.
                     speaker_user_id, speaker_confidence = None, 0.0
+                    timings["stt_start"] = time.monotonic()
                     text = self.stt.transcribe(audio, sample_rate)
                 elif self.speaker_id is not None:
                     identified, speaker_confidence = self.speaker_id.identify(audio, sample_rate)
@@ -289,13 +294,18 @@ class STTWorker(threading.Thread):
                         audio_turn.speaker_id = speaker_user_id
                         audio_turn.speaker_confidence = speaker_confidence
                         audio_turn.speaker_resolved = True
+                    timings["stt_start"] = time.monotonic()
                     text = self.stt.transcribe(
                         audio, sample_rate, speaker_user_id=speaker_user_id
                     )
                 else:
+                    timings["stt_start"] = time.monotonic()
                     text = self.stt.transcribe(audio, sample_rate)
                     speaker_user_id, speaker_confidence = None, 0.0
 
+                timings["stt_end"] = time.monotonic()
+                if audio_turn is not None:
+                    audio_turn.latency_timings = timings
                 if (not self._privacy_allows_stt()
                         or (privacy_epoch is not None and self._privacy_gate is not None
                             and not self._privacy_gate.is_current_epoch(privacy_epoch))):
@@ -344,6 +354,7 @@ class STTWorker(threading.Thread):
                         }
                         if audio_turn is not None:
                             data["audio_turn_id"] = audio_turn.turn_id
+                        data["latency_timings"] = timings
                     else:
                         data = text.strip()
 
@@ -355,7 +366,7 @@ class STTWorker(threading.Thread):
                     _dispatch_deferred()
                 else:
                     self.logger.info("Blank transcription")
-                    print("⚠️  (no speech detected)")
+                    print("⚠️  (keine Sprache erkannt)")
                     self._reject_audio_turn(audio_turn, "blank")
                     self._audio_turn_verdict(audio_turn, None, "blank")
                     _dispatch_deferred()
@@ -538,9 +549,10 @@ class _ChatterboxAudioWriter:
     # make the producer block forever handing off audio nobody will play).
     _PUT_POLL_INTERVAL = 0.5
 
-    def __init__(self, tts, logger):
+    def __init__(self, tts, logger, on_output_start=None):
         self.tts = tts
         self.logger = logger
+        self._on_output_start = on_output_start
         self._queue: queue.Queue = queue.Queue(maxsize=self._QUEUE_MAXSIZE)
         self.aplay = None
         self.total_samples = 0
@@ -602,7 +614,11 @@ class _ChatterboxAudioWriter:
 
                 if getattr(tts, "output_backend", "") == "windows":
                     rate = sr or tts.sample_rate
-                    if not tts._play_pcm_windows(pcm, rate):
+                    observe = getattr(tts, "observe_output", None)
+                    boundary = observe(self._on_output_start) if callable(observe) else nullcontext()
+                    with boundary:
+                        played = tts._play_pcm_windows(pcm, rate)
+                    if not played:
                         self.error = "Windows audio playback failed"
                         self._stopped.set()
                         break
@@ -622,6 +638,11 @@ class _ChatterboxAudioWriter:
                     pcm = tts._resample_pcm(pcm, sr, tts.sample_rate)
 
                 self.aplay.stdin.write(pcm)
+                if self._on_output_start:
+                    try:
+                        self._on_output_start()
+                    except Exception:
+                        pass  # observation must never interrupt playback
                 self.total_samples += len(pcm) // 2  # 16-bit samples
 
         except BrokenPipeError:
@@ -719,6 +740,7 @@ class StreamingAudioPipeline:
         # latency instrumentation (core/latency_tracker.py); must never
         # raise, so it's wrapped defensively at each call site.
         self._on_first_audio = on_first_audio
+        self._output_start_reported = False
         self._writer = None
 
     def start(self):
@@ -769,8 +791,9 @@ class StreamingAudioPipeline:
             writer.cancel()
 
     def _fire_first_audio_callback(self):
-        if self._on_first_audio is None:
+        if self._on_first_audio is None or self._output_start_reported or self._cancelled.is_set():
             return
+        self._output_start_reported = True
         try:
             self._on_first_audio()
         except Exception:
@@ -784,7 +807,11 @@ class StreamingAudioPipeline:
             return
         deadline = time.monotonic() + 120
         while not self._done.wait(timeout=0.1):
-            if self._cancelled.is_set() or time.monotonic() >= deadline:
+            if self._cancelled.is_set():
+                break
+            if time.monotonic() >= deadline:
+                self.logger.warning("Streaming audio completion timed out; cancelling playback")
+                self.cancel()
                 break
         if self._error:
             self.logger.error(f"Streaming audio pipeline error: {self._error}")
@@ -920,7 +947,7 @@ class StreamingAudioPipeline:
         # ---- Chatterbox: producer (this thread) / consumer (writer) ----
         # See _ChatterboxAudioWriter's docstring for why this is a
         # separate thread rather than direct writes like the Kokoro path.
-        writer = _ChatterboxAudioWriter(tts, self.logger)
+        writer = _ChatterboxAudioWriter(tts, self.logger, self._fire_first_audio_callback)
         self._writer = writer
         writer.start()
 
@@ -971,7 +998,6 @@ class StreamingAudioPipeline:
                                 self.logger.info(
                                     f"{tts.engine} first chunk in {time.time() - t0:.3f}s"
                                 )
-                                self._fire_first_audio_callback()
                             if not writer.submit(pcm, sr) or writer.error:
                                 break
                             continue
@@ -1013,8 +1039,6 @@ class StreamingAudioPipeline:
                             f"{tts.engine} first chunk in "
                             f"{time.time() - t0:.3f}s"
                         )
-                        self._fire_first_audio_callback()
-
                     submitted = writer.submit(pcm, sr)
 
                     if not submitted or writer.error:
@@ -1382,6 +1406,9 @@ class Coordinator:
         conversation window, and emit COMMAND_DETECTED if appropriate."""
         self._last_transcription_ts = time.monotonic()
         audio_turn_id = None
+        timings = event.data.get("latency_timings") if isinstance(event.data, dict) else None
+        if isinstance(timings, dict):
+            timings["wake_start"] = time.monotonic()
         # Extract text and speaker context from enriched or plain event data
         if isinstance(event.data, dict):
             raw_text = event.data["text"]
@@ -1404,7 +1431,7 @@ class Coordinator:
         if (text.startswith('(') and text.endswith(')')) or \
            (text.startswith('[') and text.endswith(']')):
             self.logger.info("Ignoring Whisper noise annotation (%d chars)", len(text))
-            print("⚠️  Ignoring background noise")
+            print("⚠️  Hintergrundgeräusche werden ignoriert")
             self.reject_audio_turn(audio_turn_id, "noise")
             return
 
@@ -1442,7 +1469,7 @@ class Coordinator:
             self.logger.info("Accepting conversation response (%d chars)", len(text))
             self.event_queue.put(Event(
                 EventType.COMMAND_DETECTED,
-                data=text,
+                data={"text": text, "latency_timings": timings} if timings else text,
                 source="coordinator",
             ))
             return
@@ -1453,31 +1480,60 @@ class Coordinator:
             self.logger.info("Wake word detected (similarity: %.2f)", similarity)
             # Check if this is ambient conversation rather than a command
             if self._is_ambient_wake_word(text, matched_word):
-                print("🔇 Ambient mention (ignored)")
+                print("🔇 Beiläufige Erwähnung (ignoriert)")
                 return
 
             corrected_text = strip_wake_word(text, self.wake_word)
             self.logger.info("Normalized wake-word transcript (%d chars)", len(text))
             self.event_queue.put(Event(
                 EventType.COMMAND_DETECTED,
-                data=corrected_text,
+                data={"text": corrected_text, "latency_timings": timings} if timings else corrected_text,
                 source="coordinator",
             ))
         else:
             self.logger.info("No wake word detected (%d chars)", len(text))
-            print("❌ No wake word (ignored)")
+            print("❌ Kein Aktivierungswort erkannt (ignoriert)")
 
     # ----- command processing (extracted from on_command_detected) -----
 
     def _handle_command(self, event: Event):
         """Route a detected command through the priority chain."""
         self._current_direct = None
+        turn_status = "success"
         try:
             self._handle_command_impl(event)
+        except Exception:
+            turn_status = "error"
+            raise
         finally:
-            current, self._current_direct = self._current_direct, None
-            if current is not None:
-                self.direct_audio.finish(current)   # drop tracking/timer of the popped turn
+            try:
+                current, self._current_direct = self._current_direct, None
+                if current is not None:
+                    self.direct_audio.finish(current)
+            finally:
+                # Dispatch is synchronous: returning from it ends this command,
+                # including an exception after playback in bookkeeping.
+                self._streaming_active = False
+                self._active_response_text = ""
+                self._last_command_start_ts = 0.0
+                self._last_command_end_ts = time.monotonic()
+                self._last_idle_ts = self._last_command_end_ts
+                needs_resume = self.state != PipelineState.IDLE
+                self.state = PipelineState.IDLE
+                if needs_resume and getattr(self, "running", True):
+                    active = getattr(self, "_active_audio_pipeline", None)
+                    if active is not None:
+                        active.cancel()
+                        self._active_audio_pipeline = None
+                    self.listener.resume_listening()
+                latency = getattr(self, "_current_latency", None)
+                if latency is not None:
+                    if getattr(self, "running", True):
+                        latency.mark("listener_resumed")
+                    latency.mark("command_state_cleared")
+                    latency.mark("response_done")
+                    latency.emit(self.logger, getattr(self, "config", None), status=turn_status)
+                    self._current_latency = None
 
     def _handle_command_impl(self, event: Event):
         self._last_command_start_ts = time.monotonic()
@@ -1486,6 +1542,12 @@ class Coordinator:
         self._active_response_text = ""
         self._pending_expert = None      # never leak a delegation into another turn
         self._current_latency = LatencyTracker()
+        timings = event.data.get("latency_timings") if isinstance(event.data, dict) else None
+        if isinstance(timings, dict):
+            for stage in ("speech_end", "stt_start", "stt_end", "wake_start"):
+                if isinstance(timings.get(stage), (int, float)):
+                    self._current_latency.mark(stage, at=timings[stage])
+            self._current_latency.mark("wake_end", at=event.timestamp)
         direct = None
         if isinstance(event.data, dict) and event.data.get("direct_audio_turn") is not None:
             direct = self.direct_audio.pop(event.data["direct_audio_turn"], active=True)
@@ -1502,7 +1564,7 @@ class Coordinator:
             full_text = direct.placeholder
             in_conversation = direct.in_conversation
         else:
-            full_text = event.data
+            full_text = event.data.get("text", "") if isinstance(event.data, dict) else event.data
             in_conversation = self.listener.conversation_window_active
         self.state = PipelineState.PROCESSING_COMMAND
         self.stats['commands_processed'] += 1
@@ -1530,6 +1592,11 @@ class Coordinator:
                 self._finalize_direct_context(direct)
 
         # Parse input
+        if self._current_direct is not None and self._current_latency:
+            direct_timings = getattr(self._current_direct, "latency_timings", {})
+            for stage in ("speech_end", "stt_start", "stt_end"):
+                if isinstance(direct_timings.get(stage), (int, float)):
+                    self._current_latency.mark(stage, at=direct_timings[stage])
         if direct is not None:
             command = direct.placeholder
             if not in_conversation and self.memory_manager:
@@ -1699,7 +1766,7 @@ class Coordinator:
                 self.logger.warning("Expert requested but handover/expert not available; primary answers")
                 self._speak_and_wait("Der Experte ist derzeit nicht verfügbar. Ich antworte selbst.")
             # LLM fallback (streaming)
-            print("🤖 Thinking...")
+            print("🤖 Antwort wird vorbereitet ...")
             if direct is None:
                 unavailable = self._await_primary()
                 if unavailable:
@@ -1745,8 +1812,6 @@ class Coordinator:
 
         if self._current_latency:
             self._current_latency.mark("response_done")
-            self._current_latency.emit(self.logger, self.config)
-            self._current_latency = None
 
         # Update centralized conversation state
         self.conv_state.update(
@@ -1808,8 +1873,8 @@ class Coordinator:
 
         # Stats and resume
         stats = self.conversation.get_conversation_stats()
-        print(f"\n📊 Session: {stats['session_user_messages']} user, "
-              f"{stats['session_assistant_messages']} assistant messages\n")
+        print(f"\n📊 Sitzung: {stats['session_user_messages']} Benutzernachrichten, "
+              f"{stats['session_assistant_messages']} Assistentennachrichten\n")
         self.listener.resume_listening()
         self.state = PipelineState.IDLE
         self._last_command_end_ts = self._last_idle_ts = time.monotonic()
@@ -2019,6 +2084,8 @@ class Coordinator:
 
                 # Tool call sentinel — break to Phase B
                 if isinstance(item, ToolCallRequest):
+                    if self._current_latency:
+                        self._current_latency.mark("tool_requested")
                     tool_call_request = item
                     if not self._llm_responded:
                         self._llm_responded = True
@@ -2042,8 +2109,6 @@ class Coordinator:
                 chunk = chunker.feed(safe_token) if safe_token else None
 
                 if chunk:
-                    if self._current_latency:
-                        self._current_latency.mark("first_speakable_chunk")
                     chunks_spoken, first_chunk_checked, pending_chunk, audio_pipeline = \
                         self._process_speech_chunk(
                             chunk, command, history, memory_context,
@@ -2100,24 +2165,60 @@ class Coordinator:
                     )
                     break
 
-                self.logger.info(
-                    f"🔧 Tool call: {tool_call_request.name}({tool_call_request.arguments})"
-                )
+                self.logger.info("Tool call: %s", tool_call_request.name)
                 self._last_tools_called.append(tool_call_request.name)
 
                 # Execute the tool
+                if self._current_latency:
+                    self._current_latency.mark("tool_start")
                 tool_image_data = None  # Set by multimodal tools (e.g. take_screenshot)
                 if tool_call_request.name == "web_search":
-                    query = tool_call_request.arguments.get("query", command)
-                    print(f"🔍 Searching: {query}")
+                    query = (extract_explicit_search_query(raw_command)
+                             if tool_chain_count == 1 else None)
+                    query = query or tool_call_request.arguments.get("query", command)
+                    tool_call_request.arguments["query"] = query
+                    if self._current_latency:
+                        self._current_latency.mark("tool_start")
+                    print("🔍 Suche läuft")
                     # Trim fetch volume on 2nd+ search — snippets alone
                     # provide sufficient factual density for sub-queries.
                     _is_followup = _tool_call_counts.get("web_search", 0) > 1
                     _max_res = 3 if _is_followup else 5
                     _max_chars = 2000 if _is_followup else 4000
-                    results = self.web_researcher.search(query, max_results=_max_res)
+                    search_outcome = run_search(self.web_researcher, query, max_results=_max_res)
+                    if self._current_latency:
+                        self._current_latency.mark("tool_result")
+                    results = search_outcome.results
                     self.conv_state.research_results = results
-                    _backend = getattr(self.web_researcher, 'last_backend', None) or "unknown"
+                    _backend = search_outcome.backend or "unknown"
+
+                    try:
+                        from core.event_logger import get_event_logger
+                        _el = get_event_logger()
+                        if _el:
+                            _el.emit(event="tool_completed", category="tool_execution",
+                                     stage="web_search", status=search_outcome.event_status,
+                                     message="Web search completed",
+                                     metadata={"tool": "web_search",
+                                               "search_status": search_outcome.status,
+                                               "results_count": len(results),
+                                               "backend": _backend,
+                                               "error_type": search_outcome.error_type})
+                    except Exception as exc:
+                        self.logger.warning("Search event persistence failed (%s)", type(exc).__name__)
+
+                    if not search_outcome.has_results:
+                        self._llm_responded = True
+                        if ack_timer:
+                            ack_timer.cancel()
+                        if audio_pipeline:
+                            audio_pipeline.cancel()
+                        self._active_audio_pipeline = None
+                        self._active_response_text = ""
+                        self.listener.active_tts_text = ""
+                        self.conv_state.last_tool_result_text = ""
+                        self.tts._spoke = False
+                        return search_outcome.failure_message
 
                     page_sections = self.web_researcher.fetch_pages_parallel(
                         results, max_results=_max_res, max_chars=_max_chars,
@@ -2129,21 +2230,7 @@ class Coordinator:
 
                     tool_result = format_search_results(results) + page_content
                     self.logger.info("Web search (%s): %d results", _backend, len(results))
-                    print(f"📋 Found {len(results)} results ({_backend})")
-
-                    # Emit tool_completed for voice pipeline web_search
-                    try:
-                        from core.event_logger import get_event_logger
-                        _el = get_event_logger()
-                        if _el:
-                            _el.emit(event="tool_completed", category="tool_execution",
-                                     stage="web_search", status="success",
-                                     message=f"web_search: {query[:80]}",
-                                     metadata={"tool": "web_search", "query": query,
-                                               "results_count": len(results) if results else 0,
-                                               "backend": _backend})
-                    except Exception:
-                        pass
+                    print(f"📋 {len(results)} Ergebnisse gefunden ({_backend})")
 
                     # Artifact cache (dual-write alongside conv_state)
                     if self.interaction_cache:
@@ -2173,7 +2260,7 @@ class Coordinator:
                 else:
                     from core.tool_executor import execute_tool
                     from core.tool_registry import parse_tool_result, save_tool_image
-                    print(f"🔧 Running: {tool_call_request.name}")
+                    print(f"🔧 Ausführung: {tool_call_request.name}")
                     raw_result = execute_tool(
                         tool_call_request.name, tool_call_request.arguments
                     )
@@ -2210,7 +2297,7 @@ class Coordinator:
                             show_me = show_me or "auto"
 
                         if (show_me and tool_result
-                                and not tool_result.startswith(("BLOCKED", "CONFIRMATION REQUIRED", "Error"))):
+                                and not tool_result.startswith(("BLOCKED", "CONFIRMATION REQUIRED", "Error", "Gesperrt:", "Bestätigung erforderlich:", "Fehler:"))):
                             ct, title = _DEVTOOLS_DISPLAY_MAP.get(action, ("general", "Output"))
                             # For system_health, generate the full visual report
                             # instead of the compact tool output
@@ -2230,6 +2317,19 @@ class Coordinator:
                                 )
                             except Exception as e:
                                 self.logger.warning(f"Display hook error: {e}")
+
+                if self._current_latency:
+                    self._current_latency.mark("tool_result")
+                if tool_call_request.name == "get_weather":
+                    from core.tools.get_weather import WEATHER_UNAVAILABLE, WEATHER_LOCATION_UNKNOWN
+                    if tool_result in (WEATHER_UNAVAILABLE, WEATHER_LOCATION_UNKNOWN):
+                        if ack_timer:
+                            ack_timer.cancel()
+                        if audio_pipeline:
+                            audio_pipeline.cancel()
+                        self._active_audio_pipeline = None
+                        self.tts._spoke = False
+                        return tool_result
 
                 # Store compact tool result for follow-up context.
                 # This powers anaphoric references ("list them", "which ones?")
@@ -2276,10 +2376,15 @@ class Coordinator:
                 _synth_max_tokens = 400 + (tool_chain_count * 100)
                 # Buffer intermediate text — discard if followed by a chained tool call
                 _intermediate_buffer = ""
+                final_search = bool(
+                    tool_call_request.name == "web_search"
+                    and extract_explicit_search_query(raw_command))
+                if self._current_latency:
+                    self._current_latency.mark("continuation_start")
                 for item in self.llm.continue_after_tool_call(
                     tool_call_request, tool_result,
                     max_tokens=_synth_max_tokens,
-                    tools=use_tools,
+                    tools=[] if final_search else use_tools,
                     image_data=_synth_img,
                     synthesis_temperature=synthesis_temperature,
                     synthesis_category=synthesis_category,
@@ -2297,6 +2402,24 @@ class Coordinator:
 
                     _intermediate_buffer += item
                     _synth_token_count += 1
+                    if self._current_latency:
+                        self._current_latency.mark("continuation_first_token")
+                    if final_search:
+                        for char in item:
+                            safe_char = voice_boundary.feed(char)
+                            log_diagnostics(self.logger, voice_boundary.diagnostics)
+                            voice_boundary.diagnostics.clear()
+                            chunk = chunker.feed(safe_char) if safe_char else None
+                            if chunk:
+                                chunks_spoken, first_chunk_checked, pending_chunk, audio_pipeline = \
+                                    self._process_speech_chunk(
+                                        chunk, command, history, memory_context,
+                                        conversation_messages, chunks_spoken,
+                                        first_chunk_checked, pending_chunk,
+                                        audio_pipeline, use_pipeline,
+                                    )
+                                if chunks_spoken == -1:
+                                    return pending_chunk
 
                 if self._turn_cancelled.is_set():
                     return ""
@@ -2307,7 +2430,7 @@ class Coordinator:
                         self._llm_responded = True
                     full_response += _intermediate_buffer
                     # Re-feed buffered text through chunker for TTS
-                    for char in _intermediate_buffer:
+                    for char in ("" if final_search else _intermediate_buffer):
                         safe_char = voice_boundary.feed(char)
                         log_diagnostics(self.logger, voice_boundary.diagnostics)
                         voice_boundary.diagnostics.clear()
@@ -2343,10 +2466,10 @@ class Coordinator:
                 ]
                 if _summaries:
                     _fallback_prompt = (
-                        f"The user asked: {command}\n\n"
-                        "Here is the information gathered:\n\n"
+                        f"Die aktuelle Anfrage lautet: {command}\n\n"
+                        "Diese Informationen liegen vor:\n\n"
                         + "\n\n".join(_summaries)
-                        + "\n\nSynthesize a concise, complete answer."
+                        + "\n\nFormuliere eine kurze, vollständige Antwort gemäß der Sprachregel der aktuellen Anfrage."
                     )
                     try:
                         full_response = self.llm.chat(
@@ -2358,6 +2481,8 @@ class Coordinator:
                     except Exception as e:
                         self.logger.error("Partial fallback also failed: %s", e)
 
+            if self._current_latency:
+                self._current_latency.mark("llm_complete")
             # Combine buffered last chunk + flush remnant, strip filler, then speak
             safe_tail = voice_boundary.finish()
             log_diagnostics(self.logger, voice_boundary.diagnostics)
@@ -2408,6 +2533,8 @@ class Coordinator:
             # Wait for all audio to finish playing
             if audio_pipeline:
                 audio_pipeline.finish()
+                if self._current_latency:
+                    self._current_latency.mark("tts_complete")
 
         except Exception as e:
             if self._turn_cancelled.is_set():
@@ -2522,6 +2649,9 @@ class Coordinator:
                 self.tts.clear_ack_played()
                 if not chunk:
                     return chunks_spoken, first_chunk_checked, pending_chunk, audio_pipeline
+            if self._current_latency:
+                self._current_latency.mark("first_speakable_chunk")
+                self._current_latency.mark("tts_requested")
             processed = self.llm.strip_metric(chunk, command)
             self.listener.speaking = True
             if use_pipeline:
@@ -2529,7 +2659,7 @@ class Coordinator:
                 audio_pipeline = StreamingAudioPipeline(
                     self.tts, self.logger,
                     on_first_audio=(
-                        (lambda: _latency.mark("tts_first_pcm")) if _latency else None
+                        (lambda: _latency.mark("tts_output_start")) if _latency else None
                     ),
                 )
                 audio_pipeline.start()
@@ -2561,7 +2691,15 @@ class Coordinator:
         """
         self.listener.speaking = True
         self.listener.active_tts_text = text
-        self.tts.speak(text)
+        if self._current_latency:
+            self._current_latency.mark("tts_requested")
+        latency = self._current_latency
+        observer = getattr(self.tts, "observe_output", None)
+        boundary = observer(lambda: latency.mark("tts_output_start")) if callable(observer) and latency else nullcontext()
+        with boundary:
+            self.tts.speak(text)
+        if self._current_latency:
+            self._current_latency.mark("tts_complete")
 
     def handle_barge_in(self, text: str, speaker_id=None,
                         speaker_confidence: float = 0.0) -> bool:
@@ -2841,13 +2979,13 @@ class Coordinator:
         wake_match = find_wake_word(text, self.wake_word)
         if not wake_match:
             self.logger.info("No wake word detected (%d chars)", len(text))
-            print("❌ No wake word (ignored)")
+            print("❌ Kein Aktivierungswort erkannt (ignoriert)")
             self.reject_audio_turn(turn_id, "no_wake")
             return True
         _, _, matched_word, similarity = wake_match
         self.logger.info("Wake word detected (similarity: %.2f)", similarity)
         if self._is_ambient_wake_word(text, matched_word):
-            print("🔇 Ambient mention (ignored)")
+            print("🔇 Beiläufige Erwähnung (ignoriert)")
             self.reject_audio_turn(turn_id, "ambient")
             return True
         action, command, why = self._direct_turn_decision(at, text)
@@ -3222,7 +3360,7 @@ class Coordinator:
             # TextToSpeech.speak()'s docstring.
             ctx_ack = getattr(self, '_contextual_ack_text', None)
             if ctx_ack and not self._llm_responded:
-                self.logger.info(f"Contextual ack: '{ctx_ack}'")
+                self.logger.info("Contextual acknowledgement (%d chars)", len(ctx_ack))
                 played = self.tts.speak(
                     ctx_ack,
                     cancel_check=lambda: self._llm_responded,

@@ -92,7 +92,7 @@ class FilesystemSkill(BaseSkill):
                     return data['handler'](entities)
         
         self.logger.error(f"Unknown intent: {intent}")
-        return "I'm sorry, I don't understand that command."
+        return "Diese Anweisung habe ich nicht verstanden."
     
     def find_file(self, entities: dict = None) -> str:
         """Search for files in user directories"""
@@ -118,7 +118,7 @@ class FilesystemSkill(BaseSkill):
                     break
         
         if not filename:
-            return f"I couldn't identify which file you're looking for, {self.honorific}."
+            return f"Ich konnte die gesuchte Datei nicht bestimmen, {self.honorific}."
         
         # Search in common locations
         search_paths = [
@@ -140,15 +140,15 @@ class FilesystemSkill(BaseSkill):
                 files = [f for f in result.stdout.strip().split('\n') if f]
                 if files:
                     if len(files) == 1:
-                        return f"Found it, {self.honorific}: {files[0]}"
+                        return f"Gefunden, {self.honorific}: {files[0]}"
                     else:
-                        return f"Found {len(files)} matches, {self.honorific}. The first is: {files[0]}"
+                        return f"{len(files)} Treffer gefunden, {self.honorific}. Der erste ist: {files[0]}"
             
-            return f"I couldn't locate {filename}, {self.honorific}."
+            return f"Ich konnte {filename} nicht finden, {self.honorific}."
             
         except Exception as e:
             self.logger.error(f"File search error: {e}")
-            return f"I encountered an error searching for that file, {self.honorific}."
+            return f"Bei der Dateisuche ist ein Fehler aufgetreten, {self.honorific}."
     
     def count_code_lines(self, entities: dict = None) -> str:
         """Count lines of code in JARVIS codebase"""
@@ -169,7 +169,7 @@ class FilesystemSkill(BaseSkill):
             py_files = [f for f in result.stdout.strip().split('\n') if f]
             
             if not py_files:
-                return f"I couldn't find my codebase, {self.honorific}."
+                return f"Ich konnte meinen Quellcode nicht finden, {self.honorific}."
             
             # Count lines
             total_lines = 0
@@ -180,11 +180,11 @@ class FilesystemSkill(BaseSkill):
                 except:
                     continue
             
-            return f"My codebase contains {total_lines:,} lines of Python code across {len(py_files)} files, {self.honorific}."
+            return f"Mein Quellcode enthält {total_lines:,} Python-Zeilen in {len(py_files)} Dateien, {self.honorific}."
             
         except Exception as e:
             self.logger.error(f"Code count error: {e}")
-            return f"I encountered an error analyzing my codebase, {self.honorific}."
+            return f"Bei der Quellcodeanalyse ist ein Fehler aufgetreten, {self.honorific}."
     
     def count_files_in_directory(self, entities: dict) -> str:
         """Count files in a specified directory"""
@@ -226,27 +226,27 @@ class FilesystemSkill(BaseSkill):
                     break
             
             if not target_dir:
-                return f"Which directory would you like me to count files in, {self.honorific}?"
+                return f"In welchem Verzeichnis soll ich die Dateien zählen, {self.honorific}?"
             
             if not target_dir.exists():
-                return f"The {dir_name} directory doesn't exist, {self.honorific}."
+                return f"Das Verzeichnis {dir_name} existiert nicht, {self.honorific}."
             
             # Count files (not directories)
             file_count = sum(1 for item in target_dir.iterdir() if item.is_file())
             dir_count = sum(1 for item in target_dir.iterdir() if item.is_dir())
             
             if file_count == 0 and dir_count == 0:
-                return f"The {dir_name} directory is empty, {self.honorific}."
+                return f"Das Verzeichnis {dir_name} ist leer, {self.honorific}."
             elif dir_count == 0:
-                return f"There are {file_count:,} files in your {dir_name} directory, {self.honorific}."
+                return f"Das Verzeichnis {dir_name} enthält {file_count:,} Dateien, {self.honorific}."
             else:
-                return f"There are {file_count:,} files and {dir_count:,} folders in your {dir_name} directory, {self.honorific}."
+                return f"Das Verzeichnis {dir_name} enthält {file_count:,} Dateien und {dir_count:,} Ordner, {self.honorific}."
             
         except PermissionError:
-            return f"I don't have permission to access that directory, {self.honorific}."
+            return f"Ich habe keine Berechtigung für dieses Verzeichnis, {self.honorific}."
         except Exception as e:
             self.logger.error(f"Directory count error: {e}")
-            return f"I encountered an error counting files in that directory, {self.honorific}."
+            return f"Beim Zählen der Dateien ist ein Fehler aufgetreten, {self.honorific}."
     
     def analyze_script(self, entities: dict = None) -> str:
         """Analyze a script file using LLM"""
@@ -290,7 +290,7 @@ class FilesystemSkill(BaseSkill):
                     script_name = words[0] if '.' in words[0] else words[0] + '.sh'
             
             if not script_name:
-                return f"Which script would you like me to analyze, {self.honorific}?"
+                return f"Welches Skript soll ich analysieren, {self.honorific}?"
             
             # Search for the script
             # Prioritize user's home and obvious script locations
@@ -343,7 +343,7 @@ class FilesystemSkill(BaseSkill):
                     break
             
             if not all_matches:
-                return f"I couldn't locate a script named {script_name}, {self.honorific}."
+                return f"Ich konnte kein Skript namens {script_name} finden, {self.honorific}."
             
             # Prefer files in home directory
             home_matches = [f for f in all_matches if str(Path.home()) in f]
@@ -352,17 +352,17 @@ class FilesystemSkill(BaseSkill):
             script_path = files[0]
             
             if not script_path:
-                return f"I couldn't locate a script named {script_name}, {self.honorific}."
+                return f"Ich konnte kein Skript namens {script_name} finden, {self.honorific}."
             
             # TOO MANY matches? Give up
             if len(files) > 10:
-                return f"I found {len(files)} files matching '{script_name}', {self.honorific}. Please be more specific with the filename."
+                return f"Ich habe {len(files)} Dateien zu '{script_name}' gefunden, {self.honorific}. Bitte nenne einen genaueren Dateinamen."
             
             # Multiple matches? Show first 3
             if len(files) > 1:
                 file_list = "\n  ".join([f"• {Path(f).name}" for f in files[:3]])
-                more = f" and {len(files)-3} more" if len(files) > 3 else ""
-                return f"I found {len(files)} matches{more}, {self.honorific}:\n  {file_list}\n\nWhich one would you like me to analyze?"
+                more = f" und {len(files)-3} weitere" if len(files) > 3 else ""
+                return f"Ich habe {len(files)} Treffer{more} gefunden, {self.honorific}:\n  {file_list}\n\nWelchen soll ich analysieren?"
             
             # Confirm the file before analyzing
             self.logger.info(f"Analyzing: {script_path}")
@@ -373,7 +373,7 @@ class FilesystemSkill(BaseSkill):
                     content = f.read()
             except Exception as e:
                 self.logger.error(f"Error reading {script_path}: {e}")
-                return f"I couldn't read {script_path}, {self.honorific}."
+                return f"Ich konnte {script_path} nicht lesen, {self.honorific}."
             
             # Limit content size (don't send huge files to LLM)
             if len(content) > 5000:
@@ -382,7 +382,9 @@ class FilesystemSkill(BaseSkill):
             # Ask LLM to analyze
             llm = LLMRouter(self.config)
             
-            prompt = f"""You are JARVIS. Analyze this script in EXACTLY 2 sentences maximum. Be extremely brief.
+            from core.persona import OWNER_LANGUAGE_RULE
+            prompt = f"""{OWNER_LANGUAGE_RULE}
+You are JARVIS. Analyze this script in EXACTLY 2 sentences maximum. Be extremely brief.
 First say what it does, then mention one key detail like the main command or path.
 Do NOT prefix sentences with labels or numbers.
 
@@ -395,10 +397,10 @@ CRITICAL: Maximum 2 sentences. No more. No labels."""
             
             analysis = llm.generate(prompt, use_api=False, max_tokens=200)
             
-            return f"Analyzing {Path(script_path).name}: {analysis}"
+            return f"Analyse von {Path(script_path).name}: {analysis}"
             
         except subprocess.TimeoutExpired:
-            return f"The search took too long, {self.honorific}. Could you be more specific?"
+            return f"Die Suche hat zu lange gedauert, {self.honorific}. Bitte präzisiere deine Anfrage."
         except Exception as e:
             self.logger.error(f"Script analysis error: {e}")
-            return f"I encountered an error analyzing that script, {self.honorific}."
+            return f"Bei der Skriptanalyse ist ein Fehler aufgetreten, {self.honorific}."

@@ -5,6 +5,7 @@ Prompts for natural language → shell command translation and output summarizat
 """
 
 from pathlib import Path
+from core.persona import OWNER_LANGUAGE_RULE
 
 _JARVIS_ROOT = Path(__file__).resolve().parents[3]
 _MODELS_ROOT = Path("/home/alex/jarvis-data/models")
@@ -55,7 +56,8 @@ def summarize_output_prompt(command: str, output: str, user_query: str, for_voic
         "You may reference specific file paths and numbers."
     )
 
-    return f"""You are JARVIS, a British butler-style AI assistant. Summarize the following command output as a response to the user's question.
+    return f"""{OWNER_LANGUAGE_RULE}
+You are JARVIS, a British butler-style AI assistant. Summarize the following command output as a response to the user's question.
 
 {mode_instruction}
 
@@ -85,7 +87,8 @@ def git_summary_prompt(repo_outputs: dict, user_query: str, for_voice: bool = Tr
         "Respond in 2-5 sentences. Refer to repos by name and include key details."
     )
 
-    return f"""You are JARVIS, a British butler-style AI assistant. Summarize the git output across the user's repositories.
+    return f"""{OWNER_LANGUAGE_RULE}
+You are JARVIS, a British butler-style AI assistant. Summarize the git output across the user's repositories.
 
 {mode_instruction}
 

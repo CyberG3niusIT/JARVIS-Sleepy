@@ -81,7 +81,7 @@ def handler(args: dict) -> str:
     """Generate an image via Flux.1-schnell with GPU swap."""
     prompt = args.get("prompt", "").strip()
     if not prompt:
-        return "Error: No image prompt provided."
+        return "Fehler: Es fehlt eine Bildbeschreibung."
 
     width = args.get("width", 1024)
     height = args.get("height", 1024)
@@ -92,8 +92,8 @@ def handler(args: dict) -> str:
     logger.info("Initiating GPU swap to flux for image generation")
     if not swap.swap_to("flux"):
         return (
-            "Error: Could not switch to image generation mode. "
-            "The GPU swap failed — llama-server may still be running."
+            "Fehler: Der Bildmodus ist nicht verfügbar. "
+            "Der GPU-Wechsel ist fehlgeschlagen; llama-server läuft möglicherweise noch."
         )
 
     try:
@@ -112,8 +112,7 @@ def handler(args: dict) -> str:
         )
 
         if response.status_code != 200:
-            detail = response.json().get("detail", response.text) if response.headers.get("content-type", "").startswith("application/json") else response.text
-            return f"Error: Image generation failed — {detail}"
+            return f"Fehler: Die Bilderzeugung ist fehlgeschlagen."
 
         result = response.json()
         path = result["path"]
@@ -122,20 +121,20 @@ def handler(args: dict) -> str:
 
         logger.info("Image generated in %.1fs: %s", elapsed, path)
         return (
-            f"Image generated successfully.\n"
-            f"Path: {path}\n"
-            f"Size: {width}x{height}\n"
-            f"Generation time: {elapsed:.1f}s\n"
+            f"Das Bild wurde erstellt.\n"
+            f"Pfad: {path}\n"
+            f"Größe: {width}x{height}\n"
+            f"Erstellungsdauer: {elapsed:.1f} s\n"
             f"Seed: {seed}"
         )
 
     except requests.Timeout:
-        return "Error: Image generation timed out after 600 seconds."
+        return "Fehler: Die Bilderzeugung hat nach 600 Sekunden die Zeitgrenze überschritten."
     except requests.ConnectionError:
-        return "Error: Could not connect to the Flux server."
+        return "Fehler: Der Flux-Server ist nicht erreichbar."
     except Exception as e:
-        logger.error("Image generation failed: %s", e)
-        return f"Error: Image generation failed — {e}"
+        logger.error("Image generation failed: %s", type(e).__name__)
+        return f"Fehler: Die Bilderzeugung ist fehlgeschlagen."
 
     finally:
         # 3. Always swap back to LLM

@@ -5,7 +5,7 @@ JARVIS Console — Keyboard interaction mode.
 Bypasses STT/TTS and feeds typed text directly into the skill pipeline.
 Stats panel shows match layer, skill, confidence, timing, and token counts.
 
-Usage:
+Verwendung:
     python jarvis_console.py              # Text mode (default)
     python jarvis_console.py --text       # Text mode (explicit)
     python jarvis_console.py --speech     # Launches voice mode
@@ -161,11 +161,11 @@ def render_stats(console, match_info, llm, used_llm, t_start, t_match, t_end, se
         pairs.append(("Skill", match_info.get("skill_name", "-")))
         pairs.append(("Handler", match_info.get("handler_name", "-")))
         conf = match_info.get("confidence")
-        pairs.append(("Confidence", f"{conf:.3f}" if conf else "-"))
+        pairs.append(("Konfidenz", f"{conf:.3f}" if conf else "-"))
     elif used_llm:
         pairs.append(("Layer", "llm_fallback"))
 
-    pairs.append(("Time", f"{total_ms:.0f}ms (match {match_ms:.0f} + exec {exec_ms:.0f})"))
+    pairs.append(("Zeit", f"{total_ms:.0f}ms (match {match_ms:.0f} + exec {exec_ms:.0f})"))
 
     if used_llm and llm.last_call_info:
         info = llm.last_call_info
@@ -175,7 +175,7 @@ def render_stats(console, match_info, llm, used_llm, t_start, t_match, t_end, se
     if doc_buffer and doc_buffer.active:
         pairs.append(("DocCtx", f"~{doc_buffer.token_estimate} tok ({doc_buffer.source})"))
 
-    pairs.append(("Session", f"{session.total} cmd | Skill {session.skill_hits} | LLM {session.llm_hits}"))
+    pairs.append(("Sitzung", f"{session.total} Befehle | Skill {session.skill_hits} | LLM {session.llm_hits}"))
 
     # Adaptive columns: 3 pairs/row when wide, 2 when medium
     width = console.width
@@ -200,7 +200,7 @@ def render_stats(console, match_info, llm, used_llm, t_start, t_match, t_end, se
                 row_data.append("│" if i + j < len(pairs) else "")
         table.add_row(*row_data)
 
-    console.print(Panel(table, title="[dim]Stats[/dim]", border_style="dim"))
+    console.print(Panel(table, title="[dim]Statistik[/dim]", border_style="dim"))
 
 
 _DEFLECTION_PHRASES = [
@@ -221,7 +221,7 @@ def _is_deflection(response: str) -> bool:
 
 def _do_web_search(query, web_researcher, llm, console):
     """Execute a web search and stream the synthesized answer. Returns response text."""
-    console.print(f"\n[dim]Searching: {query}[/dim]")
+    console.print(f"\n[dim]Suche: {query}[/dim]")
 
     results = web_researcher.search(query)
 
@@ -229,11 +229,11 @@ def _do_web_search(query, web_researcher, llm, console):
 
     page_content = ""
     if page_sections:
-        page_content = "\n\nFull article content:\n\n" + \
+        page_content = "\n\nVollständiger Artikelinhalt:\n\n" + \
             "\n\n---\n\n".join(page_sections)
 
     tool_result = format_search_results(results) + page_content
-    console.print(f"[dim]Found {len(results)} results[/dim]")
+    console.print(f"[dim]{len(results)} Ergebnisse gefunden[/dim]")
 
     # Build a fake ToolCallRequest for continue_after_tool_call
     forced_call = ToolCallRequest(
@@ -248,9 +248,9 @@ def _do_web_search(query, web_researcher, llm, console):
     current_time = now.strftime("%I:%M %p").lstrip("0")
     system_prompt = llm._build_system_prompt()
     system_prompt += (
-        f"\n\nToday's date is {today}. Current time: {current_time}. "
-        "Your training data is OUTDATED. "
-        "Answer the user's question using ONLY the search results provided."
+        f"\n\nHeutiges Datum: {today}. Aktuelle Uhrzeit: {current_time}. "
+        "Deine Trainingsdaten sind veraltet. "
+        "Beantworte die aktuelle Anfrage ausschließlich anhand der bereitgestellten Suchergebnisse. "
     )
     llm._tool_call_messages = [
         {"role": "system", "content": system_prompt},
@@ -339,7 +339,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
                 if quality_issue:
                     # Clear the partial typewriter output
                     sys.stdout.write("\n")
-                    console.print(f"[dim](quality retry: {quality_issue})[/dim]")
+                    console.print(f"[dim](erneute Qualitätsprüfung: {quality_issue})[/dim]")
                     response = llm.chat(
                         user_message=command,
                         conversation_history=history,
@@ -384,7 +384,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
 
             if tool_call_request.name == "web_search":
                 query = tool_call_request.arguments.get("query", command)
-                console.print(f"\n[dim]Searching: {query}[/dim]")
+                console.print(f"\n[dim]Suche: {query}[/dim]")
                 # Trim fetch volume on 2nd+ search — snippets alone
                 # provide sufficient factual density for sub-queries.
                 _is_followup = _tool_call_counts.get("web_search", 0) > 1
@@ -398,11 +398,11 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
                 )
                 page_content = ""
                 if page_sections:
-                    page_content = "\n\nFull article content:\n\n" + \
+                    page_content = "\n\nVollständiger Artikelinhalt:\n\n" + \
                         "\n\n---\n\n".join(page_sections)
 
                 tool_result = format_search_results(results) + page_content
-                console.print(f"[dim]Found {len(results)} results[/dim]")
+                console.print(f"[dim]{len(results)} Ergebnisse gefunden[/dim]")
 
                 # Artifact cache — web search results
                 from core.interaction_cache import get_interaction_cache, Artifact
@@ -431,7 +431,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
             else:
                 from core.tool_executor import execute_tool
                 from core.tool_registry import parse_tool_result, save_tool_image
-                console.print(f"\n[dim]Running: {tool_call_request.name}[/dim]")
+                console.print(f"\n[dim]Ausführung: {tool_call_request.name}[/dim]")
                 raw_result = execute_tool(
                     tool_call_request.name, tool_call_request.arguments
                 )
@@ -441,7 +441,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
                 image_path = None
                 if tool_image_data:
                     image_path = save_tool_image(tool_image_data, tool_call_request.name)
-                    console.print(f"[dim]Image saved: {image_path}[/dim]")
+                    console.print(f"[dim]Bild gespeichert: {image_path}[/dim]")
 
                 # Artifact cache — non-web-search tool results
                 from core.interaction_cache import get_interaction_cache, store_tool_artifact
@@ -514,10 +514,10 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
             ]
             if _summaries:
                 _fallback_prompt = (
-                    f"The user asked: {command}\n\n"
-                    "Here is the information gathered:\n\n"
+                    f"Die aktuelle Anfrage lautet: {command}\n\n"
+                    "Gesammelte Informationen:\n\n"
                     + "\n\n".join(_summaries)
-                    + "\n\nSynthesize a concise, complete answer."
+                    + "\n\nFormuliere eine kurze, vollständige Antwort. " + persona.OWNER_LANGUAGE_RULE
                 )
                 try:
                     full_response = llm.chat(
@@ -563,7 +563,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
         # discard the response and do a web search instead.
         if full_response and web_researcher and _is_deflection(full_response):
             sys.stdout.write("\n")
-            console.print("[dim](deflection detected — searching instead)[/dim]")
+            console.print("[dim](ausweichende Antwort erkannt; Websuche läuft)[/dim]")
             return _do_web_search(command, web_researcher, llm, console)
 
         # Flush remaining
@@ -572,7 +572,7 @@ def _stream_llm_console(llm, command, history, console, mode, real_tts,
             quality_issue = llm._check_response_quality(remaining, command)
             if quality_issue:
                 sys.stdout.write("\n")
-                console.print(f"[dim](quality retry: {quality_issue})[/dim]")
+                console.print(f"[dim](erneute Qualitätsprüfung: {quality_issue})[/dim]")
                 return llm.chat(
                     user_message=command,
                     conversation_history=history,
@@ -617,7 +617,7 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
     # arg = parts[1] if len(parts) > 1 else ""
 
     if cmd == "/paste":
-        console.print("[cyan]Paste mode — type or paste text. Press [bold]Esc then Enter[/bold] to submit, [bold]Ctrl+C[/bold] to cancel.[/cyan]")
+        console.print("[cyan]Einfügemodus: Text eingeben oder einfügen. [bold]Esc, dann Enter[/bold] zum Übernehmen, [bold]Strg+C[/bold] zum Abbrechen.[/cyan]")
 
         # Multi-line key bindings: Enter = newline, Esc+Enter = submit
         paste_bindings = KeyBindings()
@@ -639,25 +639,25 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
                 "paste> ",
                 multiline=True,
                 key_bindings=paste_bindings,
-                bottom_toolbar=HTML('<b>Esc+Enter</b> to submit | <b>Ctrl+C</b> to cancel'),
+                bottom_toolbar=HTML('<b>Esc+Enter</b> zum Übernehmen | <b>Strg+C</b> zum Abbrechen'),
             )
         except KeyboardInterrupt:
-            console.print("[dim]Paste cancelled.[/dim]")
+            console.print("[dim]Einfügen abgebrochen.[/dim]")
             return True
 
         text = text.strip()
         if not text:
-            console.print("[yellow]Nothing pasted.[/yellow]")
+            console.print("[yellow]Kein Text eingefügt.[/yellow]")
             return True
 
         doc_buffer.load(text, "paste")
         lines = text.count('\n') + 1
         preview = text[:200] + ("..." if len(text) > 200 else "")
         console.print(Panel(
-            f"[bold green]Loaded[/bold green] ~{doc_buffer.token_estimate} tokens, "
-            f"{lines} lines ({doc_buffer.source})\n\n"
+            f"[bold green]Geladen[/bold green] ~{doc_buffer.token_estimate} Token, "
+            f"{lines} Zeilen ({doc_buffer.source})\n\n"
             f"[dim]{preview}[/dim]",
-            title="[cyan]Document Buffer[/cyan]",
+            title="[cyan]Dokumentenpuffer[/cyan]",
             border_style="cyan",
         ))
         return True
@@ -665,7 +665,7 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
     elif cmd == "/file":
         arg = parts[1].strip() if len(parts) > 1 else ""
         if not arg:
-            console.print("[yellow]Usage: /file <path> [--tail][/yellow]")
+            console.print("[yellow]Verwendung: /file <path> [--tail][/yellow]")
             return True
 
         # Parse --tail flag
@@ -679,30 +679,30 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
         filepath = Path(arg).expanduser().resolve()
 
         if not filepath.exists():
-            console.print(f"[red]File not found:[/red] {filepath}")
+            console.print(f"[red]Datei nicht gefunden:[/red] {filepath}")
             return True
         if not filepath.is_file():
-            console.print(f"[red]Not a file:[/red] {filepath}")
+            console.print(f"[red]Keine Datei:[/red] {filepath}")
             return True
 
         # Binary rejection
         if filepath.suffix.lower() in BINARY_EXTENSIONS:
-            console.print(f"[red]Binary file rejected:[/red] {filepath.suffix} files are not supported")
+            console.print(f"[red]Binärdatei abgelehnt:[/red] {filepath.suffix} wird nicht unterstützt")
             return True
 
         # Size check
         size = filepath.stat().st_size
         if size > 500_000:
-            console.print(f"[yellow]Warning:[/yellow] File is {size:,} bytes — loading anyway (will truncate to token budget)")
+            console.print(f"[yellow]Hinweis:[/yellow] Datei umfasst {size:,} Bytes; wird geladen und auf das Tokenbudget gekürzt")
 
         try:
             text = filepath.read_text(encoding='utf-8', errors='replace')
         except Exception as e:
-            console.print(f"[red]Error reading file:[/red] {e}")
+            console.print("[red]Datei konnte nicht gelesen werden.[/red]")
             return True
 
         if not text.strip():
-            console.print(f"[yellow]File is empty:[/yellow] {filepath.name}")
+            console.print(f"[yellow]Datei ist leer:[/yellow] {filepath.name}")
             return True
 
         # --tail: keep end of file instead of beginning
@@ -723,10 +723,10 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
         preview = text[:200] + ("..." if len(text) > 200 else "")
         tail_tag = " [dim](tail)[/dim]" if tail_mode else ""
         console.print(Panel(
-            f"[bold green]Loaded[/bold green] ~{doc_buffer.token_estimate} tokens, "
-            f"{line_count} lines, {size:,} bytes ({doc_buffer.source}){tail_tag}\n\n"
+            f"[bold green]Geladen[/bold green] ~{doc_buffer.token_estimate} Token, "
+            f"{line_count} Zeilen, {size:,} bytes ({doc_buffer.source}){tail_tag}\n\n"
             f"[dim]{preview}[/dim]",
-            title="[cyan]Document Buffer[/cyan]",
+            title="[cyan]Dokumentenpuffer[/cyan]",
             border_style="cyan",
         ))
         return True
@@ -739,34 +739,34 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
                 capture_output=True, text=True, timeout=3,
             )
             if result.returncode != 0:
-                console.print(f"[red]Clipboard error:[/red] {result.stderr.strip() or 'wl-paste failed'}")
+                console.print("[red]Zwischenablage konnte nicht gelesen werden.[/red]")
                 return True
             text = result.stdout
         except FileNotFoundError:
-            console.print("[red]wl-paste not found.[/red] Install with: [bold]sudo apt install wl-clipboard[/bold]")
+            console.print("[red]wl-paste nicht gefunden.[/red] Installation mit: [bold]sudo apt install wl-clipboard[/bold]")
             return True
         except _sp.TimeoutExpired:
-            console.print("[red]Clipboard read timed out.[/red]")
+            console.print("[red]Zeitgrenze beim Lesen der Zwischenablage überschritten.[/red]")
             return True
 
         if not text.strip():
-            console.print("[yellow]Clipboard is empty.[/yellow]")
+            console.print("[yellow]Zwischenablage ist leer.[/yellow]")
             return True
 
         doc_buffer.load(text, "clipboard")
         lines = text.count('\n') + 1
         preview = text[:200] + ("..." if len(text) > 200 else "")
         console.print(Panel(
-            f"[bold green]Loaded[/bold green] ~{doc_buffer.token_estimate} tokens, "
-            f"{lines} lines ({doc_buffer.source})\n\n"
+            f"[bold green]Geladen[/bold green] ~{doc_buffer.token_estimate} Token, "
+            f"{lines} Zeilen ({doc_buffer.source})\n\n"
             f"[dim]{preview}[/dim]",
-            title="[cyan]Document Buffer[/cyan]",
+            title="[cyan]Dokumentenpuffer[/cyan]",
             border_style="cyan",
         ))
         return True
 
     elif cmd == "/append":
-        console.print("[cyan]Append mode — type or paste text. Press [bold]Esc then Enter[/bold] to submit, [bold]Ctrl+C[/bold] to cancel.[/cyan]")
+        console.print("[cyan]Ergänzungsmodus: Text eingeben oder einfügen. [bold]Esc, dann Enter[/bold] zum Übernehmen, [bold]Strg+C[/bold] zum Abbrechen.[/cyan]")
 
         append_bindings = KeyBindings()
 
@@ -784,91 +784,91 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
                 "append> ",
                 multiline=True,
                 key_bindings=append_bindings,
-                bottom_toolbar=HTML('<b>Esc+Enter</b> to submit | <b>Ctrl+C</b> to cancel'),
+                bottom_toolbar=HTML('<b>Esc+Enter</b> zum Übernehmen | <b>Strg+C</b> zum Abbrechen'),
             )
         except KeyboardInterrupt:
-            console.print("[dim]Append cancelled.[/dim]")
+            console.print("[dim]Ergänzen abgebrochen.[/dim]")
             return True
 
         text = text.strip()
         if not text:
-            console.print("[yellow]Nothing to append.[/yellow]")
+            console.print("[yellow]Kein Text zum Ergänzen.[/yellow]")
             return True
 
         was_empty = not doc_buffer.active
         doc_buffer.append(text, "append")
-        verb = "Loaded" if was_empty else "Appended"
+        verb = "Geladen" if was_empty else "Ergänzt"
         console.print(Panel(
-            f"[bold green]{verb}[/bold green] — buffer now ~{doc_buffer.token_estimate} tokens ({doc_buffer.source})",
-            title="[cyan]Document Buffer[/cyan]",
+            f"[bold green]{verb}[/bold green] Puffer enthält jetzt etwa {doc_buffer.token_estimate} tokens ({doc_buffer.source})",
+            title="[cyan]Dokumentenpuffer[/cyan]",
             border_style="cyan",
         ))
         return True
 
     elif cmd == "/context":
         if not doc_buffer.active:
-            console.print("[dim]No document loaded. Use /paste or /file to load one.[/dim]")
+            console.print("[dim]Kein Dokument geladen. Lade eines mit /paste oder /file.[/dim]")
             return True
         lines = doc_buffer.content.count('\n') + 1
         chars = len(doc_buffer.content)
         preview = doc_buffer.content[:500] + ("..." if chars > 500 else "")
         console.print(Panel(
-            f"[bold]Source:[/bold] {doc_buffer.source}\n"
+            f"[bold]Quelle:[/bold] {doc_buffer.source}\n"
             f"[bold]Tokens:[/bold] ~{doc_buffer.token_estimate} / {doc_buffer.max_tokens} max\n"
-            f"[bold]Size:[/bold] {chars:,} chars, {lines} lines\n\n"
+            f"[bold]Größe:[/bold] {chars:,} Zeichen, {lines} Zeilen\n\n"
             f"[dim]{preview}[/dim]",
-            title="[cyan]Document Context[/cyan]",
+            title="[cyan]Dokumentenkontext[/cyan]",
             border_style="cyan",
         ))
         return True
 
     elif cmd == "/clear":
         if not doc_buffer.active:
-            console.print("[dim]Nothing to clear — buffer is empty.[/dim]")
+            console.print("[dim]Nichts zu leeren; der Puffer ist leer.[/dim]")
             return True
         old_source, old_tokens = doc_buffer.clear()
-        console.print(f"[green]Cleared[/green] document buffer ({old_source}, ~{old_tokens} tokens)")
+        console.print(f"[green]Dokumentenpuffer geleert[/green] ({old_source}, ~{old_tokens} tokens)")
         return True
 
     elif cmd == "/image":
         import base64
         arg = parts[1].strip() if len(parts) > 1 else ""
         if not arg:
-            console.print("[yellow]Usage: /image <path>[/yellow]")
+            console.print("[yellow]Verwendung: /image <path>[/yellow]")
             return True
 
         arg = arg.strip("'\"")
         filepath = Path(arg).expanduser().resolve()
 
         if not filepath.exists():
-            console.print(f"[red]File not found:[/red] {filepath}")
+            console.print(f"[red]Datei nicht gefunden:[/red] {filepath}")
             return True
         if not filepath.is_file():
-            console.print(f"[red]Not a file:[/red] {filepath}")
+            console.print(f"[red]Keine Datei:[/red] {filepath}")
             return True
         if filepath.suffix.lower() not in _IMAGE_EXTENSIONS:
-            console.print(f"[red]Unsupported format:[/red] {filepath.suffix} — "
-                          f"supported: {', '.join(sorted(_IMAGE_EXTENSIONS))}")
+            console.print(f"[red]Nicht unterstütztes Format:[/red] {filepath.suffix} — "
+                          f"unterstützt: {', '.join(sorted(_IMAGE_EXTENSIONS))}")
             return True
 
         size = filepath.stat().st_size
         if size > 10_000_000:
-            console.print(f"[red]Image too large:[/red] {size:,} bytes (max 10 MB)")
+            console.print(f"[red]Bild zu groß:[/red] {size:,} bytes (max 10 MB)")
             return True
 
         try:
             raw = filepath.read_bytes()
             b64 = base64.b64encode(raw).decode("ascii")
         except Exception as e:
-            console.print(f"[red]Error reading image:[/red] {e}")
+            console.print("[red]Bild konnte nicht gelesen werden.[/red]")
             return True
 
         _pending_image["data"] = b64
         _pending_image["label"] = filepath.name
         console.print(Panel(
-            f"[bold green]Image loaded[/bold green] {filepath.name} ({size // 1024} KB)\n"
-            f"[dim]Send a message to analyze this image. Image clears after use.[/dim]",
-            title="[cyan]Image Attached[/cyan]",
+            f"[bold green]Bild geladen[/bold green] {filepath.name} ({size // 1024} KB)\n"
+            f"[dim]Sende eine Nachricht, um das Bild auszuwerten. Es wird nach der Verwendung entfernt.[/dim]",
+            title="[cyan]Bild angehängt[/cyan]",
             border_style="cyan",
         ))
         return True
@@ -878,19 +878,19 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
         from core.desktop_manager import get_desktop_manager
         dm = get_desktop_manager()
         if dm is None:
-            console.print("[red]Desktop manager not available.[/red]")
+            console.print("[red]Desktop-Steuerung nicht verfügbar.[/red]")
             return True
 
         # Parse optional target: /screenshot [window|all]
         arg = parts[1].strip().lower() if len(parts) > 1 else "monitor"
         if arg not in ("monitor", "window", "all"):
-            console.print("[yellow]Usage: /screenshot [monitor|window|all][/yellow]")
+            console.print("[yellow]Verwendung: /screenshot [monitor|window|all][/yellow]")
             return True
 
-        console.print("[dim]Capturing screenshot...[/dim]")
+        console.print("[dim]Bildschirmaufnahme läuft ...[/dim]")
         path = dm.take_screenshot(target=arg)
         if not path:
-            console.print("[red]Screenshot capture failed.[/red]")
+            console.print("[red]Bildschirmaufnahme fehlgeschlagen.[/red]")
             return True
 
         try:
@@ -898,7 +898,7 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
             b64 = base64.b64encode(raw).decode("ascii")
             size = len(raw)
         except Exception as e:
-            console.print(f"[red]Error reading screenshot:[/red] {e}")
+            console.print("[red]Bildschirmaufnahme konnte nicht gelesen werden.[/red]")
             return True
         finally:
             # Clean up temp file
@@ -910,9 +910,9 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
         _pending_image["data"] = b64
         _pending_image["label"] = f"screenshot ({arg})"
         console.print(Panel(
-            f"[bold green]Screenshot captured[/bold green] ({size // 1024} KB, {arg})\n"
-            f"[dim]Send a message to analyze this screenshot. Image clears after use.[/dim]",
-            title="[cyan]Image Attached[/cyan]",
+            f"[bold green]Bildschirmaufnahme erstellt[/bold green] ({size // 1024} KB, {arg})\n"
+            f"[dim]Sende eine Nachricht, um die Bildschirmaufnahme auszuwerten. Sie wird nach der Verwendung entfernt.[/dim]",
+            title="[cyan]Bild angehängt[/cyan]",
             border_style="cyan",
         ))
         return True
@@ -921,7 +921,7 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
         import asyncio as _asyncio
         import base64 as _b64
         import io as _io
-        console.print("[dim]Capturing webcam frame...[/dim]")
+        console.print("[dim]Webcam-Aufnahme läuft ...[/dim]")
         try:
             from core.webcam_manager import get_webcam_manager
             import yaml as _yaml
@@ -949,33 +949,33 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
             _pending_image["data"] = b64
             _pending_image["label"] = "webcam capture"
             console.print(Panel(
-                f"[bold green]Webcam captured[/bold green] ({size // 1024} KB)\n"
-                f"[dim]Send a message to analyze this frame. Image clears after use.[/dim]",
-                title="[cyan]Image Attached[/cyan]",
+                f"[bold green]Webcam-Aufnahme erstellt[/bold green] ({size // 1024} KB)\n"
+                f"[dim]Sende eine Nachricht, um die Aufnahme auszuwerten. Sie wird nach der Verwendung entfernt.[/dim]",
+                title="[cyan]Bild angehängt[/cyan]",
                 border_style="cyan",
             ))
         except FileNotFoundError as e:
-            console.print(f"[red]Webcam not found:[/red] {e}")
+            console.print("[red]Webcam nicht gefunden.[/red]")
         except TimeoutError:
-            console.print("[red]Webcam timeout — camera may not be responding.[/red]")
+            console.print("[red]Webcam-Zeitgrenze überschritten; die Kamera antwortet möglicherweise nicht.[/red]")
         except Exception as e:
-            console.print(f"[red]Webcam error:[/red] {e}")
+            console.print("[red]Webcam-Aufnahme fehlgeschlagen.[/red]")
         return True
 
     elif cmd == "/imagine":
         prompt = parts[1].strip() if len(parts) > 1 else ""
         if not prompt:
-            console.print("[yellow]Usage: /imagine <description>[/yellow]")
-            console.print("[dim]Example: /imagine a sunset over mountains in watercolor style[/dim]")
+            console.print("[yellow]Verwendung: /imagine <description>[/yellow]")
+            console.print("[dim]Beispiel: /imagine Sonnenuntergang über Bergen als Aquarell[/dim]")
             return True
 
-        console.print(f"[cyan]Generating image:[/cyan] {prompt}")
-        console.print("[dim]Swapping GPU to Flux.1-schnell... chat paused during generation.[/dim]")
+        console.print(f"[cyan]Bild wird erzeugt:[/cyan] {prompt}")
+        console.print("[dim]GPU wechselt zu Flux.1-schnell; der Chat pausiert während der Bilderzeugung.[/dim]")
         try:
             from core.gpu_swap import get_gpu_swap_manager
             swap = get_gpu_swap_manager()
             if not swap.swap_to("flux"):
-                console.print("[red]GPU swap failed — could not start Flux server.[/red]")
+                console.print("[red]GPU-Wechsel fehlgeschlagen; Flux-Server konnte nicht starten.[/red]")
                 return True
             try:
                 import requests as req
@@ -986,40 +986,40 @@ def _handle_slash_command(command, doc_buffer, console, pt_history):
                 )
                 if resp.status_code == 200:
                     result = resp.json()
-                    console.print(f"[green]Image saved:[/green] {result['path']}")
-                    console.print(f"[dim]Generated in {result['elapsed_seconds']:.1f}s (seed: {result['seed']})[/dim]")
+                    console.print(f"[green]Bild gespeichert:[/green] {result['path']}")
+                    console.print(f"[dim]Erzeugt in {result['elapsed_seconds']:.1f}s (seed: {result['seed']})[/dim]")
                 else:
-                    console.print(f"[red]Generation failed:[/red] {resp.text}")
+                    console.print("[red]Bilderzeugung fehlgeschlagen.[/red]")
             finally:
-                console.print("[dim]Restoring llama-server...[/dim]")
+                console.print("[dim]llama-server wird wiederhergestellt ...[/dim]")
                 swap.swap_back()
-                console.print("[green]LLM restored.[/green]")
+                console.print("[green]LLM wiederhergestellt.[/green]")
         except Exception as e:
-            console.print(f"[red]Image generation error:[/red] {e}")
+            console.print("[red]Bilderzeugung fehlgeschlagen.[/red]")
         return True
 
     elif cmd in ("/help", "/?"):
-        help_table = Table(title="Slash Commands", box=box.SIMPLE, show_edge=False)
-        help_table.add_column("Command", style="cyan bold", no_wrap=True)
-        help_table.add_column("Description")
-        help_table.add_row("/paste", "Multi-line paste mode (Esc+Enter to submit)")
-        help_table.add_row("/file <path>", "Load a file into document buffer (--tail for end of file)")
-        help_table.add_row("/clipboard", "Load clipboard contents via wl-paste")
-        help_table.add_row("/append", "Append text to existing buffer (multi-line mode)")
-        help_table.add_row("/context", "Show current document buffer info")
-        help_table.add_row("/clear", "Clear document buffer")
-        help_table.add_row("/image <path>", "Attach an image for the LLM to analyze")
-        help_table.add_row("/imagine <desc>", "Generate an AI image via FLUX.1-schnell")
-        help_table.add_row("/screenshot", "Capture screen and attach [monitor|window|all]")
-        help_table.add_row("/webcam", "Capture webcam frame and attach for analysis")
-        help_table.add_row("/help", "Show this help")
+        help_table = Table(title="Konsolenbefehle", box=box.SIMPLE, show_edge=False)
+        help_table.add_column("Befehl", style="cyan bold", no_wrap=True)
+        help_table.add_column("Beschreibung")
+        help_table.add_row("/paste", "Mehrzeiligen Text einfügen (Esc+Enter zum Übernehmen)")
+        help_table.add_row("/file <path>", "Datei in den Dokumentenpuffer laden (--tail für das Dateiende)")
+        help_table.add_row("/clipboard", "Zwischenablage mit wl-paste laden")
+        help_table.add_row("/append", "Text zum Puffer hinzufügen (mehrzeilig)")
+        help_table.add_row("/context", "Informationen zum Dokumentenpuffer anzeigen")
+        help_table.add_row("/clear", "Dokumentenpuffer leeren")
+        help_table.add_row("/image <path>", "Bild zur Auswertung anhängen")
+        help_table.add_row("/imagine <desc>", "Bild mit FLUX.1-schnell erzeugen")
+        help_table.add_row("/screenshot", "Bildschirm aufnehmen und anhängen [monitor|window|all]")
+        help_table.add_row("/webcam", "Webcam-Aufnahme zur Auswertung anhängen")
+        help_table.add_row("/help", "Diese Hilfe anzeigen")
         help_table.add_row("", "")
-        help_table.add_row("[dim]Tip[/dim]", "[dim]Drag a file from Nautilus to auto-load it[/dim]")
+        help_table.add_row("[dim]Tipp[/dim]", "[dim]Datei aus Nautilus ziehen, um sie zu laden[/dim]")
         console.print(help_table)
         return True
 
     else:
-        console.print(f"[yellow]Unknown command: {cmd}[/yellow] — type /help for available commands")
+        console.print(f"[yellow]Unbekannter Befehl: {cmd}[/yellow] /help zeigt verfügbare Befehle")
         return True
 
 
@@ -1068,13 +1068,13 @@ def run_console(config, mode, user_id="user"):
         mcp_bridge = MCPBridge(skill_manager)
         mcp_timeouts = config.get("mcp.timeouts", {})
         mcp_bridge.start(mcp_config, timeouts=mcp_timeouts)
-        console.print(f"[cyan]MCP bridge:[/cyan] {sum(len(t) for t in mcp_bridge._server_tools.values())} "
-                       f"tools from {len(mcp_bridge._server_tools)} server(s)")
+        console.print(f"[cyan]MCP-Brücke:[/cyan] {sum(len(t) for t in mcp_bridge._server_tools.values())} "
+                       f"Tools von {len(mcp_bridge._server_tools)} Servern")
 
     # Web research (for tool-calling LLM queries)
     web_researcher = WebResearcher(config) if config.get("llm.local.tool_calling", False) else None
     if web_researcher:
-        console.print("[cyan]Web research:[/cyan] enabled (DuckDuckGo + trafilatura)")
+        console.print("[cyan]Webrecherche:[/cyan] aktiviert (DuckDuckGo + trafilatura)")
 
     # Reminder system
     reminder_manager = None
@@ -1092,7 +1092,7 @@ def run_console(config, mode, user_id="user"):
                 reminder_manager.set_calendar_manager(calendar_manager)
                 calendar_manager.start()
             except Exception as e:
-                console.print(f"[yellow]Calendar init failed: {e}[/yellow]")
+                console.print("[yellow]Kalenderinitialisierung fehlgeschlagen.[/yellow]")
 
         reminder_manager.start()
         # Wire reminder manager for tool-calling dispatch
@@ -1127,11 +1127,11 @@ def run_console(config, mode, user_id="user"):
         conversation.set_memory_manager(memory_manager)
         set_memory_manager(memory_manager)
         vec_count = memory_manager.faiss_index.ntotal if memory_manager.faiss_index else 0
-        pro_status = "on" if memory_manager.proactive_enabled else "off"
+        pro_status = "an" if memory_manager.proactive_enabled else "aus"
         pro_color = "green" if memory_manager.proactive_enabled else "red"
-        console.print(f"[cyan]Memory system:[/cyan] {vec_count} vectors, "
-                       f"[cyan]proactive[/cyan] [{pro_color}]{pro_status}[/{pro_color}] "
-                       f"([cyan]threshold[/cyan] {memory_manager.proactive_threshold})")
+        console.print(f"[cyan]Gedächtnis:[/cyan] {vec_count} Vektoren, "
+                       f"[cyan]proaktiv[/cyan] [{pro_color}]{pro_status}[/{pro_color}] "
+                       f"([cyan]Schwelle[/cyan] {memory_manager.proactive_threshold})")
 
     # Context window (working memory)
     context_window = None
@@ -1149,8 +1149,8 @@ def run_console(config, mode, user_id="user"):
         )
 
         cw_stats = context_window.get_stats()
-        console.print(f"[cyan]Context window:[/cyan] enabled "
-                       f"(budget={context_window.token_budget} tokens, "
+        console.print(f"[cyan]Kontextfenster:[/cyan] aktiviert "
+                       f"(budget={context_window.token_budget} Token, "
                        f"threshold={context_window.topic_shift_threshold}, "
                        f"prior={cw_stats['segments']} seg(s))")
 
@@ -1218,7 +1218,7 @@ def run_console(config, mode, user_id="user"):
             config=config,
         )
     except Exception as e:
-        console.print(f"[dim]Awareness assembler init failed (non-fatal): {e}[/dim]")
+        console.print("[dim]Kontextzusammenstellung konnte nicht initialisiert werden; Betrieb wird fortgesetzt.[/dim]")
 
     # Interaction artifact cache
     from core.interaction_cache import get_interaction_cache
@@ -1255,11 +1255,11 @@ def run_console(config, mode, user_id="user"):
         if doc_buffer.active:
             parts.append(
                 f'<b>DocCtx:</b> ~{doc_buffer.token_estimate} tok '
-                f'({doc_buffer.source}) — /context to view, /clear to remove'
+                f'({doc_buffer.source}) — /context zum Anzeigen, /clear zum Entfernen'
             )
         if parts:
             return HTML('  '.join(parts))
-        return HTML('<b>/paste</b> load text  <b>/file</b> load file  <b>/image</b> attach  <b>/imagine</b> generate  <b>/help</b> commands')
+        return HTML('<b>/paste</b> Text laden  <b>/file</b> Datei laden  <b>/image</b> anhängen  <b>/imagine</b> erzeugen  <b>/help</b> Befehle')
 
     pt_session = PromptSession(
         history=pt_history,
@@ -1270,9 +1270,9 @@ def run_console(config, mode, user_id="user"):
     )
 
     console.print(Panel(
-        f"[bold]J.A.R.V.I.S. Console[/bold] — {mode} mode\n"
-        f"Type commands directly. Type [bold]quit[/bold] to exit.\n"
-        f"Slash commands: /paste /file /clipboard /image /screenshot /webcam /context /clear /help",
+        f"[bold]J.A.R.V.I.S. Konsole[/bold] — Modus: {mode}\n"
+        f"Befehle direkt eingeben. [bold]quit[/bold] beendet die Konsole.\n"
+        f"Konsolenbefehle: /paste /file /clipboard /image /screenshot /webcam /context /clear /help",
         border_style="cyan"
     ))
 
@@ -1282,10 +1282,10 @@ def run_console(config, mode, user_id="user"):
         while True:
             # Show queued announcements from background threads
             for ann in tts_proxy.get_pending_announcements():
-                console.print(Panel(ann, title="[yellow]Announcement[/yellow]", border_style="yellow"))
+                console.print(Panel(ann, title="[yellow]Mitteilung[/yellow]", border_style="yellow"))
 
             try:
-                command = pt_session.prompt("You > ").strip()
+                command = pt_session.prompt("Du > ").strip()
             except (EOFError, KeyboardInterrupt):
                 break
 
@@ -1297,7 +1297,7 @@ def run_console(config, mode, user_id="user"):
                 os.system("clear")
                 continue
             if command.lower() in ("reload", "restart", "console_reload"):
-                console.print("[cyan]Reloading console...[/cyan]\n")
+                console.print("[cyan]Konsole wird neu geladen ...[/cyan]\n")
                 # Clean shutdown before exec
                 if mcp_bridge:
                     mcp_bridge.stop()
@@ -1346,11 +1346,11 @@ def run_console(config, mode, user_id="user"):
             if context_window and context_window.enabled:
                 stats = context_window.get_stats()
                 seg_count = stats["segments"]
-                open_seg = "open" if stats["open_segment"] else "closed"
+                open_seg = "offen" if stats["open_segment"] else "geschlossen"
                 summarized = stats.get("summarized", 0)
-                summary_tag = f", {summarized} summarized" if summarized else ""
+                summary_tag = f", {summarized} zusammengefasst" if summarized else ""
                 console.print(
-                    f"[dim]  ctx: {seg_count} segment(s), current={open_seg}, "
+                    f"[dim]  ctx: {seg_count} Segmente, aktuell={open_seg}, "
                     f"~{stats['estimated_tokens']} tokens{summary_tag}[/dim]"
                 )
 
@@ -1366,7 +1366,7 @@ def run_console(config, mode, user_id="user"):
             current_image = None
             if _pending_image["data"]:
                 current_image = _pending_image["data"]
-                console.print(f"[dim]  image: {_pending_image['label']} attached[/dim]")
+                console.print(f"[dim]  Bild: {_pending_image['label']} angehängt[/dim]")
                 _pending_image["data"] = None
                 _pending_image["label"] = None
 
@@ -1424,8 +1424,8 @@ def run_console(config, mode, user_id="user"):
 
                 if result.context_messages:
                     console.print(
-                        f"[dim]  ctx assembled: {len(result.context_messages)} messages "
-                        f"for LLM (max_tokens={llm._estimate_max_tokens(command)})[/dim]"
+                        f"[dim]  Kontext: {len(result.context_messages)} Nachrichten "
+                        f"für LLM (max_tokens={llm._estimate_max_tokens(command)})[/dim]"
                     )
 
                 response = _stream_llm_console(
@@ -1500,7 +1500,7 @@ def run_console(config, mode, user_id="user"):
                         synthesis_category=getattr(result, 'synthesis_category', None),
                     )
                 except Exception as e:
-                    console.print(f"[dim]Metrics recording failed: {e}[/dim]")
+                    console.print("[dim]Metriken konnten nicht gespeichert werden.[/dim]")
 
             # Stats panel
             session_stats.update(skill_handled, used_llm)
@@ -1511,7 +1511,7 @@ def run_console(config, mode, user_id="user"):
             tts_proxy._wait_for_speech()
 
     finally:
-        console.print("\n[dim]Shutting down...[/dim]")
+        console.print("\n[dim]Wird beendet ...[/dim]")
         if mcp_bridge:
             mcp_bridge.stop()
         if memory_manager:
@@ -1525,7 +1525,7 @@ def run_console(config, mode, user_id="user"):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="J.A.R.V.I.S. Console — Keyboard interaction mode")
+    parser = argparse.ArgumentParser(description="J.A.R.V.I.S. Konsole — Keyboard interaction mode")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--text", action="store_true", default=True, help="Text mode (default)")
     group.add_argument("--speech", action="store_true", help="Launch voice mode")

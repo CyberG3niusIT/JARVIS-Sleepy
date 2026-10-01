@@ -75,7 +75,7 @@ def _run(cmd: list | str, timeout: int = 10, cwd: str = None) -> str:
     except subprocess.TimeoutExpired:
         return ""
     except Exception as e:
-        return f"Error: {e}"
+        return f"Fehler: Die Anfrage konnte nicht ausgeführt werden."
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ def handler(args: dict) -> str:
     fn = dispatch.get(action)
     if fn:
         return fn()
-    return f"Unknown find_files action: {action}"
+    return f"Unbekannte find_files-Aktion: {action}"
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ def handler(args: dict) -> str:
 def _find_search(pattern: str) -> str:
     """Search for files matching a name pattern."""
     if not pattern:
-        return "Error: 'pattern' is required for file search."
+        return "Fehler: Für die Dateisuche ist 'pattern' erforderlich."
     search_paths = [
         str(Path.home()),
         str(Path.home() / "Documents"),
@@ -278,7 +278,7 @@ def _find_search(pattern: str) -> str:
             break  # Stop after first path with results
 
     if not all_matches:
-        return f"No files found matching '{pattern}'."
+        return f"Keine passenden Dateien zu '{pattern}' gefunden."
     # Deduplicate and limit
     seen = set()
     unique = []
@@ -287,12 +287,12 @@ def _find_search(pattern: str) -> str:
             seen.add(m)
             unique.append(m)
     if len(unique) == 1:
-        return f"Found: {unique[0]}"
+        return f"Gefunden: {unique[0]}"
     display = unique[:10]
-    result_text = f"Found {len(unique)} files matching '{pattern}':\n"
+    result_text = f"{len(unique)} passende Dateien zu '{pattern}' gefunden:\n"
     result_text += "\n".join(f"  - {f}" for f in display)
     if len(unique) > 10:
-        result_text += f"\n  ... and {len(unique) - 10} more"
+        result_text += f"\n  ... und {len(unique) - 10} weitere"
     return result_text
 
 
@@ -300,20 +300,20 @@ def _find_count_files(directory: str) -> str:
     """Count files in a named directory."""
     target = _resolve_dir(directory)
     if not target:
-        return f"Directory '{directory}' does not exist."
+        return f"Das Verzeichnis '{directory}' existiert nicht."
     try:
         file_count = sum(1 for item in target.iterdir() if item.is_file())
         dir_count = sum(1 for item in target.iterdir() if item.is_dir())
     except PermissionError:
-        return f"Permission denied accessing '{directory}'."
+        return f"Zugriff auf '{directory}' verweigert."
     if file_count == 0 and dir_count == 0:
-        return f"'{directory}' is empty."
+        return f"'{directory}' ist leer."
     parts = []
     if file_count:
-        parts.append(f"{file_count:,} files")
+        parts.append(f"{file_count:,} Dateien")
     if dir_count:
-        parts.append(f"{dir_count:,} folders")
-    return f"'{directory}' contains {' and '.join(parts)}."
+        parts.append(f"{dir_count:,} Ordner")
+    return f"'{directory}' enthält {' und '.join(parts)}."
 
 
 def _find_list_files(directory: str, limit: int = None,
@@ -321,19 +321,19 @@ def _find_list_files(directory: str, limit: int = None,
     """List files in a named directory with sizes (including directory sizes)."""
     target = _resolve_dir(directory)
     if not target:
-        return f"Directory '{directory}' does not exist."
+        return f"Das Verzeichnis '{directory}' existiert nicht."
     try:
         entries = list(target.iterdir())
     except PermissionError:
-        return f"Permission denied accessing '{directory}'."
+        return f"Zugriff auf '{directory}' verweigert."
 
     if not entries:
-        return f"'{directory}' is empty."
+        return f"'{directory}' ist leer."
 
     # Filter hidden files
     visible = [e for e in entries if not e.name.startswith('.')]
     if not visible:
-        return f"'{directory}' contains only hidden files."
+        return f"'{directory}' enthält nur versteckte Dateien."
 
     # Sort entries
     sort_by = sort_by or "name"
@@ -360,7 +360,7 @@ def _find_list_files(directory: str, limit: int = None,
     if visible_dirs and not skip_du:
         du_args = ["du", "-sh", "--"] + [str(d) for d in visible_dirs[:50]]
         du_output = _run(du_args, timeout=5)
-        if du_output and not du_output.startswith("Error"):
+        if du_output and not du_output.startswith(("Error", "Fehler:")):
             for line in du_output.split("\n"):
                 parts = line.split("\t", 1)
                 if len(parts) == 2:
@@ -383,10 +383,10 @@ def _find_list_files(directory: str, limit: int = None,
             except OSError:
                 lines.append(f"  {entry.name}")
 
-    sort_label = {"name": "alphabetical", "modified": "most recent", "size": "largest"}.get(sort_by, "")
-    header = f"'{directory}' — {total} items (sorted by {sort_label}):"
+    sort_label = {"name": "Name", "modified": "Änderungsdatum", "size": "Größe"}.get(sort_by, "")
+    header = f"'{directory}' — {total} Einträge (sortiert nach {sort_label}):"
     if total > cap:
-        lines.append(f"  ... and {total - cap} more")
+        lines.append(f"  ... und {total - cap} weitere")
     return header + "\n" + "\n".join(lines)
 
 
@@ -397,7 +397,7 @@ def _find_count_code(per_file: bool = False) -> str:
     """
     jarvis_path = _JARVIS_ROOT
     if not jarvis_path.exists():
-        return "JARVIS codebase not found."
+        return "Der JARVIS-Quellcode wurde nicht gefunden."
     result = subprocess.run(
         ["find", str(jarvis_path), "-name", "*.py", "-type", "f",
          "-not", "-path", "*/venv*", "-not", "-path", "*/__pycache__/*"],
@@ -405,7 +405,7 @@ def _find_count_code(per_file: bool = False) -> str:
     )
     py_files = [f for f in result.stdout.strip().split("\n") if f]
     if not py_files:
-        return "No Python files found."
+        return "Keine Python-Dateien gefunden."
     file_counts = []
     total_lines = 0
     for py_file in py_files:
@@ -417,11 +417,11 @@ def _find_count_code(per_file: bool = False) -> str:
                     file_counts.append((py_file, count))
         except Exception:
             continue
-    summary = f"Codebase: {total_lines:,} lines of Python across {len(py_files)} files."
+    summary = f"Quellcode: {total_lines:,} Python-Zeilen in {len(py_files)} Dateien."
     if per_file:
         file_counts.sort(key=lambda x: x[1], reverse=True)
-        lines = [f"{count:>6,} lines  {path}" for path, count in file_counts[:20]]
-        return summary + "\n\nTop 20 files by line count:\n" + "\n".join(lines)
+        lines = [f"{count:>6,} Zeilen  {path}" for path, count in file_counts[:20]]
+        return summary + "\n\nDie 20 Dateien mit den meisten Zeilen:\n" + "\n".join(lines)
     return summary
 
 
@@ -433,21 +433,21 @@ def _find_dir_sizes(directory: str) -> str:
     """Show recursive sizes of items in a directory, sorted largest first."""
     target = _resolve_dir(directory)
     if not target:
-        return f"Directory '{directory}' does not exist."
+        return f"Das Verzeichnis '{directory}' existiert nicht."
 
     # du -sh on each child item (files + dirs)
     try:
         visible = [e for e in target.iterdir() if not e.name.startswith('.')]
     except PermissionError:
-        return f"Permission denied accessing '{directory}'."
+        return f"Zugriff auf '{directory}' verweigert."
 
     if not visible:
-        return f"'{directory}' is empty."
+        return f"'{directory}' ist leer."
 
     du_args = ["du", "-sh", "--"] + [str(e) for e in visible[:50]]
     output = _run(du_args, timeout=10)
-    if not output or output.startswith("Error"):
-        return f"Could not determine sizes in '{directory}'."
+    if not output or output.startswith(("Error", "Fehler:")):
+        return f"Die Größen in '{directory}' konnten nicht ermittelt werden."
 
     # Parse and sort by raw bytes
     items = []
@@ -460,7 +460,7 @@ def _find_dir_sizes(directory: str) -> str:
             # Get raw bytes for sorting
             raw = _run(["du", "-sb", "--", path_str], timeout=5)
             raw_bytes = 0
-            if raw and not raw.startswith("Error"):
+            if raw and not raw.startswith(("Error", "Fehler:")):
                 try:
                     raw_bytes = int(raw.split("\t")[0])
                 except (ValueError, IndexError):
@@ -473,12 +473,12 @@ def _find_dir_sizes(directory: str) -> str:
     # Total size of the directory itself
     total_output = _run(["du", "-sh", "--", str(target)], timeout=5)
     total_size = ""
-    if total_output and not total_output.startswith("Error"):
+    if total_output and not total_output.startswith(("Error", "Fehler:")):
         total_size = total_output.split("\t")[0]
 
-    header = f"'{directory}' — {len(items)} items"
+    header = f"'{directory}' — {len(items)} Einträge"
     if total_size:
-        header += f", total {total_size}"
+        header += f", insgesamt {total_size}"
     header += ":"
 
     return header + "\n" + "\n".join(line for _, line in items)
@@ -487,12 +487,12 @@ def _find_dir_sizes(directory: str) -> str:
 def _find_disk_usage() -> str:
     """Show disk space usage across mount points."""
     output = _run(["df", "-h"], timeout=5)
-    if not output or output.startswith("Error"):
-        return "Could not retrieve disk usage."
+    if not output or output.startswith(("Error", "Fehler:")):
+        return "Die Speicherbelegung konnte nicht ermittelt werden."
 
     lines = output.split("\n")
     if not lines:
-        return "No disk usage data."
+        return "Keine Daten zur Speicherbelegung verfügbar."
 
     # Filter to real filesystems (exclude tmpfs, snap, etc.)
     header = lines[0]
@@ -503,7 +503,7 @@ def _find_disk_usage() -> str:
             real.append(line)
 
     if not real:
-        return "No real filesystems found."
+        return "Keine Dateisysteme gefunden."
 
     return header + "\n" + "\n".join(real)
 
@@ -511,21 +511,21 @@ def _find_disk_usage() -> str:
 def _find_file_info(path_str: str) -> str:
     """Get detailed metadata for a specific file or directory."""
     if not path_str:
-        return "Error: 'pattern' (file path) is required for file_info."
+        return "Fehler: Für file_info ist 'pattern' (Dateipfad) erforderlich."
 
     # Try named dir map first, then literal path
     target = _DIR_MAP.get(path_str.lower().strip())
     if not target:
         target = Path(path_str).expanduser()
     if not target.exists():
-        return f"'{path_str}' does not exist."
+        return f"'{path_str}' existiert nicht."
 
     try:
         st = target.stat()
     except PermissionError:
-        return f"Permission denied accessing '{path_str}'."
+        return f"Zugriff auf '{path_str}' verweigert."
     except OSError as e:
-        return f"Error accessing '{path_str}': {e}"
+        return f"Fehler: Auf die Datei konnte nicht zugegriffen werden."
 
     # Type
     if target.is_symlink():
@@ -559,7 +559,7 @@ def _find_file_info(path_str: str) -> str:
     # Size
     if target.is_dir():
         du_out = _run(["du", "-sh", "--", str(target)], timeout=5)
-        if du_out and not du_out.startswith("Error"):
+        if du_out and not du_out.startswith(("Error", "Fehler:")):
             size_str = du_out.split("\t")[0]
         else:
             size_str = "(unknown)"
@@ -588,7 +588,7 @@ def _find_recent_files(directory: str, days: int = 1) -> str:
     """Find files modified within the last N days."""
     target = _resolve_dir(directory)
     if not target:
-        return f"Directory '{directory}' does not exist."
+        return f"Das Verzeichnis '{directory}' existiert nicht."
 
     days = max(1, min(365, days))
 
@@ -600,8 +600,8 @@ def _find_recent_files(directory: str, days: int = 1) -> str:
         "-printf", "%T@ %s %p\n",
     ], timeout=10)
 
-    if not output or output.startswith("Error"):
-        return f"No files modified in the last {days} day(s) in '{directory}'."
+    if not output or output.startswith(("Error", "Fehler:")):
+        return f"Keine in den letzten {days} Tagen geänderten Dateien in '{directory}' gefunden."
 
     # Parse, sort by mtime descending
     items = []
@@ -619,15 +619,15 @@ def _find_recent_files(directory: str, days: int = 1) -> str:
                 continue
 
     if not items:
-        return f"No files modified in the last {days} day(s) in '{directory}'."
+        return f"Keine in den letzten {days} Tagen geänderten Dateien in '{directory}' gefunden."
 
     items.sort(key=lambda x: x[0], reverse=True)
     display = items[:30]
 
-    period = f"{days} day" + ("s" if days > 1 else "")
-    header = f"{len(items)} files modified in the last {period} in '{directory}'"
+    period = f"{days} Tag" + ("en" if days > 1 else "")
+    header = f"{len(items)} Dateien in '{directory}' geändert in den letzten {period}"
     if len(items) > 30:
-        header += f" (showing 30 of {len(items)})"
+        header += f" (30 von {len(items)} angezeigt)"
     header += ":"
 
     lines = [header]
@@ -643,7 +643,7 @@ def _find_tree(directory: str, depth: int = 2) -> str:
     """Show recursive directory structure."""
     target = _resolve_dir(directory)
     if not target:
-        return f"Directory '{directory}' does not exist."
+        return f"Das Verzeichnis '{directory}' existiert nicht."
 
     depth = max(1, min(5, depth))
 
@@ -652,11 +652,11 @@ def _find_tree(directory: str, depth: int = 2) -> str:
                     "-I", ".git|__pycache__|venv|.cache|node_modules",
                     str(target)], timeout=10)
 
-    if output and not output.startswith("Error"):
+    if output and not output.startswith(("Error", "Fehler:")):
         lines = output.split("\n")
         if len(lines) > 200:
             lines = lines[:200]
-            lines.append(f"  ... ({len(output.split(chr(10))) - 200} more entries)")
+            lines.append(f"  ... ({len(output.split(chr(10))) - 200} weitere Einträge)")
         return "\n".join(lines)
 
     # Fallback: Python os.walk with depth limit
@@ -680,7 +680,7 @@ def _find_tree(directory: str, depth: int = 2) -> str:
             if not f.startswith('.'):
                 lines.append(f"{indent}{f}")
         if len(lines) > 200:
-            lines.append(f"  ... (output truncated at 200 lines)")
+            lines.append(f"  ... (Ausgabe auf 200 Zeilen begrenzt)")
             break
 
     return "\n".join(lines)
@@ -690,7 +690,7 @@ def _find_large(directory: str, min_size: str = "100M") -> str:
     """Find files above a size threshold."""
     target = _resolve_dir(directory)
     if not target:
-        return f"Directory '{directory}' does not exist."
+        return f"Das Verzeichnis '{directory}' existiert nicht."
 
     # Validate min_size format
     if not min_size:
@@ -707,8 +707,8 @@ def _find_large(directory: str, min_size: str = "100M") -> str:
         "-printf", "%s %p\n",
     ], timeout=10)
 
-    if not output or output.startswith("Error"):
-        return f"No files larger than {min_size} found in '{directory}'."
+    if not output or output.startswith(("Error", "Fehler:")):
+        return f"Keine Dateien größer als {min_size} in '{directory}' gefunden."
 
     # Parse and sort by size descending
     items = []
@@ -725,12 +725,12 @@ def _find_large(directory: str, min_size: str = "100M") -> str:
                 continue
 
     if not items:
-        return f"No files larger than {min_size} found in '{directory}'."
+        return f"Keine Dateien größer als {min_size} in '{directory}' gefunden."
 
     items.sort(key=lambda x: x[0], reverse=True)
     display = items[:20]
 
-    header = f"{len(items)} files larger than {min_size} in '{directory}'"
+    header = f"{len(items)} Dateien größer als {min_size} in '{directory}'"
     if len(items) > 20:
         header += f" (showing top 20)"
     header += ":"
@@ -747,7 +747,7 @@ def _find_largest(directory: str, limit: int = 20) -> str:
     """Find the largest files in a directory (no size threshold)."""
     target = _resolve_dir(directory)
     if not target:
-        return f"Directory '{directory}' does not exist."
+        return f"Das Verzeichnis '{directory}' existiert nicht."
 
     # Find all files, sorted by size
     output = _run([
@@ -757,8 +757,8 @@ def _find_largest(directory: str, limit: int = 20) -> str:
         "-printf", "%s %p\n",
     ], timeout=10)
 
-    if not output or output.startswith("Error"):
-        return f"No files found in '{directory}'."
+    if not output or output.startswith(("Error", "Fehler:")):
+        return f"Keine Dateien in '{directory}' gefunden."
 
     items = []
     for line in output.split("\n"):
@@ -772,13 +772,13 @@ def _find_largest(directory: str, limit: int = 20) -> str:
                 continue
 
     if not items:
-        return f"No files found in '{directory}'."
+        return f"Keine Dateien in '{directory}' gefunden."
 
     items.sort(key=lambda x: x[0], reverse=True)
     cap = min(limit, 20)
     display = items[:cap]
 
-    header = f"Top {len(display)} largest files in '{directory}':"
+    header = f"Die {len(display)} größten Dateien in '{directory}':"
     lines = [header]
     for size, path in display:
         rel = path.replace(str(target) + "/", "")
@@ -790,7 +790,7 @@ def _find_largest(directory: str, limit: int = 20) -> str:
 def _find_package_info(package_name: str) -> str:
     """Check if a package is installed and retrieve version info."""
     if not package_name:
-        return "Error: 'package_name' is required for package_info."
+        return "Fehler: Für package_info ist 'package_name' erforderlich."
 
     name = package_name.strip()
     sections = []
@@ -807,9 +807,9 @@ def _find_package_info(package_name: str) -> str:
                 version = line.split(":", 1)[1].strip()
             elif line.startswith("Description:"):
                 description = line.split(":", 1)[1].strip()
-        parts = [f"dpkg: installed"]
+        parts = [f"dpkg: installiert"]
         if version:
-            parts.append(f"version {version}")
+            parts.append(f"Version {version}")
         if description:
             parts.append(f"({description})")
         sections.append(" — ".join(parts))
@@ -817,22 +817,22 @@ def _find_package_info(package_name: str) -> str:
         # Check if available but not installed
         apt_out = _run(f"apt list {shlex.quote(name)} 2>/dev/null", timeout=5)
         if apt_out and name in apt_out and "installed" not in apt_out.lower():
-            sections.append(f"dpkg: not installed (available via apt)")
+            sections.append(f"dpkg: nicht installiert (über apt verfügbar)")
 
     # 2. which — binary location
     which_out = _run(["which", name], timeout=3)
-    if which_out and not which_out.startswith("Error") and which_out.strip():
-        sections.append(f"Binary: {which_out.strip()}")
+    if which_out and not which_out.startswith(("Error", "Fehler:")) and which_out.strip():
+        sections.append(f"Programmdatei: {which_out.strip()}")
 
     # 3. --version
     version_out = _run(f"{shlex.quote(name)} --version 2>&1 | head -1", timeout=5)
-    if (version_out and not version_out.startswith("Error")
+    if (version_out and not version_out.startswith(("Error", "Fehler:"))
             and version_out.strip() and "not found" not in version_out.lower()):
         sections.append(f"Version: {version_out.strip()}")
 
     # 4. pip — Python package
     pip_out = _run(["pip", "show", name], timeout=5)
-    if pip_out and not pip_out.startswith("Error") and "Name:" in pip_out:
+    if pip_out and not pip_out.startswith(("Error", "Fehler:")) and "Name:" in pip_out:
         pip_version = ""
         pip_location = ""
         for line in pip_out.split("\n"):
@@ -840,14 +840,14 @@ def _find_package_info(package_name: str) -> str:
                 pip_version = line.split(":", 1)[1].strip()
             elif line.startswith("Location:"):
                 pip_location = line.split(":", 1)[1].strip()
-        parts = ["pip: installed"]
+        parts = ["pip: installiert"]
         if pip_version:
-            parts.append(f"version {pip_version}")
+            parts.append(f"Version {pip_version}")
         if pip_location:
-            parts.append(f"at {pip_location}")
+            parts.append(f"Installationsort: {pip_location}")
         sections.append(" — ".join(parts))
 
     if not sections:
-        return f"Package '{name}' is not installed (not found via dpkg, PATH, or pip)."
+        return f"Paket '{name}' ist nicht installiert (nicht über dpkg, PATH oder pip gefunden)."
 
-    return f"Package '{name}':\n" + "\n".join(f"  {s}" for s in sections)
+    return f"Paket '{name}':\n" + "\n".join(f"  {s}" for s in sections)

@@ -1,0 +1,382 @@
+﻿===== JARVIS MAIN EXACT DELTA =====
+Start: 2026-09-29 16:56:52 +02:00
+HEAD=a977e1e77ff7f2531dbdfe1a9251b4341541586a
+BRANCH=backup/jarvis-runtime-voice-2026-09-24
+REFERENCE=3ef09b2ec9d54f97485eaa0fa072dddc9b0de2c2
+TRACKED_CHANGED=66
+UNTRACKED=55
+UNIQUE_WORKING_PATHS=121
+
+===== SUMMARY =====
+IDENTICAL_TO_REFERENCE=44
+DIFFERENT_FROM_REFERENCE=68
+LOCAL_ONLY=9
+MISSING_CURRENT=0
+
+===== IDENTICAL TO REFERENCE =====
+.github/dependabot.yml
+.github/pull_request_template.md
+.github/workflows/ci-python.yml
+CLAUDE.md
+core/audio_turn_routing.py
+core/expert_policy.py
+core/live_telemetry.py
+core/model_handover.py
+core/npu_face_backend.py
+core/runtime_state.py
+core/tools/delegate_to_expert.py
+core/tts.py
+core/vision_gate.py
+core/wake_word_utils.py
+docs/RUNTIME_SUPERVISOR.md
+killswitch.sh
+pyproject.toml
+requirements-anthropic.txt
+requirements-ci.txt
+restart.sh
+scripts/check_chatterbox_runtime.py
+scripts/check_runtime_dependencies.py
+scripts/jarvis-circuit-reset
+scripts/jarvis-confirm
+start.sh
+start_chatterbox.sh
+stop.sh
+systemd/llama-server-expert.service
+systemd/llama-server-primary.service
+tests/unit/test_active_voice_event_telemetry.py
+tests/unit/test_expert_delegation.py
+tests/unit/test_expert_handover_integration.py
+tests/unit/test_jarvis_web_app.py
+tests/unit/test_live_telemetry.py
+tests/unit/test_llm_cloud_provider.py
+tests/unit/test_llm_router_hardening.py
+tests/unit/test_model_handover.py
+tests/unit/test_presence_npu_backend.py
+tests/unit/test_privacy_direct_audio.py
+tests/unit/test_runtime_dependencies.py
+tests/unit/test_transcript_content_logging.py
+tests/unit/test_voice_barge_in.py
+tests/unit/test_voice_routing_hardening.py
+tools/openvino_npu_worker.py
+
+===== DIFFERENT FROM REFERENCE =====
+.env.example
+.github/CODEOWNERS
+config.yaml
+core/claude_consultation.py
+core/context_window.py
+core/continuous_listener.py
+core/conversation.py
+core/conversation_router.py
+core/direct_audio.py
+core/governance.py
+core/gpu_swap.py
+core/health_check.py
+core/llm_router.py
+core/llm_server_client.py
+core/memory_manager.py
+core/metrics_tracker.py
+core/observation_collector.py
+core/pipeline.py
+core/presence_detector.py
+core/privacy_gate.py
+core/speculative_turn.py
+core/stt_qwen3.py
+core/tool_registry.py
+core/turn_assembler.py
+core/watchdog.py
+docs/ARCHITECTURE.md
+docs/DEVELOPMENT.md
+docs/DEVELOPMENT_VISION.md
+docs/EDGE_CASE_TESTING.md
+docs/SETUP_GUIDE.md
+docs/SYSTEM_SPECIFIC_NOTES.md
+JARVIS.Runtime.psm1
+jarvis_console.py
+jarvis_continuous.py
+jarvis_web.py
+JARVIS-Runtime.ps1
+PROJECT_OVERVIEW.md
+README.md
+requirements.txt
+scripts/preflight_check.py
+scripts/runtime_status.py
+scripts/test_suite_v3/cleanup.py
+scripts/test_suite_v3/client.py
+scripts/ws_test.py
+scripts/wsl-pytest.ps1
+systemd/README.md
+tests/components/test_temporal_weather.py
+tests/integration/test_conversations.py
+tests/integration/test_vision.py
+tests/powershell/Test-JarvisRuntime.ps1
+tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+tests/unit/test_audio_turn_routing.py
+tests/unit/test_direct_audio_routing.py
+tests/unit/test_runtime_lifecycle_shell.py
+tests/unit/test_runtime_status.py
+tests/unit/test_speculative_audio_side_effects.py
+tests/unit/test_stop_fastpath_integration.py
+tests/unit/test_turn_assembler.py
+tests/unit/test_vision_gate.py
+tests/unit/test_watchdog_listener_idle.py
+web/dashboard.css
+web/dashboard.html
+web/dashboard.js
+web/dashboard_governance.html
+web/dashboard_health.html
+web/dashboard_pipeline.html
+web/index.html
+web/memory.html
+
+===== LOCAL ONLY =====
+core/mail_integration.py
+core/tools/mail_status.py
+tests/unit/test_context_window_read_only.py
+tests/unit/test_jarvis_web_desktop_mode.py
+tests/unit/test_mail_integration.py
+tests/unit/test_memory_read_only.py
+web/dashboard_mail.css
+web/dashboard_mail.html
+web/dashboard_mail.js
+
+===== MISSING CURRENT =====
+
+===== CACHE CLEANUP =====
+CACHE_DIRS_FOUND=26
+DELETED CACHE: tools\__pycache__
+DELETED CACHE: tests\unit\__pycache__
+DELETED CACHE: tests\routing\__pycache__
+DELETED CACHE: tests\integration\__pycache__
+DELETED CACHE: tests\components\__pycache__
+DELETED CACHE: tests\__pycache__
+DELETED CACHE: skills\system\web_navigation\__pycache__
+DELETED CACHE: skills\system\weather\__pycache__
+DELETED CACHE: skills\system\time_info\__pycache__
+DELETED CACHE: skills\system\system_info\__pycache__
+DELETED CACHE: skills\system\privacy\__pycache__
+DELETED CACHE: skills\system\mobility\__pycache__
+DELETED CACHE: skills\system\filesystem\__pycache__
+DELETED CACHE: skills\system\file_editor\__pycache__
+DELETED CACHE: skills\system\developer_tools\__pycache__
+DELETED CACHE: skills\system\app_launcher\__pycache__
+DELETED CACHE: skills\personal\social_introductions\__pycache__
+DELETED CACHE: skills\personal\school\__pycache__
+DELETED CACHE: skills\personal\reminders\__pycache__
+DELETED CACHE: skills\personal\news\__pycache__
+DELETED CACHE: skills\personal\conversation\__pycache__
+DELETED CACHE: scripts\__pycache__
+DELETED CACHE: core\tools\__pycache__
+DELETED CACHE: core\__pycache__
+DELETED CACHE: __pycache__
+DELETED CACHE: .pytest_cache
+
+===== UNIT + ROUTING TEST =====
+TEST_EXITCODE=2
+TEST_LOG=C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Evidence\main-unit-routing-tests-2026-09-29.txt
+
+--- LAST 80 TEST LINES ---
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 377, in pytest_cmdline_main
+    return wrap_session(config, _main)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 365, in wrap_session
+    config.hook.pytest_sessionfinish(
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/logging.py", line 888, in pytest_sessionfinish
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/terminal.py", line 961, in pytest_sessionfinish
+    result = yield
+             ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/warnings.py", line 119, in pytest_sessionfinish
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 112, in pytest_sessionfinish
+    session._setupstate.teardown_exact(None)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    fin()
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/nodes.py", line 283, in teardown
+    def teardown(self) -> None:
+System.Management.Automation.RemoteException
+KeyboardInterrupt
+System.Management.Automation.RemoteException
+During handling of the above exception, another exception occurred:
+System.Management.Automation.RemoteException
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pytest/__main__.py", line 9, in <module>
+    raise SystemExit(_console_main())
+                     ^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 253, in _console_main
+    code = _main(prog=_get_prog_name(sys.argv))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 235, in _main
+    config._ensure_unconfigure()
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1212, in _ensure_unconfigure
+    self.hook.pytest_unconfigure(config=self)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/unraisableexception.py", line 172, in pytest_unconfigure
+    gc_collect_harder(gc_collect_iterations)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/unraisableexception.py", line 33, in gc_collect_harder
+    gc.collect()
+KeyboardInterrupt
+......................................
+
+===== FINAL MAIN STATUS =====
+ M .env.example
+ M .github/pull_request_template.md
+ M JARVIS.Runtime.psm1
+ M PROJECT_OVERVIEW.md
+ M README.md
+ M config.yaml
+ M core/claude_consultation.py
+ M core/context_window.py
+ M core/continuous_listener.py
+ M core/conversation.py
+ M core/conversation_router.py
+ M core/governance.py
+ M core/gpu_swap.py
+ M core/health_check.py
+ M core/llm_router.py
+ M core/llm_server_client.py
+ M core/memory_manager.py
+ M core/metrics_tracker.py
+ M core/observation_collector.py
+ M core/pipeline.py
+ M core/presence_detector.py
+ M core/privacy_gate.py
+ M core/stt_qwen3.py
+ M core/tool_registry.py
+ M core/tts.py
+ M core/watchdog.py
+ M docs/ARCHITECTURE.md
+ M docs/DEVELOPMENT.md
+ M docs/DEVELOPMENT_VISION.md
+ M docs/EDGE_CASE_TESTING.md
+ M docs/SETUP_GUIDE.md
+ M docs/SYSTEM_SPECIFIC_NOTES.md
+ M jarvis_console.py
+ M jarvis_continuous.py
+ M jarvis_web.py
+ M killswitch.sh
+ M requirements.txt
+ M restart.sh
+ M scripts/check_chatterbox_runtime.py
+ M scripts/check_runtime_dependencies.py
+ M scripts/jarvis-circuit-reset
+ M scripts/jarvis-confirm
+ M scripts/preflight_check.py
+ M scripts/test_suite_v3/cleanup.py
+ M scripts/test_suite_v3/client.py
+ M scripts/ws_test.py
+ M start.sh
+ M start_chatterbox.sh
+ M stop.sh
+ M systemd/README.md
+ M tests/components/test_temporal_weather.py
+ M tests/integration/test_conversations.py
+ M tests/integration/test_vision.py
+ M tests/powershell/Test-JarvisRuntime.ps1
+ M tests/unit/test_runtime_dependencies.py
+ M tests/unit/test_runtime_lifecycle_shell.py
+ M tests/unit/test_transcript_content_logging.py
+ M tests/unit/test_voice_barge_in.py
+ M web/dashboard.css
+ M web/dashboard.html
+ M web/dashboard.js
+ M web/dashboard_governance.html
+ M web/dashboard_health.html
+ M web/dashboard_pipeline.html
+ M web/index.html
+ M web/memory.html
+?? .github/CODEOWNERS
+?? .github/dependabot.yml
+?? .github/workflows/
+?? CLAUDE.md
+?? JARVIS-Runtime.ps1
+?? core/audio_turn_routing.py
+?? core/direct_audio.py
+?? core/expert_policy.py
+?? core/live_telemetry.py
+?? core/mail_integration.py
+?? core/model_handover.py
+?? core/npu_face_backend.py
+?? core/runtime_state.py
+?? core/speculative_turn.py
+?? core/tools/delegate_to_expert.py
+?? core/tools/mail_status.py
+?? core/turn_assembler.py
+?? core/vision_gate.py
+?? core/wake_word_utils.py
+?? docs/RUNTIME_SUPERVISOR.md
+?? pyproject.toml
+?? requirements-anthropic.txt
+?? requirements-ci.txt
+?? scripts/runtime_status.py
+?? scripts/wsl-pytest.ps1
+?? systemd/llama-server-expert.service
+?? systemd/llama-server-primary.service
+?? tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+?? tests/unit/test_active_voice_event_telemetry.py
+?? tests/unit/test_audio_turn_routing.py
+?? tests/unit/test_context_window_read_only.py
+?? tests/unit/test_direct_audio_routing.py
+?? tests/unit/test_expert_delegation.py
+?? tests/unit/test_expert_handover_integration.py
+?? tests/unit/test_jarvis_web_app.py
+?? tests/unit/test_jarvis_web_desktop_mode.py
+?? tests/unit/test_live_telemetry.py
+?? tests/unit/test_llm_cloud_provider.py
+?? tests/unit/test_llm_router_hardening.py
+?? tests/unit/test_mail_integration.py
+?? tests/unit/test_memory_read_only.py
+?? tests/unit/test_model_handover.py
+?? tests/unit/test_presence_npu_backend.py
+?? tests/unit/test_privacy_direct_audio.py
+?? tests/unit/test_runtime_status.py
+?? tests/unit/test_speculative_audio_side_effects.py
+?? tests/unit/test_stop_fastpath_integration.py
+?? tests/unit/test_turn_assembler.py
+?? tests/unit/test_vision_gate.py
+?? tests/unit/test_voice_routing_hardening.py
+?? tests/unit/test_watchdog_listener_idle.py
+?? tools/openvino_npu_worker.py
+?? web/dashboard_mail.css
+?? web/dashboard_mail.html
+?? web/dashboard_mail.js
+End: 2026-09-29 17:44:31 +02:00

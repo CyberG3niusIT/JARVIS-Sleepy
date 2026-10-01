@@ -68,6 +68,8 @@ SYSTEM_PROMPT_RULE = (
 
 from core.logger import get_logger
 logger = get_logger("jarvis.tools.get_weather")
+WEATHER_UNAVAILABLE = "Ich kann die aktuellen Wetterdaten gerade nicht abrufen."
+WEATHER_LOCATION_UNKNOWN = "Ich konnte diesen Ort nicht finden. Bitte nenne den Ort genauer."
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +106,7 @@ def _resolve_location(location: str | None) -> tuple[float, float, str] | str:
     import requests
     try:
         resp = requests.get(
-            "http://api.openweathermap.org/geo/1.0/direct",
+            "https://api.openweathermap.org/geo/1.0/direct",
             params={"q": location, "limit": 1, "appid": _get_weather_api_key()},
             timeout=5,
         )
@@ -113,11 +115,11 @@ def _resolve_location(location: str | None) -> tuple[float, float, str] | str:
         if data:
             return data[0]["lat"], data[0]["lon"], data[0]["name"]
         else:
-            logger.warning(f"Geocoding returned no results for '{location}'")
-            return f"I couldn't find a location called '{location}'. Could you be more specific?"
+            logger.warning("Geocoding returned no results")
+            return WEATHER_LOCATION_UNKNOWN
     except Exception as e:
-        logger.error(f"Geocoding error for '{location}': {e}")
-        return f"I had trouble looking up '{location}'. Please try again."
+        logger.error("Geocoding failed (%s)", type(e).__name__)
+        return WEATHER_UNAVAILABLE
 
 
 # ---------------------------------------------------------------------------
@@ -189,9 +191,9 @@ def _weather_current(lat: float, lon: float, city: str, is_home: bool) -> str:
                 feels = round(current["feels_like"])
                 desc = current.get("description", "")
                 wind = round(current.get("wind_speed", 0))
-                result = f"Weather in {city}: {temp} degrees"
+                result = f"Wetter in {city}: {temp} Grad"
                 if abs(temp - feels) > 3:
-                    result += f" (feels like {feels})"
+                    result += f" (gefühlt {feels})"
                 result += f", {desc}."
                 if wind >= 15:
                     result += f" Windy at {wind} mph."
@@ -214,17 +216,17 @@ def _weather_current(lat: float, lon: float, city: str, is_home: bool) -> str:
         desc = d["weather"][0]["description"]
         wind = round(d["wind"]["speed"])
 
-        result = f"Weather in {city}: {temp} degrees"
+        result = f"Wetter in {city}: {temp} Grad"
         if abs(temp - feels) > 3:
-            result += f" (feels like {feels})"
+            result += f" (gefühlt {feels})"
         result += f", {desc}."
         if wind >= 15:
             result += f" Windy at {wind} mph."
         return result
 
     except Exception as e:
-        logger.error(f"Weather API error: {e}")
-        return f"Error fetching weather for {city}: {e}"
+        logger.error("Weather API failed (%s)", type(e).__name__)
+        return WEATHER_UNAVAILABLE
 
 
 def _weather_forecast(lat: float, lon: float, city: str, is_home: bool) -> str:
@@ -297,8 +299,8 @@ def _weather_forecast(lat: float, lon: float, city: str, is_home: bool) -> str:
         return "\n".join(lines)
 
     except Exception as e:
-        logger.error(f"Forecast API error: {e}")
-        return f"Error fetching forecast for {city}: {e}"
+        logger.error("Forecast API failed (%s)", type(e).__name__)
+        return WEATHER_UNAVAILABLE
 
 
 def _weather_tomorrow(lat: float, lon: float, city: str, is_home: bool) -> str:
@@ -314,10 +316,10 @@ def _weather_tomorrow(lat: float, lon: float, city: str, is_home: bool) -> str:
                 high = round(row["temp_high"])
                 low = round(row["temp_low"])
                 wm = row.get("weather_main", "").lower()
-                cond = "thunderstorms expected" if "thunderstorm" in wm else (
-                    "rain expected" if ("rain" in wm or "drizzle" in wm) else
+                cond = "Gewitter erwartet" if "thunderstorm" in wm else (
+                    "Regen erwartet" if ("rain" in wm or "drizzle" in wm) else
                     row.get("description", wm))
-                return f"Tomorrow in {city}: High {high} degrees, Low {low} degrees, {cond}."
+                return f"Morgen in {city}: Höchstwert {high} Grad, Tiefstwert {low} Grad, {cond}."
 
     # Live API fallback
     import requests
@@ -331,32 +333,32 @@ def _weather_tomorrow(lat: float, lon: float, city: str, is_home: bool) -> str:
         resp.raise_for_status()
         data = resp.json()
 
-        tomorrow_day = (datetime.now().day + 1)
+        tomorrow_date = (datetime.now() + timedelta(days=1)).date()
         temps = []
         conditions = []
         for item in data["list"][:16]:
             dt = datetime.fromtimestamp(item["dt"])
-            if dt.day == tomorrow_day:
+            if dt.date() == tomorrow_date:
                 temps.append(item["main"]["temp"])
                 conditions.append(item["weather"][0]["main"].lower())
 
         if not temps:
-            return f"Tomorrow's forecast for {city} is not yet available."
+            return f"Die Vorhersage für morgen in {city} ist noch nicht verfügbar."
 
         high = round(max(temps))
         low = round(min(temps))
         has_rain = any("rain" in c or "drizzle" in c for c in conditions)
         has_storm = any("thunderstorm" in c for c in conditions)
 
-        cond = "thunderstorms expected" if has_storm else (
-            "rain expected" if has_rain else
+        cond = "Gewitter erwartet" if has_storm else (
+            "Regen erwartet" if has_rain else
             data["list"][0]["weather"][0]["description"])
 
-        return f"Tomorrow in {city}: High {high} degrees, Low {low} degrees, {cond}."
+        return f"Morgen in {city}: Höchstwert {high} Grad, Tiefstwert {low} Grad, {cond}."
 
     except Exception as e:
-        logger.error(f"Tomorrow weather error: {e}")
-        return f"Error fetching tomorrow's weather for {city}: {e}"
+        logger.error("Tomorrow weather failed (%s)", type(e).__name__)
+        return WEATHER_UNAVAILABLE
 
 
 def _weather_rain_check(lat: float, lon: float, city: str, is_home: bool) -> str:
@@ -374,13 +376,13 @@ def _weather_rain_check(lat: float, lon: float, city: str, is_home: bool) -> str
                 has_storm = "thunderstorm" in wm
                 has_rain = "rain" in wm or "drizzle" in wm
                 if has_storm:
-                    return (f"Rain check for {city}: Thunderstorms likely tomorrow, "
-                            f"{rain_chance}% precipitation chance.")
+                    return (f"Regenausblick für {city}: Morgen sind Gewitter wahrscheinlich, "
+                            f"{rain_chance}% Niederschlagswahrscheinlichkeit.")
                 elif has_rain:
-                    return (f"Rain check for {city}: Rain expected tomorrow, "
-                            f"{rain_chance}% precipitation chance.")
+                    return (f"Regenausblick für {city}: Morgen wird Regen erwartet, "
+                            f"{rain_chance}% Niederschlagswahrscheinlichkeit.")
                 else:
-                    return f"Rain check for {city}: No rain expected tomorrow."
+                    return f"Regenausblick für {city}: Morgen wird kein Regen erwartet."
 
     # Live API fallback
     import requests
@@ -394,14 +396,14 @@ def _weather_rain_check(lat: float, lon: float, city: str, is_home: bool) -> str
         resp.raise_for_status()
         data = resp.json()
 
-        tomorrow_day = (datetime.now().day + 1)
+        tomorrow_date = (datetime.now() + timedelta(days=1)).date()
         will_rain = False
         rain_chance = 0
         has_storm = False
 
         for item in data["list"][:16]:
             dt = datetime.fromtimestamp(item["dt"])
-            if dt.day == tomorrow_day:
+            if dt.date() == tomorrow_date:
                 w_main = item["weather"][0]["main"].lower()
                 if "thunderstorm" in w_main:
                     has_storm = True
@@ -412,17 +414,17 @@ def _weather_rain_check(lat: float, lon: float, city: str, is_home: bool) -> str
                     rain_chance = max(rain_chance, item["pop"] * 100)
 
         if has_storm:
-            return (f"Rain check for {city}: Thunderstorms likely tomorrow, "
-                    f"{round(rain_chance)}% precipitation chance.")
+            return (f"Regenausblick für {city}: Morgen sind Gewitter wahrscheinlich, "
+                    f"{round(rain_chance)}% Niederschlagswahrscheinlichkeit.")
         elif will_rain:
-            return (f"Rain check for {city}: Rain expected tomorrow, "
-                    f"{round(rain_chance)}% precipitation chance.")
+            return (f"Regenausblick für {city}: Morgen wird Regen erwartet, "
+                    f"{round(rain_chance)}% Niederschlagswahrscheinlichkeit.")
         else:
-            return f"Rain check for {city}: No rain expected tomorrow."
+            return f"Regenausblick für {city}: Morgen wird kein Regen erwartet."
 
     except Exception as e:
-        logger.error(f"Rain check error: {e}")
-        return f"Error checking rain forecast for {city}: {e}"
+        logger.error("Rain check failed (%s)", type(e).__name__)
+        return WEATHER_UNAVAILABLE
 
 
 def _weather_period(period_text: str, lat: float, lon: float,
@@ -440,8 +442,8 @@ def _weather_period(period_text: str, lat: float, lon: float,
     max_forecast = today + timedelta(days=15)
 
     if start_date > max_forecast:
-        return (f"That period is beyond the 16-day forecast window. "
-                f"Forecast data is available through {max_forecast.strftime('%A, %B %d')}.")
+        return (f"Dieser Zeitraum liegt außerhalb der 16-Tage-Vorhersage. "
+                f"Vorhersagedaten sind bis {max_forecast.strftime('%d.%m.%Y')} verfügbar.")
     if end_date > max_forecast:
         end_date = max_forecast
 
@@ -453,7 +455,7 @@ def _weather_period(period_text: str, lat: float, lon: float,
             if start_date.isoformat() <= r["date"] <= end_date.isoformat()
         ]
         if filtered:
-            lines = [f"Weather for {start_date.strftime('%A %b %d')} – {end_date.strftime('%A %b %d')}:"]
+            lines = [f"Wetter vom {start_date.strftime('%d.%m.%Y')} bis {end_date.strftime('%d.%m.%Y')}:"]
             for row in filtered:
                 dt = datetime.strptime(row["date"], "%Y-%m-%d")
                 day = dt.strftime("%A")
@@ -483,6 +485,6 @@ def _weather_sun(which: str) -> str:
         if sun:
             time_val = sun.get(which, "")
             if time_val:
-                return f"{which.capitalize()} today: {time_val}."
+                return f"{'Sonnenaufgang' if which == 'sunrise' else 'Sonnenuntergang'} heute: {time_val}."
 
-    return f"{which.capitalize()} time is not available yet — data is still being populated."
+    return f"Die Sonnenzeit ist noch nicht verfügbar; die Daten werden noch geladen."

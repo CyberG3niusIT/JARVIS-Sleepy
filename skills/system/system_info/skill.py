@@ -142,13 +142,13 @@ class SystemInfoSkill(BaseSkill):
                     return data['handler']()
             
             self.logger.error(f"Semantic handler not found: {handler_name}")
-            return "I'm sorry, I couldn't process that request."
+            return "Ich konnte diese Anfrage nicht verarbeiten."
         
         # Regular exact pattern match
         handler = self.intents.get(intent, {}).get("handler")
         if handler:
             return handler()
-        return "I'm sorry, I couldn't process that request."
+        return "Ich konnte diese Anfrage nicht verarbeiten."
     
     def get_uptime(self) -> str:
         """Get system uptime"""
@@ -167,23 +167,23 @@ class SystemInfoSkill(BaseSkill):
             # Build response
             parts = []
             if days > 0:
-                parts.append(f"{days} day{'s' if days != 1 else ''}")
+                parts.append(f"{days} Tag{'e' if days != 1 else ''}")
             if hours > 0:
-                parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+                parts.append(f"{hours} Stunde{'n' if hours != 1 else ''}")
             if minutes > 0:
-                parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+                parts.append(f"{minutes} Minute{'n' if minutes != 1 else ''}")
             
             if not parts:
-                uptime_str = "less than a minute"
+                uptime_str = "weniger als eine Minute"
             else:
                 uptime_str = ", ".join(parts)
             
-            response = f"System uptime is {uptime_str}."
+            response = f"Das System läuft seit {uptime_str}."
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error getting uptime: {e}")
-            return self.respond("I'm sorry, I couldn't retrieve the system uptime.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond("Ich konnte die Systemlaufzeit nicht ermitteln.")
     
     def get_disk_space(self) -> str:
         """Get disk space information"""
@@ -197,17 +197,17 @@ class SystemInfoSkill(BaseSkill):
             percent = (usage.used / usage.total) * 100
             
             response = (
-                f"Disk usage: {used_gb:.1f} gigabytes used out of "
-                f"{total_gb:.1f} gigabytes total. "
-                f"{free_gb:.1f} gigabytes free. "
-                f"That's {percent:.0f} percent used."
+                f"Speicherbelegung: {used_gb:.1f} Gigabyte belegt von "
+                f"{total_gb:.1f} Gigabyte insgesamt. "
+                f"{free_gb:.1f} Gigabyte sind frei. "
+                f"Das entspricht {percent:.0f} Prozent Belegung."
             )
             
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error getting disk space: {e}")
-            return self.respond("I'm sorry, I couldn't retrieve disk space information.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond("Ich konnte die Speicherbelegung nicht ermitteln.")
     
     def get_username(self) -> str:
         """Get current username"""
@@ -216,26 +216,26 @@ class SystemInfoSkill(BaseSkill):
             username = os.getenv('USER') or os.getenv('USERNAME')
             
             if username:
-                response = f"You are logged in as {username}."
+                response = f"Sie sind als {username} angemeldet."
             else:
-                response = "I couldn't determine your username."
+                response = "Ich konnte Ihren Benutzernamen nicht ermitteln."
             
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error getting username: {e}")
-            return self.respond("I'm sorry, I couldn't retrieve your username.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond("Ich konnte Ihren Benutzernamen nicht abrufen.")
     
     def get_hostname(self) -> str:
         """Get system hostname"""
         try:
             hostname = platform.node()
-            response = f"The system hostname is {hostname}."
+            response = f"Der Rechnername ist {hostname}."
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error getting hostname: {e}")
-            return self.respond("I'm sorry, I couldn't retrieve the hostname.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond("Ich konnte den Rechnernamen nicht ermitteln.")
     
     def get_cpu_info(self) -> str:
         """Get CPU information"""
@@ -257,15 +257,15 @@ class SystemInfoSkill(BaseSkill):
             if model_match:
                 # Clean up CPU name (remove extra spaces, "(R)", "(TM)", etc.)
                 cpu_name = model_match.replace('(R)', '').replace('(TM)', '').replace('  ', ' ')
-                response = f"You have a {cpu_name} with {cpu_count} cores, {self.honorific}."
+                response = f"Ihr Prozessor ist ein {cpu_name} mit {cpu_count} Kernen, {self.honorific}."
             else:
-                response = f"You have a {cpu_count}-core processor, {self.honorific}."
+                response = f"Ihr Prozessor hat {cpu_count} Kerne, {self.honorific}."
             
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error getting CPU info: {e}")
-            return self.respond(f"I'm having trouble retrieving CPU information, {self.honorific}.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich konnte die CPU-Informationen nicht ermitteln, {self.honorific}.")
     
     def get_memory_info(self) -> str:
         """Get RAM information"""
@@ -299,21 +299,21 @@ class SystemInfoSkill(BaseSkill):
                         percent_used = (used_gb / total_gb) * 100
                         
                         response = (
-                            f"You have {total_gb:.1f} gigabytes of RAM, {self.honorific}. "
-                            f"Currently using {used_gb:.1f} gigabytes, which is {percent_used:.0f} percent."
+                            f"Sie haben {total_gb:.1f} Gigabyte Arbeitsspeicher, {self.honorific}. "
+                            f"Aktuell sind {used_gb:.1f} Gigabyte belegt, also {percent_used:.0f} Prozent."
                         )
                     else:
-                        response = f"You have {total_gb:.1f} gigabytes of RAM installed, {self.honorific}."
+                        response = f"Sie haben {total_gb:.1f} Gigabyte Arbeitsspeicher installiert, {self.honorific}."
                 else:
-                    response = f"You have {total_gb:.1f} gigabytes of RAM installed, {self.honorific}."
+                    response = f"Sie haben {total_gb:.1f} Gigabyte Arbeitsspeicher installiert, {self.honorific}."
             else:
-                response = f"You have {total_gb:.1f} gigabytes of RAM installed, {self.honorific}."
+                response = f"Sie haben {total_gb:.1f} Gigabyte Arbeitsspeicher installiert, {self.honorific}."
             
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error getting memory info: {e}")
-            return self.respond(f"I'm having trouble retrieving memory information, {self.honorific}.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich konnte die Speicherinformationen nicht ermitteln, {self.honorific}.")
     
     def get_all_drives(self) -> str:
         """List all hard drives with model and capacity"""
@@ -326,7 +326,7 @@ class SystemInfoSkill(BaseSkill):
             )
             
             if result.returncode != 0:
-                return self.respond(f"I'm having trouble listing your drives, {self.honorific}.")
+                return self.respond(f"Ich konnte Ihre Laufwerke nicht auflisten, {self.honorific}.")
             
             drives = []
             for line in result.stdout.strip().split('\n'):
@@ -343,28 +343,28 @@ class SystemInfoSkill(BaseSkill):
                         })
             
             if not drives:
-                return self.respond(f"I couldn't find any drives, {self.honorific}.")
+                return self.respond(f"Ich konnte keine Laufwerke finden, {self.honorific}.")
             
             # Build conversational response
             if len(drives) == 1:
                 drive = drives[0]
-                response = f"You have one drive installed, {self.honorific}: a {drive['size']} {drive['model']}."
+                response = f"Sie haben ein Laufwerk installiert, {self.honorific}: {drive['size']} {drive['model']}."
             else:
                 drive_list = []
                 for drive in drives:
-                    drive_list.append(f"a {drive['size']} {drive['model']}")
+                    drive_list.append(f"{drive['size']} {drive['model']}")
                 
                 if len(drives) == 2:
-                    response = f"You have two drives, {self.honorific}: {drive_list[0]} and {drive_list[1]}."
+                    response = f"Sie haben zwei Laufwerke, {self.honorific}: {drive_list[0]} und {drive_list[1]}."
                 else:
-                    drive_str = ', '.join(drive_list[:-1]) + f", and {drive_list[-1]}"
-                    response = f"You have {len(drives)} drives, {self.honorific}: {drive_str}."
+                    drive_str = ', '.join(drive_list[:-1]) + f", und {drive_list[-1]}"
+                    response = f"Sie haben {len(drives)} Laufwerke, {self.honorific}: {drive_str}."
             
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error listing drives: {e}")
-            return self.respond(f"I encountered an error while listing your drives, {self.honorific}.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond(f"Beim Auflisten Ihrer Laufwerke ist ein Fehler aufgetreten, {self.honorific}.")
     
     def get_drive_at_mount(self, path: str) -> str:
         """Get information about drive mounted at specific path"""
@@ -382,7 +382,7 @@ class SystemInfoSkill(BaseSkill):
             )
             
             if result.returncode != 0:
-                return self.respond(f"I don't see anything mounted at {path}, {self.honorific}.")
+                return self.respond(f"Unter {path} ist kein Laufwerk eingebunden, {self.honorific}.")
             
             parts = result.stdout.strip().split()
             if len(parts) >= 3:
@@ -400,19 +400,19 @@ class SystemInfoSkill(BaseSkill):
                     
                     if model_result.returncode == 0:
                         model = model_result.stdout.strip()
-                        response = f"At {path}, you have a {size} {model} formatted as {fstype}, {self.honorific}."
+                        response = f"Unter {path} ist {size} {model} mit dem Dateisystem {fstype} eingebunden, {self.honorific}."
                     else:
-                        response = f"At {path}, you have a {size} drive formatted as {fstype}, {self.honorific}."
+                        response = f"Unter {path} ist ein Laufwerk mit {size} und dem Dateisystem {fstype} eingebunden, {self.honorific}."
                 else:
-                    response = f"At {path}, you have {source} with {size} formatted as {fstype}, {self.honorific}."
+                    response = f"Unter {path} ist {source} mit {size} und dem Dateisystem {fstype} eingebunden, {self.honorific}."
             else:
-                response = f"There is something mounted at {path}, {self.honorific}, but I'm having trouble reading the details."
+                response = f"Unter {path} ist etwas eingebunden, {self.honorific}, aber ich konnte die Details nicht ermitteln."
             
             return self.respond(response)
             
         except Exception as e:
-            self.logger.error(f"Error checking mount at {path}: {e}")
-            return self.respond(f"I encountered an error checking what's mounted at {path}, {self.honorific}.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond(f"Beim Prüfen des Laufwerks unter {path} ist ein Fehler aufgetreten, {self.honorific}.")
     
     def get_gpu_info(self) -> str:
         """Get GPU information."""
@@ -425,7 +425,7 @@ class SystemInfoSkill(BaseSkill):
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     gpu_name = result.stdout.strip()
-                    return self.respond(f"You have an NVIDIA {gpu_name}, {self.honorific}.")
+                    return self.respond(f"Ihre Grafikkarte ist eine NVIDIA {gpu_name}, {self.honorific}.")
             except FileNotFoundError:
                 pass  # nvidia-smi not installed — fall through to lspci
 
@@ -441,13 +441,13 @@ class SystemInfoSkill(BaseSkill):
                             if len(parts) >= 3:
                                 gpu_info = parts[2].strip()
                                 gpu_info = gpu_info.replace('[AMD/ATI]', 'AMD').replace('[NVIDIA]', 'NVIDIA')
-                                return self.respond(f"You have a {gpu_info}, {self.honorific}.")
+                                return self.respond(f"Ihre Grafikkarte ist {gpu_info}, {self.honorific}.")
 
-            return self.respond(f"I'm having trouble detecting your GPU, {self.honorific}.")
+            return self.respond(f"Ich konnte Ihre Grafikkarte nicht erkennen, {self.honorific}.")
 
         except Exception as e:
-            self.logger.error(f"Error getting GPU info: {e}")
-            return self.respond(f"I encountered an error checking your GPU, {self.honorific}.")
+            self.logger.error("System information operation failed (%s)", type(e).__name__)
+            return self.respond(f"Beim Prüfen Ihrer Grafikkarte ist ein Fehler aufgetreten, {self.honorific}.")
 
 
 def create_skill(config, conversation, tts, responses, llm):

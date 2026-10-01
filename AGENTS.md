@@ -11,7 +11,7 @@ Hinweis: Im Wurzelverzeichnis gibt es KEIN `.git`. `.git-store` ist ein Bare-Rep
 | `Mobile-App` | `J.A.R.V.I.S-Mobile-App` | Mobile-App |
 | `Architecture` | `Codex/jarvis-architecture` | Architektur-Arbeit |
 | `Backend-RC` | `Codex/jarvis-sleepy-backend-rc-nhtfgm` | Backend-Release-Candidate |
-| `Dokumentation` | (unversioniert) | Deutsche Doku `00`-`17` |
+| `Dokumentation` | aktueller Main-Branch | Zentraler Rootpfad als Junction auf `Main/Dokumentation`; nur geprüfte Projektdokumente versioniert |
 | `Handoff` | (unversioniert) | Übergabenotizen |
 
 ## WSL-Regeln (Windows-Host)

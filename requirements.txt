@@ -38,6 +38,8 @@ python-xlib>=0.33
 # Web Search (Phase 4)
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+# Canonical DDGS provider used by core/web_research.py.
+ddgs==9.16.0
 
 # Document Generation
 python-pptx>=1.0.2

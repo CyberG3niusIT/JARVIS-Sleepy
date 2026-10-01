@@ -1,0 +1,16 @@
+﻿===== JARVIS MAILCOW RUNTIME SAFETY STATUS V2 =====
+
+===== WSL MAIL CONFIG METADATA =====
+config_exists=no
+state_dir_exists=no
+
+===== PORT 8091 LISTENER =====
+listener_8091=no
+
+===== WEB CONFIG, NON-SECRET FIELDS ONLY =====
+host=0.0.0.0
+port=8091
+tls_enabled=True
+tls_cert_configured=True
+tls_key_configured=True
+auth_token_configured=False

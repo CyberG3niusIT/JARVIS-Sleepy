@@ -1,0 +1,387 @@
+﻿........................................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 16%]
+........................................................................ [ 22%]
+....................F................................................... [ 27%]
+...................................................................... [ 33%]
+........................................................................ [ 38%]
+........................................................................ [ 44%]
+....................................................s................... [ 50%]
+........................................................................ [ 55%]
+........................................................................ [ 61%]
+........................................................................ [ 66%]
+........................................................................ [ 72%]
+Traceback (most recent call last):
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 330, in wrap_session
+    session.exitstatus = doit(config, session) or 0
+                         ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 384, in _main
+    config.hook.pytest_runtestloop(session=session)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/logging.py", line 816, in pytest_runtestloop
+    return (yield)  # Run all the tests.
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/terminal.py", line 708, in pytest_runtestloop
+    result = yield
+             ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 408, in pytest_runtestloop
+    item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/warnings.py", line 90, in pytest_runtest_protocol
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/assertion/__init__.py", line 205, in pytest_runtest_protocol
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/unittest.py", line 612, in pytest_runtest_protocol
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/faulthandler.py", line 102, in pytest_runtest_protocol
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 118, in pytest_runtest_protocol
+    runtestprotocol(item, nextitem=nextitem)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 132, in runtestprotocol
+    rep = call_and_report(item, "setup", log)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 249, in call_and_report
+    call = CallInfo.from_call(
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 361, in from_call
+    result: TResult | None = func()
+                             ^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 250, in <lambda>
+    lambda: runtest_hook(item=item, **kwds),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/logging.py", line 858, in pytest_runtest_setup
+    yield
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/capture.py", line 895, in pytest_runtest_setup
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 170, in pytest_runtest_setup
+    item.session._setupstate.setup(item)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 536, in setup
+    col.setup()
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/python.py", line 1710, in setup
+    self._request._fillfixtures()
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 806, in _fillfixtures
+    item.funcargs[argname] = self.getfixturevalue(argname)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 630, in getfixturevalue
+    fixturedef = self._get_active_fixturedef(argname)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 726, in _get_active_fixturedef
+    fixturedef.execute(request=subrequest)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 1232, in execute
+    result: FixtureValue = ihook.pytest_fixture_setup(
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 53, in run_old_style_hookwrapper
+    return result.get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_result.py", line 103, in get_result
+    raise exc.with_traceback(tb)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 38, in run_old_style_hookwrapper
+    res = yield
+          ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/setuponly.py", line 36, in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 1328, in pytest_fixture_setup
+    result = call_fixture_func(fixturefunc, request, kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 1005, in call_fixture_func
+    fixture_result = fixturefunc(**kwargs)
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/tests/unit/test_school_mobility_skill_loading.py", line 49, in skill_manager
+    manager = SkillManager(config, conversation, _FakeTTS(), _FakeResponses(), llm=None)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/Alex/Projekte/JARVIS-Sleepy/Main/core/skill_manager.py", line 138, in __init__
+    self._embedding_model = SentenceTransformer(
+                            ^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/util/decorators.py", line 46, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/sentence_transformer/model.py", line 194, in __init__
+    super().__init__(
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/base/model.py", line 236, in __init__
+    modules, self.module_kwargs = self._load_modules(
+                                  ^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/base/model.py", line 1081, in _load_modules
+    return self._load_config_modules(model_name_or_path, **load_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/base/model.py", line 1298, in _load_config_modules
+    module = module_class.load(
+             ^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/base/modules/transformer.py", line 2631, in load
+    return cls(model_name_or_path=model_name_or_path, **init_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/util/decorators.py", line 92, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/sentence_transformers/base/modules/transformer.py", line 869, in __init__
+    self.processor = AutoProcessor.from_pretrained(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/transformers/models/auto/processing_auto.py", line 227, in from_pretrained
+    processor_config_file = cached_file(pretrained_model_name_or_path, PROCESSOR_NAME, **cached_file_kwargs)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 294, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/transformers/utils/hub.py", line 438, in cached_files
+    hf_hub_download(
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1035, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1164, in _hf_hub_download_to_cache_dir
+    _get_metadata_or_catch_error(
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1728, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1635, in get_hf_file_metadata
+    response = _httpx_follow_hub_redirects_with_backoff(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 726, in _httpx_follow_hub_redirects_with_backoff
+    response = http_backoff(
+               ^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 599, in http_backoff
+    return next(
+           ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 507, in _http_backoff_base
+    response = client.request(method=method, url=url, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpx/_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpx/_client.py", line 914, in send
+    response = self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpx/_client.py", line 942, in _send_handling_auth
+    response = self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpx/_client.py", line 979, in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpx/_client.py", line 1014, in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpx/_transports/default.py", line 250, in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpcore/_sync/connection_pool.py", line 256, in handle_request
+    raise exc from None
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpcore/_sync/connection_pool.py", line 236, in handle_request
+    response = connection.handle_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpcore/_sync/connection.py", line 101, in handle_request
+    raise exc
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpcore/_sync/connection.py", line 78, in handle_request
+    stream = self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpcore/_sync/connection.py", line 124, in _connect
+    stream = self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/httpcore/_backends/sync.py", line 207, in connect_tcp
+    with map_exceptions(exc_map):
+  File "/usr/lib/python3.12/contextlib.py", line 141, in __exit__
+    def __exit__(self, typ, value, traceback):
+System.Management.Automation.RemoteException
+KeyboardInterrupt
+System.Management.Automation.RemoteException
+During handling of the above exception, another exception occurred:
+System.Management.Automation.RemoteException
+Traceback (most recent call last):
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 344, in wrap_session
+    config.hook.pytest_keyboard_interrupt(excinfo=excinfo)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/terminal.py", line 1012, in pytest_keyboard_interrupt
+    self._keyboardinterrupt_memo = excinfo.getrepr(funcargs=True)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/_code/code.py", line 774, in getrepr
+    return fmt.repr_excinfo(self)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/_code/code.py", line 1224, in repr_excinfo
+    reprtraceback = self.repr_traceback(excinfo_)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/_code/code.py", line 1150, in repr_traceback
+    self.repr_traceback_entry(entry, excinfo if last == entry else None)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/_code/code.py", line 1107, in repr_traceback_entry
+    path = self._makepath(entry_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/_code/code.py", line 1123, in _makepath
+    np = bestrelpath(Path.cwd(), path)
+                     ^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1197, in cwd
+    return cls().absolute()
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1218, in absolute
+    cwd = os.getcwd()
+          ^^^^^^^^^^^
+KeyboardInterrupt
+System.Management.Automation.RemoteException
+During handling of the above exception, another exception occurred:
+System.Management.Automation.RemoteException
+Traceback (most recent call last):
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 229, in _main
+    ret: ExitCode | int = config.hook.pytest_cmdline_main(config=config)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 377, in pytest_cmdline_main
+    return wrap_session(config, _main)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/main.py", line 365, in wrap_session
+    config.hook.pytest_sessionfinish(
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/logging.py", line 888, in pytest_sessionfinish
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/terminal.py", line 961, in pytest_sessionfinish
+    result = yield
+             ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/warnings.py", line 119, in pytest_sessionfinish
+    return (yield)
+            ^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 112, in pytest_sessionfinish
+    session._setupstate.teardown_exact(None)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    fin()
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/nodes.py", line 283, in teardown
+    def teardown(self) -> None:
+System.Management.Automation.RemoteException
+KeyboardInterrupt
+System.Management.Automation.RemoteException
+During handling of the above exception, another exception occurred:
+System.Management.Automation.RemoteException
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pytest/__main__.py", line 9, in <module>
+    raise SystemExit(_console_main())
+                     ^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 253, in _console_main
+    code = _main(prog=_get_prog_name(sys.argv))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 235, in _main
+    config._ensure_unconfigure()
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1212, in _ensure_unconfigure
+    self.hook.pytest_unconfigure(config=self)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/unraisableexception.py", line 172, in pytest_unconfigure
+    gc_collect_harder(gc_collect_iterations)
+  File "/home/alex/jarvis-venv/lib/python3.12/site-packages/_pytest/unraisableexception.py", line 33, in gc_collect_harder
+    gc.collect()
+KeyboardInterrupt
+......................................

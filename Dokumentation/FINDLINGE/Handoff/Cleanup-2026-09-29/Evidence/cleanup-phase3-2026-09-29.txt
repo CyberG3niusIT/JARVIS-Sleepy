@@ -1,0 +1,83 @@
+﻿===== JARVIS CLEANUP PHASE 3 =====
+Start: 2026-09-29 16:44:49 +02:00
+
+===== SAVE Architecture =====
+HEAD=833bcebd74e1c0da506c3c5e71bf93b8625190a8
+BRANCH=claude/jarvis-architecture
+STATUS_ITEMS=1
+PATCH_BYTES=743
+TRACKED_CHANGED_FILES=1
+UNTRACKED_PRESERVED=0
+GENERATED_SKIPPED=0
+DESIGN_REFERENCE_PRESERVED=not_present
+ARCHIVE_FILES=5
+
+===== SAVE Backend-RC =====
+HEAD=b8067965fe0514c8359b46807b8d97f187229b18
+BRANCH=claude/jarvis-sleepy-backend-rc-nhtfgm
+STATUS_ITEMS=1
+PATCH_BYTES=743
+TRACKED_CHANGED_FILES=1
+UNTRACKED_PRESERVED=0
+GENERATED_SKIPPED=0
+DESIGN_REFERENCE_PRESERVED=not_present
+ARCHIVE_FILES=5
+
+===== SAVE UI-Legacy =====
+HEAD=1f533e703925c639b307991d641ad2e02161429f
+BRANCH=claude/jarvis-ui
+STATUS_ITEMS=68
+PATCH_BYTES=119204
+TRACKED_CHANGED_FILES=16
+UNTRACKED_PRESERVED=1833
+GENERATED_SKIPPED=15213
+DESIGN_REFERENCE_PRESERVED=yes
+ARCHIVE_FILES=1945
+
+ARCHIVE VERIFICATION=passed
+REMOVED WORKTREE: docs-stage
+REMOVED WORKTREE: Architecture
+REMOVED WORKTREE: Backend-RC
+REMOVED WORKTREE: UI
+
+===== LEGACY BRANCHES STILL PRESENT =====
+833bcebd74e1c0da506c3c5e71bf93b8625190a8 refs/heads/claude/jarvis-architecture
+b8067965fe0514c8359b46807b8d97f187229b18 refs/heads/claude/jarvis-sleepy-backend-rc-nhtfgm
+1f533e703925c639b307991d641ad2e02161429f refs/heads/claude/jarvis-ui
+
+===== WORKTREES AFTER PHASE 3 =====
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/.git-store
+bare
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/Main
+HEAD a977e1e77ff7f2531dbdfe1a9251b4341541586a
+branch refs/heads/backup/jarvis-runtime-voice-2026-09-24
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/Mobile-App
+HEAD a5b87137926c81e205e7036e1cd89150f43cb03f
+branch refs/heads/J.A.R.V.I.S-Mobile-App
+
+worktree C:/Users/Alex/Projekte/JARVIS-Sleepy/UI-Push
+HEAD aeb7ec821f9e4fd3905009acc05e7c153c4dfb91
+branch refs/heads/J.A.R.V.I.S-UI
+
+
+===== ROOT AFTER PHASE 3 =====
+
+Name          Mode  
+----          ----  
+.agents       d-----
+.claude       d-----
+.codex        d-----
+.git-store    d-----
+AGENTS.md     -a----
+CLAUDE.md     -a----
+Dokumentation d-----
+Handoff       d-----
+Main          d-----
+Mobile-App    d-----
+UI-Push       d-----
+
+
+
+Ende: 2026-09-29 16:45:36 +02:00

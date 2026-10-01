@@ -89,7 +89,8 @@ _keyword_negative_contexts = {
 class SkillManager:
     """Manages skill discovery, loading, and execution"""
     
-    def __init__(self, config, conversation, tts, responses, llm, embedding_device=None):
+    def __init__(self, config, conversation, tts, responses, llm, embedding_device=None,
+                 preload_embeddings=True):
         """
         Initialize skill manager
 
@@ -101,6 +102,8 @@ class SkillManager:
             llm: LLM router
             embedding_device: Device for embedding model ('cuda:0', 'cpu', etc.)
                               If None, reads from config embeddings.voice_device
+            preload_embeddings: Load semantic routing embeddings. Read-only clients
+                                that cannot execute commands do not need this model.
         """
         self.config = config
         self.conversation = conversation
@@ -131,19 +134,20 @@ class SkillManager:
         # Keep the manager's optional semantic layer in a valid state when
         # the model or its runtime dependencies are unavailable.
         self._embedding_model = None
-        try:
-            from sentence_transformers import SentenceTransformer
-            _emb_model = config.get("semantic_matching.model", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-            _emb_cache = config.get("semantic_matching.cache_dir", None)
-            self._embedding_model = SentenceTransformer(
-                _emb_model, device=_emb_device, cache_folder=_emb_cache
-            )
-            self.logger.info(
-                "Semantic embedding model pre-loaded (%s, %s)",
-                _emb_model, _emb_device
-            )
-        except Exception as e:
-            self.logger.warning(f"Failed to pre-load embedding model: {e}")
+        if preload_embeddings:
+            try:
+                from sentence_transformers import SentenceTransformer
+                _emb_model = config.get("semantic_matching.model", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+                _emb_cache = config.get("semantic_matching.cache_dir", None)
+                self._embedding_model = SentenceTransformer(
+                    _emb_model, device=_emb_device, cache_folder=_emb_cache
+                )
+                self.logger.info(
+                    "Semantic embedding model pre-loaded (%s, %s)",
+                    _emb_model, _emb_device
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to pre-load embedding model: {e}")
 
         # Pre-computed embeddings for semantic intent examples.
         # Populated during load_skill() so match-time encoding is query-only.
@@ -1024,7 +1028,7 @@ class SkillManager:
             import traceback
             traceback.print_exc()
             self._emit_skill_audit_event(skill_name, pattern, entities, _t0, None, error=e)
-            return "I'm sorry, I encountered an error processing that request."
+            return "Bei der Verarbeitung deiner Anfrage ist ein Fehler aufgetreten."
     
     def register_virtual_skill(self, name: str, intent_examples: list):
         """Register a lightweight skill for MCP tool semantic pruning.

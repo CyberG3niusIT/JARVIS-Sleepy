@@ -29,7 +29,7 @@ class ReadbackChunk:
     def __init__(self, section_type: str, title: str, content: str,
                  items: list[str] | None = None, pause_after: bool = False):
         self.section_type = section_type    # "preamble", "ingredients", "equipment", "instructions", "notes"
-        self.title = title                  # "Ingredients", "Steps 1 through 4", etc.
+        self.title = title                  # "Zutaten", "Steps 1 through 4", etc.
         self.content = content              # TTS-ready text for this chunk
         self.items = items or []            # Individual items (for ingredient/step lookup)
         self.pause_after = pause_after      # Whether to pause after delivering this chunk
@@ -61,13 +61,13 @@ class ReadbackSession:
     # Parse
     # ------------------------------------------------------------------
 
-    def parse_content(self, raw_tool_result: str, prior_pick: str, llm) -> bool:
+    def parse_content(self, raw_tool_result: str, prior_pick: str, llm, current_request=None) -> bool:
         """Call LLM to parse raw content into structured JSON.
 
         Returns True on success, False on parse failure (caller should
         fall back to unstructured _stream_readback).
         """
-        prompt = self._build_parse_prompt(raw_tool_result, prior_pick)
+        prompt = self._build_parse_prompt(raw_tool_result, prior_pick, current_request=current_request)
         try:
             response = llm.chat(prompt, max_tokens=4096)
         except Exception as e:
@@ -94,42 +94,46 @@ class ReadbackSession:
 
         return self._build_from_json(data)
 
-    def _build_parse_prompt(self, raw_tool_result: str, prior_pick: str) -> str:
+    def _build_parse_prompt(self, raw_tool_result: str, prior_pick: str, current_request=None) -> str:
         """Build the LLM prompt for structured JSON extraction."""
         pick_clause = ""
         if prior_pick:
-            pick_clause = f'Extract content from the source matching "{prior_pick}".\n'
+            pick_clause = f'Entnimm den Inhalt der Quelle, die zu "{prior_pick}" gehört.\n'
+
+        from core.persona import OWNER_LANGUAGE_RULE
 
         return (
-            f"Here are search results:\n\n{raw_tool_result}\n\n"
+            f"{OWNER_LANGUAGE_RULE}\nAktuelle Anfrage: {current_request or 'Gib den Inhalt wieder.'}\n\n"
+            f"Hier sind Suchergebnisse:\n\n{raw_tool_result}\n\n"
             f"{pick_clause}"
-            "Extract the content into this JSON format:\n"
+            "Übertrage den Inhalt in dieses JSON-Format. Formuliere eigene Abschnittstitel und Erläuterungen gemäß der zentralen Sprachregel; "
+            "erhalte fremde Inhalte und genaue Zitate.\n"
             "{\n"
-            '  "title": "Recipe Title",\n'
-            '  "source": "Website Name",\n'
-            '  "preamble": "Brief intro (1-2 sentences, or null)",\n'
+            '  "title": "Rezepttitel",\n'
+            '  "source": "Name der Webseite",\n'
+            '  "preamble": "Kurze Einleitung (1-2 Sätze oder null)",\n'
             '  "sections": [\n'
-            '    {"type": "ingredients", "title": "Ingredients", "items": ["2 1/4 tsp active dry yeast", ...]},\n'
-            '    {"type": "equipment", "title": "Equipment Needed", "items": [...]},\n'
-            '    {"type": "instructions", "title": "Instructions", "steps": [\n'
-            '      {"step": 1, "text": "Dissolve yeast in warm water..."},\n'
-            '      {"step": 2, "text": "Add flour and salt..."}\n'
+            '    {"type": "ingredients", "title": "Zutaten", "items": ["2 1/4 TL Trockenhefe", ...]},\n'
+            '    {"type": "equipment", "title": "Benötigte Ausstattung", "items": [...]},\n'
+            '    {"type": "instructions", "title": "Anleitung", "steps": [\n'
+            '      {"step": 1, "text": "Hefe in warmem Wasser auflösen ..."},\n'
+            '      {"step": 2, "text": "Mehl und Salz hinzufügen ..."}\n'
             "    ]},\n"
-            '    {"type": "notes", "title": "Tips", "text": "For best results..."}\n'
+            '    {"type": "notes", "title": "Hinweise", "text": "Für beste Ergebnisse ..."}\n'
             "  ]\n"
             "}\n"
-            "RULES:\n"
-            "1. Extract from SAME source as the prior pick ONLY.\n"
-            "2. Include ALL items and steps — DO NOT skip or summarize.\n"
-            "3. For list sections (ingredients, equipment): use \"items\" array.\n"
-            "4. For step sections (instructions): use \"steps\" array with step numbers.\n"
-            "5. For narrative (preamble, notes): use \"text\" string.\n"
-            "6. Return ONLY valid JSON — no markdown fencing, no explanation."
+            "REGELN:\n"
+            "1. Verwende ausschließlich dieselbe Quelle wie bei der vorherigen Auswahl.\n"
+            "2. Übernimm alle Einträge und Schritte; nichts auslassen oder zusammenfassen.\n"
+            "3. Listen (ingredients, equipment) verwenden das Array \"items\".\n"
+            "4. Schritte (instructions) verwenden das Array \"steps\" mit Schrittnummern.\n"
+            "5. Fließtext (preamble, notes) verwendet die Zeichenkette \"text\".\n"
+            "6. Gib nur gültiges JSON aus, ohne Markdown-Rahmen oder Erklärung."
         )
 
     def _build_from_json(self, data: dict) -> bool:
         """Build chunks from parsed JSON data.  Returns False on inadequate data."""
-        self.source_title = data.get("source") or data.get("title") or "the source"
+        self.source_title = data.get("source") or data.get("title") or "der Quelle"
 
         sections = data.get("sections")
         if not sections or not isinstance(sections, list):
@@ -141,14 +145,14 @@ class ReadbackSession:
         if preamble:
             self.chunks.append(ReadbackChunk(
                 section_type="preamble",
-                title="Introduction",
+                title="Einleitung",
                 content=preamble,
             ))
 
         # Build section chunks
         for section in sections:
             s_type = section.get("type", "")
-            s_title = section.get("title", s_type.title())
+            s_title = section.get("title", {"ingredients": "Zutaten", "equipment": "Ausstattung", "instructions": "Anleitung", "notes": "Hinweise"}.get(s_type, "Abschnitt"))
 
             if s_type in ("ingredients", "equipment"):
                 items = section.get("items", [])
@@ -229,11 +233,11 @@ class ReadbackSession:
         if len(steps) <= self.STEP_BATCH_SIZE:
             # Single batch
             content = "\n".join(
-                f"Step {s.get('step', i+1)}: {s.get('text', '')}"
+                f"Schritt {s.get('step', i+1)}: {s.get('text', '')}"
                 for i, s in enumerate(steps)
             )
             step_nums = [s.get("step", i+1) for i, s in enumerate(steps)]
-            title = f"Steps {step_nums[0]} through {step_nums[-1]}" if len(steps) > 1 else f"Step {step_nums[0]}"
+            title = f"Schritte {step_nums[0]} bis {step_nums[-1]}" if len(steps) > 1 else f"Schritt {step_nums[0]}"
             self.chunks.append(ReadbackChunk(
                 section_type="instructions",
                 title=title,
@@ -245,11 +249,11 @@ class ReadbackSession:
             for batch_start in range(0, len(steps), self.STEP_BATCH_SIZE):
                 batch = steps[batch_start:batch_start + self.STEP_BATCH_SIZE]
                 content = "\n".join(
-                    f"Step {s.get('step', batch_start+i+1)}: {s.get('text', '')}"
+                    f"Schritt {s.get('step', batch_start+i+1)}: {s.get('text', '')}"
                     for i, s in enumerate(batch)
                 )
                 step_nums = [s.get("step", batch_start+i+1) for i, s in enumerate(batch)]
-                title = f"Steps {step_nums[0]} through {step_nums[-1]}" if len(batch) > 1 else f"Step {step_nums[0]}"
+                title = f"Schritte {step_nums[0]} bis {step_nums[-1]}" if len(batch) > 1 else f"Schritt {step_nums[0]}"
                 self.chunks.append(ReadbackChunk(
                     section_type="instructions",
                     title=title,
@@ -325,7 +329,7 @@ class ReadbackSession:
         """Look up a specific step by number."""
         for step in self.all_steps:
             if step["step"] == n:
-                return f"Step {n}: {step['text']}"
+                return f"Schritt {n}: {step['text']}"
         return None
 
     def search_ingredients(self, query: str) -> str | None:
@@ -333,7 +337,7 @@ class ReadbackSession:
         query_lower = query.lower()
         for item in self.all_ingredients:
             if query_lower in item.lower():
-                return f"The recipe calls for {item}."
+                return f"Das Rezept benötigt {item}."
         return None
 
     def get_section(self, name: str) -> ReadbackChunk | None:
@@ -353,11 +357,11 @@ class ReadbackSession:
         """End-of-readback summary."""
         parts = []
         if self.all_ingredients:
-            parts.append(f"{len(self.all_ingredients)} ingredients")
+            parts.append(f"{len(self.all_ingredients)} Zutaten")
         if self.all_steps:
-            parts.append(f"{len(self.all_steps)} steps")
-        detail = ", ".join(parts) if parts else "the content"
-        return f"That's everything from {self.source_title} — {detail}."
+            parts.append(f"{len(self.all_steps)} Schritte")
+        detail = ", ".join(parts) if parts else "der Inhalt"
+        return f"Das war alles aus {self.source_title}: {detail}."
 
     def get_size(self) -> str:
         """Classify content size: 'small', 'medium', or 'large'."""

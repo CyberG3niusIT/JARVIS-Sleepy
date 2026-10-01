@@ -81,7 +81,7 @@ class TestExecuteToolAuditGatedByPrivacy:
 
         result = tool_registry.execute_tool("broken_tool", {})
 
-        assert "Error executing broken_tool" in result
+        assert "Fehler: Das Werkzeug 'broken_tool' konnte die Anfrage nicht ausführen." in result
         assert fake_el.calls == []
 
 

@@ -1,0 +1,11 @@
+name: google_calendar
+version: 1.0.0
+description: Google Kalender mit expliziter Bestätigung für Änderungen
+category: personal
+enabled: true
+priority: 8
+dependencies: []
+keywords:
+  - kalender
+  - termin
+  - termine

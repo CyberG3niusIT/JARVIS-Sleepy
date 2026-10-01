@@ -38,9 +38,9 @@ if cmd == "import-environment":
     save(); sys.exit(0)
 def prop(unit, key):
     if unit == "jarvis-desktop-api.service":
-        return {"LoadState":s["desktop_load"], "FragmentPath":s["desktop_fragment"], "ExecStart":s["desktop_exec"], "ActiveState":"active" if s["desktop_active"] else "inactive", "MainPID":"440"}[key]
+        return {"LoadState":s["desktop_load"], "FragmentPath":s["desktop_fragment"], "ExecStart":s["desktop_exec"], "ActiveState":s.get("desktop_active_state", "active" if s["desktop_active"] else "inactive"), "Result":s.get("desktop_result", "success"), "MainPID":s.get("desktop_main_pid", "440" if s["desktop_active"] else "0")}[key]
     if unit == "jarvis.service":
-        return {"LoadState":s["jarvis_load"], "FragmentPath":s["jarvis_fragment"], "ExecStart":s["jarvis_exec"], "ActiveState":"active" if s["jarvis_active"] else "inactive", "InvocationID":s["invocation"], "MainPID":"430"}[key]
+        return {"LoadState":s["jarvis_load"], "FragmentPath":s["jarvis_fragment"], "ExecStart":s["jarvis_exec"], "ActiveState":s.get("jarvis_active_state", "active" if s["jarvis_active"] else "inactive"), "Result":s.get("jarvis_result", "success"), "InvocationID":s["invocation"], "MainPID":s.get("jarvis_main_pid", "430" if s["jarvis_active"] else "0")}[key]
     if unit == "chatterbox.service":
         return {"LoadState":"not-found", "FragmentPath":"", "ExecStart":"", "ActiveState":"inactive", "User":"", "MainPID":"0", "ControlGroup":""}[key]
     if unit == "jarvis-chatterbox.service":
@@ -53,6 +53,8 @@ def prop(unit, key):
     return {"LoadState":"loaded", "FragmentPath":"/home/alex/.config/systemd/user/"+llm_unit, "ExecStart":os.environ.get("FAKE_LLM_EXECSTART", "path=/home/alex/llama.cpp/build/bin/llama-server --host 127.0.0.1 --port 8080"), "ActiveState":os.environ.get("FAKE_LLM_ACTIVE_STATE") or ("active" if s["llm_active"] else "inactive"), "MainPID":"410"}[key]
 if cmd == "show":
     unit = a[1]; key = next(x.split("=",1)[1] for x in a if x.startswith("--property="))
+    if unit == os.environ.get("FAKE_SHOW_FAIL_UNIT") and key == os.environ.get("FAKE_SHOW_FAIL_PROPERTY"):
+        sys.exit(1)
     print(prop(unit, key)); sys.exit(0)
 if cmd == "link":
     if a[1].endswith("jarvis-desktop-api.service"):
@@ -60,18 +62,23 @@ if cmd == "link":
     s["jarvis_load"]="loaded"; s["jarvis_fragment"]=os.path.join(os.environ["FAKE_ROOT"],"systemd/jarvis.service"); save(); sys.exit(0)
 if cmd in ("start", "stop", "restart") and a[1] == "jarvis-desktop-api.service":
     # Recorded apart from "calls" so the voice/LLM/Chatterbox expectations stay exactly as they are.
-    s["desktop_calls"].append(cmd); s["desktop_active"] = cmd != "stop"; save(); sys.exit(0)
+    s["desktop_calls"].append(cmd); s["desktop_active"] = cmd != "stop"
+    if cmd == "stop":
+        s.update(s.get("desktop_after_stop", {}))
+    save(); sys.exit(int(s.get("desktop_stop_exit", 0)) if cmd == "stop" else 0)
 if cmd in ("start", "stop", "restart"):
     unit=a[1]; s["calls"].append(cmd+":"+unit)
     if unit == "jarvis.service":
         s["jarvis_active"] = cmd != "stop"
+        if cmd == "stop":
+            s.update(s.get("jarvis_after_stop", {}))
         if cmd != "stop":
             s["invocation"] = "run-"+str(len(s["calls"]))
             with open(os.path.join(os.environ["FAKE_PROC_ROOT"], "430", "environ"), "wb") as f:
                 f.write(("PATH=" + s["manager_path"] + "\0WSL_INTEROP=" + s.get("manager_interop", "") + "\0").encode())
     elif unit == os.environ.get("FAKE_LLM_UNIT", "llama-server.service"): s["llm_active"] = cmd == "start"
     elif unit == "jarvis-chatterbox.service": s["chat_started"] = cmd == "start"
-    save(); sys.exit(0)
+    save(); sys.exit(int(s.get("jarvis_stop_exit", 0)) if unit == "jarvis.service" and cmd == "stop" else 0)
 if cmd == "is-active":
     unit=a[-1]; active=s["jarvis_active"] if unit == "jarvis.service" else s["desktop_active"] if unit == "jarvis-desktop-api.service" else s["chat_started"]
     sys.exit(0 if active else 3)
@@ -621,6 +628,95 @@ def test_stop_records_stopped(tmp_path):
     assert (record["action"], record["phase"], record["result"]) == ("stop", "finished", "STOPPED")
 
 
+@pytest.mark.parametrize("unit_prefix", ["jarvis", "desktop"])
+@pytest.mark.parametrize("action", ["stop", "restart"])
+@pytest.mark.parametrize("bad_state", [
+    {"result": "timeout"},
+    {"active_state": "failed", "result": "timeout"},
+    {"active_state": "active"},
+    {"main_pid": "123"},
+    {"result": ""},
+])
+def test_unclean_stop_records_error_and_never_restarts(tmp_path, unit_prefix, action, bad_state):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state["jarvis_active"] = True
+    state["desktop_active"] = True
+    state[f"{unit_prefix}_after_stop"] = {
+        f"{unit_prefix}_{key}": value for key, value in bad_state.items()
+    }
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    result = _invoke(root, env, action)
+    assert result.returncode != 0
+    assert "nicht sauber gestoppt" in result.stdout
+    assert "STOPPED:" not in result.stdout and "READY:" not in result.stdout
+    record = _record(tmp_path)
+    assert (record["action"], record["phase"], record["result"]) == (action, "finished", "ERROR")
+    state = _state(state_file)
+    assert not any(call.startswith("start:") for call in state["calls"])
+    assert "start" not in state["desktop_calls"]
+
+
+@pytest.mark.parametrize("unit_prefix", ["jarvis", "desktop"])
+def test_preexisting_failed_unit_is_not_reported_clean(tmp_path, unit_prefix):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state[f"{unit_prefix}_active"] = False
+    state[f"{unit_prefix}_active_state"] = "failed"
+    state[f"{unit_prefix}_result"] = "timeout"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    result = _invoke(root, env, "stop")
+    assert result.returncode != 0 and "STOPPED:" not in result.stdout
+    assert _record(tmp_path)["result"] == "ERROR"
+
+
+@pytest.mark.parametrize("desktop_failure", ["timeout", "stop_exit"])
+def test_desktop_stop_failure_still_stops_voice_and_keeps_restart_failed(tmp_path, desktop_failure):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state["jarvis_active"] = state["desktop_active"] = True
+    if desktop_failure == "timeout":
+        state["desktop_after_stop"] = {"desktop_active_state": "failed", "desktop_result": "timeout"}
+    else:
+        state["desktop_stop_exit"] = 1
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    result = _invoke(root, env, "restart")
+    assert result.returncode != 0
+    final_state = _state(state_file)
+    assert "stop:jarvis.service" in final_state["calls"]
+    assert not final_state["jarvis_active"]
+    assert not any(call.startswith("start:") for call in final_state["calls"])
+    assert "start" not in final_state["desktop_calls"]
+    assert _record(tmp_path)["result"] == "ERROR"
+
+
+@pytest.mark.parametrize("unit", ["jarvis.service", "jarvis-desktop-api.service"])
+@pytest.mark.parametrize("property_name", ["LoadState", "ActiveState", "Result", "MainPID"])
+def test_stop_inspection_failure_is_error(tmp_path, unit, property_name):
+    root, state_file, env = _sandbox(tmp_path)
+    env["FAKE_SHOW_FAIL_UNIT"] = unit
+    env["FAKE_SHOW_FAIL_PROPERTY"] = property_name
+    result = _invoke(root, env, "stop")
+    assert result.returncode != 0
+    assert "konnte nicht geprüft werden" in result.stdout
+    assert _record(tmp_path)["result"] == "ERROR"
+
+
+@pytest.mark.parametrize("unit_prefix", ["jarvis", "desktop"])
+def test_systemctl_stop_failure_cannot_start_restart(tmp_path, unit_prefix):
+    root, state_file, env = _sandbox(tmp_path)
+    state = _state(state_file)
+    state["jarvis_active"] = state["desktop_active"] = True
+    state[f"{unit_prefix}_stop_exit"] = 1
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    result = _invoke(root, env, "restart")
+    assert result.returncode != 0
+    assert _record(tmp_path)["result"] == "ERROR"
+    state = _state(state_file)
+    assert not any(call.startswith("start:") for call in state["calls"])
+    assert "start" not in state["desktop_calls"]
+
+
 def test_restart_keeps_one_restart_record_from_stop_through_start(tmp_path):
     root, state_file, env = _sandbox(tmp_path)
     state = _state(state_file)
@@ -800,4 +896,3 @@ def test_failed_start_before_the_desktop_step_never_touches_it(tmp_path):
     result = _invoke(root, env)
     assert result.returncode != 0
     assert _state(state_file)["desktop_calls"] == []
-

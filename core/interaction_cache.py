@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.logger import get_logger
+from core.privacy_gate import Capability, persistence_allowed
 
 
 @dataclass
@@ -286,11 +287,13 @@ class InteractionCache:
     # Core operations
     # ------------------------------------------------------------------
 
-    def store(self, artifact: Artifact) -> str:
+    def store(self, artifact: Artifact) -> Optional[str]:
         """Store an artifact in hot tier (in-memory) + SQLite (crash safety).
 
         Returns the artifact_id.
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return None
         if not artifact.created_at:
             artifact.created_at = time.time()
 
@@ -299,14 +302,10 @@ class InteractionCache:
                           artifact.window_id,
                           f" image={artifact.metadata.get('image_path')}" if artifact.metadata and artifact.metadata.get('image_path') else "")
 
-        # Hot tier
-        with self._hot_lock:
-            if artifact.window_id not in self._hot:
-                self._hot[artifact.window_id] = []
-            self._hot[artifact.window_id].append(artifact)
-
         # SQLite (crash safety)
         with self._db_lock:
+            if not persistence_allowed(Capability.MEMORY_WRITE):
+                return None
             conn = self._get_conn()
             try:
                 conn.execute(
@@ -322,8 +321,14 @@ class InteractionCache:
             except Exception as e:
                 self.logger.warning("Failed to persist artifact %s: %s",
                                     artifact.artifact_id, e)
+                conn.rollback()
+                raise
             finally:
                 conn.close()
+
+        # Publish only successfully persisted artifacts to the shared hot tier.
+        with self._hot_lock:
+            self._hot.setdefault(artifact.window_id, []).append(artifact)
 
         self.logger.debug(
             "Stored artifact %s [%s] turn=%d idx=%d window=%s",
@@ -446,6 +451,8 @@ class InteractionCache:
         Bubbles half the weight to the parent artifact (if any),
         so top-level artifacts accumulate engagement from sub-item nav.
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return None
         weight = self.ACCESS_WEIGHTS.get(access_type, 1.0)
         now = time.time()
 
@@ -531,6 +538,8 @@ class InteractionCache:
         Returns True if a new link was created, False if it already existed
         or the IDs are identical.
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return None
         if id_a == id_b:
             return False
 
@@ -940,6 +949,8 @@ class InteractionCache:
         Regex-first (numbered steps, bullets, sections), LLM fallback.
         Respects _MAX_DECOMPOSE_DEPTH to prevent unbounded nesting.
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return []
         existing = self.get_children(parent_id, window_id)
         if existing:
             return existing
@@ -1068,6 +1079,8 @@ class InteractionCache:
         Called on conversation window close. Updates tier in SQLite,
         removes from in-memory hot dict.
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return None
         if not window_id:
             return
 
@@ -1107,6 +1120,8 @@ class InteractionCache:
 
         Returns the list of promoted Artifact objects for session summary.
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return []
         if not window_id:
             return []
 
@@ -1291,6 +1306,8 @@ class InteractionCache:
         (readback, step-through, section drill) works on recalled content.
         Returns the rehydrated artifacts (new copies).
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return []
         if not artifact_ids or not window_id:
             return []
 
@@ -1714,6 +1731,8 @@ class InteractionCache:
 
     def _upsert_knowledge(self, conn, insight: dict) -> str:
         """Insert or update a consolidated knowledge row. Returns knowledge_id."""
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return None
         now = time.time()
         topic_key = insight["topic_key"]
         pattern_type = insight["pattern_type"]
@@ -1810,6 +1829,8 @@ class InteractionCache:
 
     def _promote_mature_insights(self, conn, user_id, memory_manager=None):
         """Push high-confidence consolidated knowledge to memory_manager facts."""
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return
         if not memory_manager:
             return
 
@@ -1835,10 +1856,7 @@ class InteractionCache:
                     SET promoted = 1, updated_at = ?
                     WHERE knowledge_id = ?
                 """, (time.time(), row["knowledge_id"]))
-                self.logger.info(
-                    "Promoted consolidated insight to facts: %s (kid=%s)",
-                    row["content"][:60], row["knowledge_id"][:16],
-                )
+                self.logger.info("Promoted consolidated insight to facts")
 
     def consolidate(self, user_id="user", memory_manager=None):
         """Scan cold-tier artifacts and extract/update consolidated knowledge.
@@ -1846,6 +1864,8 @@ class InteractionCache:
         Called from background thread at window close. Safe to run frequently
         as it's idempotent (updates existing insights, doesn't duplicate).
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE):
+            return None
         with self._db_lock:
             conn = self._get_conn()
             try:
@@ -1871,6 +1891,9 @@ class InteractionCache:
                 # Promote mature insights to memory_manager
                 self._promote_mature_insights(conn, user_id, memory_manager)
 
+                if not persistence_allowed(Capability.MEMORY_WRITE):
+                    conn.rollback()
+                    return
                 conn.commit()
                 self.logger.info(
                     "Consolidation complete: %d insights processed for %s",
@@ -1952,7 +1975,7 @@ _TOOL_ARTIFACT_META = {
 }
 
 # Results starting with these prefixes are transient — don't cache
-_SKIP_PREFIXES = ("Error", "BLOCKED", "CONFIRMATION REQUIRED")
+_SKIP_PREFIXES = ("Error", "BLOCKED", "CONFIRMATION REQUIRED", "Fehler:", "Gesperrt:", "Bestätigung erforderlich:")
 
 
 def store_tool_artifact(tool_name: str, tool_args: dict, tool_result: str,

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core.logger import get_logger
+from core.privacy_gate import Capability, persistence_allowed
 
 logger = get_logger(__name__)
 
@@ -220,12 +221,14 @@ class EventLogger:
              duration_ms: float = None, stage: str = None,
              status: str = None, speaker_id: str = None,
              model: str = None, latency_ms: float = None,
-             timestamp: float = None, observation_id: str = None) -> str:
+             timestamp: float = None, observation_id: str = None) -> Optional[str]:
         """Emit a structured observation event.
 
         Returns the observation ID for parent-child linking.
         This is the hot-path call — kept minimal for low latency.
         """
+        if not persistence_allowed(Capability.CONTENT_LOGGING):
+            return None
         if category not in CATEGORIES:
             logger.warning("EventLogger: unknown category '%s', recording anyway", category)
         if severity not in SEVERITIES:
@@ -275,6 +278,8 @@ class EventLogger:
         }
 
         with self._db_lock:
+            if not persistence_allowed(Capability.CONTENT_LOGGING):
+                return None
             conn = sqlite3.connect(str(self.db_path))
             try:
                 conn.execute("""
@@ -311,6 +316,8 @@ class EventLogger:
                   data_type: str = "numeric", source: str = "automated",
                   comment: str = None, timestamp: float = None) -> str:
         """Attach a post-hoc score to an observation."""
+        if not persistence_allowed(Capability.CONTENT_LOGGING):
+            return None
         if data_type not in SCORE_TYPES:
             logger.warning("EventLogger: unknown score type '%s'", data_type)
         if source not in SCORE_SOURCES:
@@ -344,6 +351,8 @@ class EventLogger:
                        trace_id: str = None, confidence: float = None,
                        timestamp: float = None) -> str:
         """Store a natural language reflection for future LLM consumption."""
+        if not persistence_allowed(Capability.CONTENT_LOGGING):
+            return None
         if category not in REFLECTION_CATEGORIES:
             logger.warning("EventLogger: unknown reflection category '%s'", category)
 
@@ -749,6 +758,8 @@ class EventLogger:
     def mark_reflection_applied(self, reflection_id: str,
                                  outcome: str = None) -> None:
         """Mark a reflection as applied with optional outcome."""
+        if not persistence_allowed(Capability.CONTENT_LOGGING):
+            return None
         with self._db_lock:
             conn = sqlite3.connect(str(self.db_path))
             try:
@@ -770,6 +781,8 @@ class EventLogger:
         Parses the detail strings from each check to extract numeric values.
         Stores one row per metric per snapshot.
         """
+        if not persistence_allowed(Capability.CONTENT_LOGGING):
+            return None
         import re as _re
         if timestamp is None:
             timestamp = time.time()
@@ -903,6 +916,8 @@ class EventLogger:
         Returns:
             The odd event ID.
         """
+        if not persistence_allowed(Capability.CONTENT_LOGGING):
+            return None
         now = time.time()
         if timestamp is None:
             timestamp = now
@@ -936,6 +951,8 @@ class EventLogger:
                           category: str = None,
                           description: str = None) -> None:
         """Update an odd event with root cause analysis or resolution."""
+        if not persistence_allowed(Capability.CONTENT_LOGGING):
+            return None
         updates = []
         params = []
         if root_cause is not None:

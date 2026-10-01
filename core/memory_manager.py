@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.logger import get_logger
-from core.privacy_gate import get_privacy_gate, Capability
+from core.privacy_gate import get_privacy_gate, Capability, persistence_allowed
 
 
 # Singleton instance
@@ -471,6 +471,17 @@ class MemoryManager:
     def _init_faiss(self):
         """Load or create FAISS index for semantic search over history."""
         if not self.embedding_model:
+            if self.read_only:
+                # The desktop only reports stored index statistics. Loading the
+                # index does not require the routing model or its private metadata.
+                index_file = self.faiss_index_path / "default.index"
+                if index_file.is_file():
+                    try:
+                        import faiss
+                        self.faiss_index = faiss.read_index(str(index_file))
+                    except (ImportError, RuntimeError, OSError):
+                        self.logger.warning("Stored FAISS statistics unavailable in read-only mode")
+                return
             self.logger.info("No embedding model provided — FAISS indexing disabled")
             return
 
@@ -574,6 +585,8 @@ class MemoryManager:
         place.  os.replace() is atomic on Linux, so a crash mid-save leaves
         the previous good copy intact instead of a half-written file.
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE, self._privacy_gate):
+            return None
         if self._reject_write("faiss_save"):
             return
         if self.faiss_index is None:
@@ -609,6 +622,8 @@ class MemoryManager:
 
     def index_message(self, message: dict):
         """Embed and add a single message to FAISS index. ~1-2ms."""
+        if not persistence_allowed(Capability.MEMORY_WRITE, self._privacy_gate):
+            return None
         if self._reject_write("index_message"):
             return
         if not self._privacy_gate.allow(Capability.EMBEDDING_GENERATE):
@@ -639,6 +654,8 @@ class MemoryManager:
 
     def backfill_history(self):
         """One-time: embed all existing chat_history.jsonl messages into FAISS."""
+        if not persistence_allowed(Capability.MEMORY_WRITE, self._privacy_gate):
+            return 0
         if self._reject_write("backfill_history"):
             return 0
         if self.faiss_index is None or not self.embedding_model:
@@ -704,8 +721,8 @@ class MemoryManager:
 
         try:
             import numpy as np
-            self.logger.debug("FAISS search: query=%.60s top_k=%d index_size=%d",
-                              query, top_k, self.faiss_index.ntotal)
+            self.logger.debug("FAISS search: top_k=%d index_size=%d",
+                              top_k, self.faiss_index.ntotal)
             query_embedding = self.embedding_model.encode(query, normalize_embeddings=True, show_progress_bar=False)
             scores, indices = self.faiss_index.search(
                 np.array([query_embedding], dtype=np.float32), top_k
@@ -1209,7 +1226,7 @@ class MemoryManager:
             birth = datetime.strptime(f"{month_str} {day} {year}", "%B %d %Y")
             today = datetime.now()
             age = today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
-            return f"{phrase}, making you currently {age} years old"
+            return f"{phrase}, derzeit {age} Jahre alt"
         except (ValueError, TypeError):
             return phrase
 
@@ -1468,7 +1485,7 @@ class MemoryManager:
                 if fact_id:
                     fact["fact_id"] = fact_id
                     extracted.append(fact)
-                    self.logger.info(f"Extracted fact [{category}]: {fact_content}")
+                    self.logger.info("Extracted fact category=%s", category)
 
                 # "remember that..." is an explicit instruction — don't also
                 # match implicit patterns (avoids duplicates like Tool→preference + Tool→general)
@@ -1621,7 +1638,7 @@ class MemoryManager:
                     content = fact_data["content"].strip()
                     # Validation gate: fact must start with the user's name
                     if not content.lower().startswith(user_name.lower()):
-                        self.logger.warning("Batch extraction rejected (no name prefix): %s", content[:80])
+                        self.logger.warning("Batch extraction rejected (no name prefix)")
                         continue
                     if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
                         return
@@ -1735,7 +1752,7 @@ class MemoryManager:
                     content = fact_data["content"].strip()
                     # Validation gate: fact must start with the user's name
                     if not content.lower().startswith(user_name.lower()):
-                        self.logger.warning("Per-turn extraction rejected (no name prefix): %s", content[:80])
+                        self.logger.warning("Per-turn extraction rejected (no name prefix)")
                         continue
                     if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
                         return
@@ -1781,7 +1798,7 @@ class MemoryManager:
         """
         if self._reject_write("store_fact"):
             return None
-        if not self._privacy_gate.allow(Capability.MEMORY_WRITE):
+        if not persistence_allowed(Capability.MEMORY_WRITE, self._privacy_gate):
             # PRIV-003: no candidate/confirmed write of any kind while
             # privacy is active — including from a background extraction
             # thread that started before privacy was entered (see the
@@ -2176,11 +2193,11 @@ class MemoryManager:
         # Use natural phrase form for better LLM context
         phrase = self._fact_to_phrase(best) or best['content']
 
-        self.logger.info(f"Proactive surfacing: '{phrase[:60]}' "
-                         f"(score={best['score']:.3f})")
+        self.logger.info("Proactive surfacing score=%.3f", best["score"])
 
         # Use stronger injection for facts with pre-computed values (e.g. age)
-        if "currently " in phrase and "years old" in phrase:
+        if (("currently " in phrase and "years old" in phrase)
+                or ("derzeit " in phrase and "Jahre alt" in phrase)):
             return (
                 f"KNOWN FACT: {phrase}. "
                 f"Use this pre-computed value — do NOT calculate it yourself."
@@ -2292,6 +2309,8 @@ class MemoryManager:
         """
         if self._reject_write("persist_interaction"):
             return None
+        if not persistence_allowed(Capability.MEMORY_WRITE, self._privacy_gate):
+            return None
         self.logger.debug("persist_interaction: type=%s query_len=%d answer_len=%d user=%s",
                           interaction_type, len(query) if query else 0,
                           len(answer) if answer else 0, user_id)
@@ -2314,6 +2333,8 @@ class MemoryManager:
         metadata_json = json.dumps(metadata) if metadata else None
 
         with self._db_lock:
+            if not persistence_allowed(Capability.MEMORY_WRITE, self._privacy_gate):
+                return None
             conn = self._get_conn()
             try:
                 conn.execute(
@@ -2325,12 +2346,11 @@ class MemoryManager:
                      answer_summary, metadata_json, time.time(), embedding_blob)
                 )
                 conn.commit()
-                self.logger.debug(
-                    f"Persisted {interaction_type} interaction: "
-                    f"'{query[:50]}'"
-                )
+                self.logger.debug("Persisted interaction type=%s", interaction_type)
             except Exception as e:
-                self.logger.warning(f"Failed to persist interaction: {e}")
+                conn.rollback()
+                self.logger.warning("Failed to persist interaction (%s)", type(e).__name__)
+                raise
             finally:
                 conn.close()
 
@@ -2350,6 +2370,8 @@ class MemoryManager:
             duration_seconds: Window duration in seconds (for metadata)
             user_id: User who owned the session
         """
+        if not persistence_allowed(Capability.MEMORY_WRITE, self._privacy_gate):
+            return None
         if self._reject_write("promote_session_artifacts"):
             return
         if not artifacts:

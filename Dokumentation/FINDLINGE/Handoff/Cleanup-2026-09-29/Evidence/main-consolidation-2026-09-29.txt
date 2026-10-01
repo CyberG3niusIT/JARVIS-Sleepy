@@ -1,0 +1,1221 @@
+﻿===== JARVIS MAIN CONSOLIDATION =====
+Created: 2026-09-29 16:48:51 +02:00
+
+===== CURRENT GIT STATE =====
+HEAD=a977e1e77ff7f2531dbdfe1a9251b4341541586a
+BRANCH=backup/jarvis-runtime-voice-2026-09-24
+UPSTREAM=origin/backup/jarvis-runtime-voice-2026-09-24
+STATUS_ITEMS=121
+ M .env.example
+ M .github/pull_request_template.md
+ M JARVIS.Runtime.psm1
+ M PROJECT_OVERVIEW.md
+ M README.md
+ M config.yaml
+ M core/claude_consultation.py
+ M core/context_window.py
+ M core/continuous_listener.py
+ M core/conversation.py
+ M core/conversation_router.py
+ M core/governance.py
+ M core/gpu_swap.py
+ M core/health_check.py
+ M core/llm_router.py
+ M core/llm_server_client.py
+ M core/memory_manager.py
+ M core/metrics_tracker.py
+ M core/observation_collector.py
+ M core/pipeline.py
+ M core/presence_detector.py
+ M core/privacy_gate.py
+ M core/stt_qwen3.py
+ M core/tool_registry.py
+ M core/tts.py
+ M core/watchdog.py
+ M docs/ARCHITECTURE.md
+ M docs/DEVELOPMENT.md
+ M docs/DEVELOPMENT_VISION.md
+ M docs/EDGE_CASE_TESTING.md
+ M docs/SETUP_GUIDE.md
+ M docs/SYSTEM_SPECIFIC_NOTES.md
+ M jarvis_console.py
+ M jarvis_continuous.py
+ M jarvis_web.py
+ M killswitch.sh
+ M requirements.txt
+ M restart.sh
+ M scripts/check_chatterbox_runtime.py
+ M scripts/check_runtime_dependencies.py
+ M scripts/jarvis-circuit-reset
+ M scripts/jarvis-confirm
+ M scripts/preflight_check.py
+ M scripts/test_suite_v3/cleanup.py
+ M scripts/test_suite_v3/client.py
+ M scripts/ws_test.py
+ M start.sh
+ M start_chatterbox.sh
+ M stop.sh
+ M systemd/README.md
+ M tests/components/test_temporal_weather.py
+ M tests/integration/test_conversations.py
+ M tests/integration/test_vision.py
+ M tests/powershell/Test-JarvisRuntime.ps1
+ M tests/unit/test_runtime_dependencies.py
+ M tests/unit/test_runtime_lifecycle_shell.py
+ M tests/unit/test_transcript_content_logging.py
+ M tests/unit/test_voice_barge_in.py
+ M web/dashboard.css
+ M web/dashboard.html
+ M web/dashboard.js
+ M web/dashboard_governance.html
+ M web/dashboard_health.html
+ M web/dashboard_pipeline.html
+ M web/index.html
+ M web/memory.html
+?? .github/CODEOWNERS
+?? .github/dependabot.yml
+?? .github/workflows/
+?? CLAUDE.md
+?? JARVIS-Runtime.ps1
+?? core/audio_turn_routing.py
+?? core/direct_audio.py
+?? core/expert_policy.py
+?? core/live_telemetry.py
+?? core/mail_integration.py
+?? core/model_handover.py
+?? core/npu_face_backend.py
+?? core/runtime_state.py
+?? core/speculative_turn.py
+?? core/tools/delegate_to_expert.py
+?? core/tools/mail_status.py
+?? core/turn_assembler.py
+?? core/vision_gate.py
+?? core/wake_word_utils.py
+?? docs/RUNTIME_SUPERVISOR.md
+?? pyproject.toml
+?? requirements-anthropic.txt
+?? requirements-ci.txt
+?? scripts/runtime_status.py
+?? scripts/wsl-pytest.ps1
+?? systemd/llama-server-expert.service
+?? systemd/llama-server-primary.service
+?? tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+?? tests/unit/test_active_voice_event_telemetry.py
+?? tests/unit/test_audio_turn_routing.py
+?? tests/unit/test_context_window_read_only.py
+?? tests/unit/test_direct_audio_routing.py
+?? tests/unit/test_expert_delegation.py
+?? tests/unit/test_expert_handover_integration.py
+?? tests/unit/test_jarvis_web_app.py
+?? tests/unit/test_jarvis_web_desktop_mode.py
+?? tests/unit/test_live_telemetry.py
+?? tests/unit/test_llm_cloud_provider.py
+?? tests/unit/test_llm_router_hardening.py
+?? tests/unit/test_mail_integration.py
+?? tests/unit/test_memory_read_only.py
+?? tests/unit/test_model_handover.py
+?? tests/unit/test_presence_npu_backend.py
+?? tests/unit/test_privacy_direct_audio.py
+?? tests/unit/test_runtime_status.py
+?? tests/unit/test_speculative_audio_side_effects.py
+?? tests/unit/test_stop_fastpath_integration.py
+?? tests/unit/test_turn_assembler.py
+?? tests/unit/test_vision_gate.py
+?? tests/unit/test_voice_routing_hardening.py
+?? tests/unit/test_watchdog_listener_idle.py
+?? tools/openvino_npu_worker.py
+?? web/dashboard_mail.css
+?? web/dashboard_mail.html
+?? web/dashboard_mail.js
+
+===== REFERENCE COMMIT =====
+REFERENCE=3ef09b2ec9d54f97485eaa0fa072dddc9b0de2c2
+HEAD_VS_REFERENCE=0	355
+MERGE_BASE=a977e1e77ff7f2531dbdfe1a9251b4341541586a
+
+===== BACKUP CURRENT MAIN =====
+TRACKED_PATCH_BYTES=410932
+UNTRACKED_FILES=55
+
+===== WORKING TREE VS BACKEND REFERENCE =====
+TRACKED_DIFFERENCES_FROM_REFERENCE=486
+D	.github/CODEOWNERS
+D	.github/dependabot.yml
+D	.github/workflows/ci-python.yml
+D	CLAUDE.md
+D	Dokumentation/00_PROJECT_STATUS.md
+D	Dokumentation/01_ARCHITECTURE.md
+D	Dokumentation/02_COMPONENTS.md
+D	Dokumentation/03_RUNTIME_AND_MODELS.md
+D	Dokumentation/04_AGENTS_AND_ORCHESTRATION.md
+D	Dokumentation/05_MEMORY.md
+D	Dokumentation/06_VOICE_STT_TTS.md
+D	Dokumentation/07_TOOLS_MCP_SKILLS.md
+D	Dokumentation/08_SCHOOL_MOBILITY.md
+D	Dokumentation/09_SECURITY_PRIVACY.md
+D	Dokumentation/10_CONFIGURATION.md
+D	Dokumentation/11_INSTALLATION_OPERATION.md
+D	Dokumentation/12_TESTING_QA.md
+D	Dokumentation/13_KNOWN_ISSUES.md
+D	Dokumentation/14_ROADMAP.md
+D	Dokumentation/15_CHANGELOG_DEVELOPMENT.md
+D	Dokumentation/16_UI_CONTROL_HUB.md
+D	Dokumentation/17_TOOLING_UND_GITHUB.md
+D	Dokumentation/18_DESKTOP_REDESIGN_LOVABLE.md
+D	Dokumentation/ADR/README.md
+D	Dokumentation/COMPONENTS/ENTRYPOINTS.md
+D	Dokumentation/COMPONENTS/OBSERVATION_AND_PRIVACY.md
+D	Dokumentation/COMPONENTS/README.md
+D	Dokumentation/COMPONENTS/STORAGE.md
+D	Dokumentation/INVENTORY.md
+D	Dokumentation/LEGACY/README.md
+D	Dokumentation/LEGACY/SOURCE_REGISTER.md
+D	Dokumentation/README.md
+D	INHALTSVERZEICHNIS.md
+D	JARVIS-Runtime.ps1
+D	Mobile-App/.gitattributes
+D	Mobile-App/.gitignore
+D	Mobile-App/.prettierignore
+D	Mobile-App/.prettierrc
+D	Mobile-App/README.md
+D	Mobile-App/android/.gitignore
+D	Mobile-App/android/OPEN_DECISIONS.md
+D	Mobile-App/android/PORTING_PLAN.md
+D	Mobile-App/android/app/build.gradle.kts
+D	Mobile-App/android/app/proguard-rules.pro
+D	Mobile-App/android/app/src/androidTest/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisTextFieldTest.kt
+D	Mobile-App/android/app/src/main/AndroidManifest.xml
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/JarvisApplication.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/MainActivity.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/JarvisColor.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/JarvisDimens.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/JarvisMotion.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/JarvisSemanticColor.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/JarvisTheme.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/JarvisType.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisContentBlocks.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisControls.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisDetailHeader.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisListPrimitives.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisOverlays.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisPrototypeSupport.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisShell.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisStates.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/designsystem/component/JarvisTags.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/di/RuntimeModule.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/model/ComparisonBaseline.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/model/Ia.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/privacy/PrivacyGate.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/privacy/StaticPrivacyGate.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/runtime/DesignStateGateways.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/runtime/RuntimeGateways.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/core/util/StringFieldCodec.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/chat/ChatAttachment.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/chat/ChatAttachmentViews.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/chat/ChatModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/chat/ChatScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/chat/ChatViewModel.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/common/DetailScaffold.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/AboutScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/AutomationEditorScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/AutomationModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/AutomationsScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/MemoryModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/MemoryScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/MoreOverviewScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/SettingsScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/VoiceModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/more/VoiceScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/start/StartScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/AgentModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/AgentsScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/DeviceScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/DiagnosticsDemoModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/DiagnosticsDemoSection.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/DiagnosticsScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/ModelDemoModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/ModelImportCatalog.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/ModelsDemoSection.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/ModelsScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/PermissionModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/PermissionsScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/PrivacyModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/PrivacyScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/RuntimesDemoModels.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/RuntimesDemoSections.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/RuntimesScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/SystemOverviewScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/feature/system/ToolsScreen.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/navigation/AppShellViewModel.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/navigation/JarvisAppShell.kt
+D	Mobile-App/android/app/src/main/kotlin/com/jarvis/mobile/navigation/JarvisDestinations.kt
+D	Mobile-App/android/app/src/main/res/drawable-xxhdpi/jarvis_symbol.png
+D	Mobile-App/android/app/src/main/res/drawable-xxhdpi/jarvis_wordmark.png
+D	Mobile-App/android/app/src/main/res/drawable/ic_launcher_background.xml
+D	Mobile-App/android/app/src/main/res/drawable/ic_launcher_foreground.xml
+D	Mobile-App/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+D	Mobile-App/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+D	Mobile-App/android/app/src/main/res/values/colors.xml
+D	Mobile-App/android/app/src/main/res/values/strings.xml
+D	Mobile-App/android/app/src/main/res/values/themes.xml
+D	Mobile-App/android/app/src/main/res/xml/backup_rules.xml
+D	Mobile-App/android/app/src/main/res/xml/data_extraction_rules.xml
+D	Mobile-App/android/app/src/test/kotlin/com/jarvis/mobile/core/util/StringFieldCodecTest.kt
+D	Mobile-App/android/app/src/test/kotlin/com/jarvis/mobile/feature/chat/ChatAttachmentTest.kt
+D	Mobile-App/android/app/src/test/kotlin/com/jarvis/mobile/feature/more/AutomationDraftCodecTest.kt
+D	Mobile-App/android/app/src/test/kotlin/com/jarvis/mobile/feature/more/MemoryEntryCodecTest.kt
+D	Mobile-App/android/app/src/test/kotlin/com/jarvis/mobile/feature/system/AgentEntryCodecTest.kt
+D	Mobile-App/android/app/src/test/kotlin/com/jarvis/mobile/feature/system/DemoModelEntryCodecTest.kt
+D	Mobile-App/android/app/src/test/kotlin/com/jarvis/mobile/feature/system/PrivacyOverlayCodecTest.kt
+D	Mobile-App/android/build.gradle.kts
+D	Mobile-App/android/gradle.properties
+D	Mobile-App/android/gradle/libs.versions.toml
+D	Mobile-App/android/gradle/wrapper/gradle-wrapper.jar
+D	Mobile-App/android/gradle/wrapper/gradle-wrapper.properties
+D	Mobile-App/android/gradlew
+D	Mobile-App/android/gradlew.bat
+D	Mobile-App/android/settings.gradle.kts
+D	Mobile-App/bun.lock
+D	Mobile-App/bunfig.toml
+D	Mobile-App/components.json
+D	Mobile-App/eslint.config.js
+D	Mobile-App/package.json
+D	Mobile-App/public/favicon.png
+D	Mobile-App/public/robots.txt
+D	Mobile-App/src/assets/jarvis-symbol.png
+D	Mobile-App/src/assets/jarvis-wordmark.png
+D	Mobile-App/src/components/brand/jarvis-mark.tsx
+D	Mobile-App/src/components/jarvis/blocks.tsx
+D	Mobile-App/src/components/jarvis/chat-attachment.tsx
+D	Mobile-App/src/components/jarvis/controls.tsx
+D	Mobile-App/src/components/jarvis/motion.tsx
+D	Mobile-App/src/components/jarvis/primitives.tsx
+D	Mobile-App/src/components/jarvis/prototype-state.tsx
+D	Mobile-App/src/components/jarvis/screens/about-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/agents-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/automation-editor.tsx
+D	Mobile-App/src/components/jarvis/screens/automations-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/chat-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/detail-header.tsx
+D	Mobile-App/src/components/jarvis/screens/device-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/diagnostics-demo.tsx
+D	Mobile-App/src/components/jarvis/screens/diagnostics-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/memory-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/models-demo.tsx
+D	Mobile-App/src/components/jarvis/screens/models-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/more-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/permissions-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/privacy-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/runtimes-demo.tsx
+D	Mobile-App/src/components/jarvis/screens/runtimes-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/settings-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/start-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/system-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/tools-screen.tsx
+D	Mobile-App/src/components/jarvis/screens/voice-screen.tsx
+D	Mobile-App/src/components/jarvis/shell.tsx
+D	Mobile-App/src/components/prototype/phone-frame.tsx
+D	Mobile-App/src/components/prototype/variant-picker.tsx
+D	Mobile-App/src/components/prototype/variants/variant-a.tsx
+D	Mobile-App/src/components/prototype/variants/variant-b.tsx
+D	Mobile-App/src/components/prototype/variants/variant-c.tsx
+D	Mobile-App/src/components/prototype/variants/variant-d.tsx
+D	Mobile-App/src/components/ui/accordion.tsx
+D	Mobile-App/src/components/ui/alert-dialog.tsx
+D	Mobile-App/src/components/ui/alert.tsx
+D	Mobile-App/src/components/ui/aspect-ratio.tsx
+D	Mobile-App/src/components/ui/avatar.tsx
+D	Mobile-App/src/components/ui/badge.tsx
+D	Mobile-App/src/components/ui/breadcrumb.tsx
+D	Mobile-App/src/components/ui/button.tsx
+D	Mobile-App/src/components/ui/calendar.tsx
+D	Mobile-App/src/components/ui/card.tsx
+D	Mobile-App/src/components/ui/carousel.tsx
+D	Mobile-App/src/components/ui/chart.tsx
+D	Mobile-App/src/components/ui/checkbox.tsx
+D	Mobile-App/src/components/ui/collapsible.tsx
+D	Mobile-App/src/components/ui/command.tsx
+D	Mobile-App/src/components/ui/context-menu.tsx
+D	Mobile-App/src/components/ui/dialog.tsx
+D	Mobile-App/src/components/ui/drawer.tsx
+D	Mobile-App/src/components/ui/dropdown-menu.tsx
+D	Mobile-App/src/components/ui/form.tsx
+D	Mobile-App/src/components/ui/hover-card.tsx
+D	Mobile-App/src/components/ui/input-otp.tsx
+D	Mobile-App/src/components/ui/input.tsx
+D	Mobile-App/src/components/ui/label.tsx
+D	Mobile-App/src/components/ui/menubar.tsx
+D	Mobile-App/src/components/ui/navigation-menu.tsx
+D	Mobile-App/src/components/ui/pagination.tsx
+D	Mobile-App/src/components/ui/popover.tsx
+D	Mobile-App/src/components/ui/progress.tsx
+D	Mobile-App/src/components/ui/radio-group.tsx
+D	Mobile-App/src/components/ui/resizable.tsx
+D	Mobile-App/src/components/ui/scroll-area.tsx
+D	Mobile-App/src/components/ui/select.tsx
+D	Mobile-App/src/components/ui/separator.tsx
+D	Mobile-App/src/components/ui/sheet.tsx
+D	Mobile-App/src/components/ui/sidebar.tsx
+D	Mobile-App/src/components/ui/skeleton.tsx
+D	Mobile-App/src/components/ui/slider.tsx
+D	Mobile-App/src/components/ui/sonner.tsx
+D	Mobile-App/src/components/ui/switch.tsx
+D	Mobile-App/src/components/ui/table.tsx
+D	Mobile-App/src/components/ui/tabs.tsx
+D	Mobile-App/src/components/ui/textarea.tsx
+D	Mobile-App/src/components/ui/toggle-group.tsx
+D	Mobile-App/src/components/ui/toggle.tsx
+D	Mobile-App/src/components/ui/tooltip.tsx
+D	Mobile-App/src/hooks/use-mobile.tsx
+D	Mobile-App/src/hooks/use-reduced-motion.ts
+D	Mobile-App/src/lib/error-capture.ts
+D	Mobile-App/src/lib/error-page.ts
+D	Mobile-App/src/lib/jarvis/comparison.ts
+D	Mobile-App/src/lib/jarvis/ia.ts
+D	Mobile-App/src/lib/jarvis/tokens.ts
+D	Mobile-App/src/lib/utils.ts
+D	Mobile-App/src/routeTree.gen.ts
+D	Mobile-App/src/router.tsx
+D	Mobile-App/src/routes/README.md
+D	Mobile-App/src/routes/__root.tsx
+D	Mobile-App/src/routes/design-system.tsx
+D	Mobile-App/src/routes/index.tsx
+D	Mobile-App/src/routes/prototypes.shell.tsx
+D	Mobile-App/src/server.ts
+D	Mobile-App/src/start.ts
+D	Mobile-App/src/styles.css
+D	Mobile-App/tsconfig.json
+D	Mobile-App/vite.config.ts
+M	README.md
+D	UI/.gitignore
+D	UI/.prettierignore
+D	UI/.prettierrc
+D	UI/README.md
+D	UI/WindowsApp/App.xaml
+D	UI/WindowsApp/App.xaml.cs
+D	UI/WindowsApp/Jarvis.ControlHub.csproj
+D	UI/WindowsApp/JarvisApiClient.cs
+D	UI/WindowsApp/JarvisListItem.cs
+D	UI/WindowsApp/MainWindow.xaml
+D	UI/WindowsApp/MainWindow.xaml.cs
+D	UI/WindowsApp/MainWindowViewModel.cs
+D	UI/WindowsApp/MetricBreakdown.cs
+D	UI/WindowsApp/MetricBucket.cs
+D	UI/WindowsApp/RuntimeSupervisorClient.cs
+D	UI/WindowsApp/app.manifest
+D	UI/WindowsApp/publish.ps1
+D	UI/components.json
+D	UI/eslint.config.js
+D	UI/package-lock.json
+D	UI/package.json
+D	UI/public/favicon.ico
+D	UI/public/robots.txt
+D	UI/src-tauri/Cargo.lock
+D	UI/src-tauri/Cargo.toml
+D	UI/src-tauri/build.rs
+D	UI/src-tauri/gen/schemas/acl-manifests.json
+D	UI/src-tauri/gen/schemas/capabilities.json
+D	UI/src-tauri/gen/schemas/desktop-schema.json
+D	UI/src-tauri/gen/schemas/windows-schema.json
+D	UI/src-tauri/icons/128x128.png
+D	UI/src-tauri/icons/128x128@2x.png
+D	UI/src-tauri/icons/32x32.png
+D	UI/src-tauri/icons/64x64.png
+D	UI/src-tauri/icons/Square107x107Logo.png
+D	UI/src-tauri/icons/Square142x142Logo.png
+D	UI/src-tauri/icons/Square150x150Logo.png
+D	UI/src-tauri/icons/Square284x284Logo.png
+D	UI/src-tauri/icons/Square30x30Logo.png
+D	UI/src-tauri/icons/Square310x310Logo.png
+D	UI/src-tauri/icons/Square44x44Logo.png
+D	UI/src-tauri/icons/Square71x71Logo.png
+D	UI/src-tauri/icons/Square89x89Logo.png
+D	UI/src-tauri/icons/StoreLogo.png
+D	UI/src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml
+D	UI/src-tauri/icons/android/mipmap-hdpi/ic_launcher.png
+D	UI/src-tauri/icons/android/mipmap-hdpi/ic_launcher_foreground.png
+D	UI/src-tauri/icons/android/mipmap-hdpi/ic_launcher_round.png
+D	UI/src-tauri/icons/android/mipmap-mdpi/ic_launcher.png
+D	UI/src-tauri/icons/android/mipmap-mdpi/ic_launcher_foreground.png
+D	UI/src-tauri/icons/android/mipmap-mdpi/ic_launcher_round.png
+D	UI/src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png
+D	UI/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_foreground.png
+D	UI/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_round.png
+D	UI/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher.png
+D	UI/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_foreground.png
+D	UI/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_round.png
+D	UI/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png
+D	UI/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png
+D	UI/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_round.png
+D	UI/src-tauri/icons/android/values/ic_launcher_background.xml
+D	UI/src-tauri/icons/icon.icns
+D	UI/src-tauri/icons/icon.ico
+D	UI/src-tauri/icons/icon.png
+D	UI/src-tauri/icons/icon.svg
+D	UI/src-tauri/icons/ios/AppIcon-20x20@1x.png
+D	UI/src-tauri/icons/ios/AppIcon-20x20@2x-1.png
+D	UI/src-tauri/icons/ios/AppIcon-20x20@2x.png
+D	UI/src-tauri/icons/ios/AppIcon-20x20@3x.png
+D	UI/src-tauri/icons/ios/AppIcon-29x29@1x.png
+D	UI/src-tauri/icons/ios/AppIcon-29x29@2x-1.png
+D	UI/src-tauri/icons/ios/AppIcon-29x29@2x.png
+D	UI/src-tauri/icons/ios/AppIcon-29x29@3x.png
+D	UI/src-tauri/icons/ios/AppIcon-40x40@1x.png
+D	UI/src-tauri/icons/ios/AppIcon-40x40@2x-1.png
+D	UI/src-tauri/icons/ios/AppIcon-40x40@2x.png
+D	UI/src-tauri/icons/ios/AppIcon-40x40@3x.png
+D	UI/src-tauri/icons/ios/AppIcon-512@2x.png
+D	UI/src-tauri/icons/ios/AppIcon-60x60@2x.png
+D	UI/src-tauri/icons/ios/AppIcon-60x60@3x.png
+D	UI/src-tauri/icons/ios/AppIcon-76x76@1x.png
+D	UI/src-tauri/icons/ios/AppIcon-76x76@2x.png
+D	UI/src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png
+D	UI/src-tauri/scripts/assert-frontend-dist.mjs
+D	UI/src-tauri/src/main.rs
+D	UI/src-tauri/tauri.conf.json
+D	UI/src/components/jarvis/app-shell.tsx
+D	UI/src/components/jarvis/charts.tsx
+D	UI/src/components/jarvis/data-table.tsx
+D	UI/src/components/jarvis/mode-context.ts
+D	UI/src/components/jarvis/primitives.tsx
+D	UI/src/components/jarvis/sections.tsx
+D	UI/src/components/ui/accordion.tsx
+D	UI/src/components/ui/alert-dialog.tsx
+D	UI/src/components/ui/alert.tsx
+D	UI/src/components/ui/aspect-ratio.tsx
+D	UI/src/components/ui/avatar.tsx
+D	UI/src/components/ui/badge.tsx
+D	UI/src/components/ui/breadcrumb.tsx
+D	UI/src/components/ui/button.tsx
+D	UI/src/components/ui/calendar.tsx
+D	UI/src/components/ui/card.tsx
+D	UI/src/components/ui/carousel.tsx
+D	UI/src/components/ui/chart.tsx
+D	UI/src/components/ui/checkbox.tsx
+D	UI/src/components/ui/collapsible.tsx
+D	UI/src/components/ui/command.tsx
+D	UI/src/components/ui/context-menu.tsx
+D	UI/src/components/ui/dialog.tsx
+D	UI/src/components/ui/drawer.tsx
+D	UI/src/components/ui/dropdown-menu.tsx
+D	UI/src/components/ui/form.tsx
+D	UI/src/components/ui/hover-card.tsx
+D	UI/src/components/ui/input-otp.tsx
+D	UI/src/components/ui/input.tsx
+D	UI/src/components/ui/label.tsx
+D	UI/src/components/ui/menubar.tsx
+D	UI/src/components/ui/navigation-menu.tsx
+D	UI/src/components/ui/pagination.tsx
+D	UI/src/components/ui/popover.tsx
+D	UI/src/components/ui/progress.tsx
+D	UI/src/components/ui/radio-group.tsx
+D	UI/src/components/ui/resizable.tsx
+D	UI/src/components/ui/scroll-area.tsx
+D	UI/src/components/ui/select.tsx
+D	UI/src/components/ui/separator.tsx
+D	UI/src/components/ui/sheet.tsx
+D	UI/src/components/ui/sidebar.tsx
+D	UI/src/components/ui/skeleton.tsx
+D	UI/src/components/ui/slider.tsx
+D	UI/src/components/ui/sonner.tsx
+D	UI/src/components/ui/switch.tsx
+D	UI/src/components/ui/table.tsx
+D	UI/src/components/ui/tabs.tsx
+D	UI/src/components/ui/textarea.tsx
+D	UI/src/components/ui/toggle-group.tsx
+D	UI/src/components/ui/toggle.tsx
+D	UI/src/components/ui/tooltip.tsx
+D	UI/src/hooks/use-mobile.tsx
+D	UI/src/lib/error-capture.ts
+D	UI/src/lib/error-page.ts
+D	UI/src/lib/jarvis/adapter.ts
+D	UI/src/lib/jarvis/live-data.ts
+D	UI/src/lib/jarvis/production-adapter.ts
+D	UI/src/lib/jarvis/prototype-adapter.ts
+D	UI/src/lib/jarvis/runtime-control.ts
+D	UI/src/lib/jarvis/runtime-status.ts
+D	UI/src/lib/jarvis/transport.ts
+D	UI/src/lib/jarvis/types.ts
+D	UI/src/lib/jarvis/use-jarvis.ts
+D	UI/src/lib/lovable-error-reporting.ts
+D	UI/src/lib/utils.ts
+D	UI/src/routeTree.gen.ts
+D	UI/src/router.tsx
+D	UI/src/routes/__root.tsx
+D	UI/src/routes/index.tsx
+D	UI/src/server.ts
+D	UI/src/start.ts
+D	UI/src/styles.css
+D	UI/tests/WindowsAppFreshness.Tests/Program.cs
+D	UI/tests/WindowsAppFreshness.Tests/README.md
+D	UI/tests/WindowsAppFreshness.Tests/WindowsAppFreshness.Tests.csproj
+D	UI/tests/live-data.test.mjs
+D	UI/tsconfig.json
+D	UI/vite.config.ts
+D	core/audio_turn_routing.py
+M	core/context_window.py
+D	core/direct_audio.py
+D	core/expert_policy.py
+D	core/live_telemetry.py
+M	core/memory_manager.py
+D	core/model_handover.py
+D	core/npu_face_backend.py
+M	core/privacy_gate.py
+D	core/runtime_state.py
+D	core/speculative_turn.py
+D	core/tools/delegate_to_expert.py
+D	core/turn_assembler.py
+D	core/vision_gate.py
+D	core/wake_word_utils.py
+D	docs/RUNTIME_SUPERVISOR.md
+M	jarvis_continuous.py
+M	jarvis_web.py
+M	killswitch.sh
+D	pyproject.toml
+D	requirements-anthropic.txt
+D	requirements-ci.txt
+M	restart.sh
+M	scripts/install_desktop_extension.sh
+M	scripts/jarvis-approve
+M	scripts/jarvis-circuit-reset
+M	scripts/jarvis-confirm
+M	scripts/jarvis-governance-setup
+M	scripts/query_reminders.py
+D	scripts/runtime_status.py
+M	scripts/session_init.sh
+M	scripts/unit_tests.sh
+M	scripts/weekly_journal_audit.sh
+M	scripts/ws_test.py
+D	scripts/wsl-pytest.ps1
+M	start.sh
+M	start_jarvis_gpu.sh
+M	startup_checks.sh
+M	status.sh
+M	stop.sh
+D	systemd/llama-server-expert.service
+D	systemd/llama-server-primary.service
+M	tests/integration/test_desktop_manager.py
+M	tests/integration/test_voice.py
+D	tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+D	tests/unit/test_active_voice_event_telemetry.py
+D	tests/unit/test_audio_turn_routing.py
+D	tests/unit/test_direct_audio_routing.py
+D	tests/unit/test_expert_delegation.py
+D	tests/unit/test_expert_handover_integration.py
+D	tests/unit/test_jarvis_web_app.py
+D	tests/unit/test_live_telemetry.py
+D	tests/unit/test_llm_cloud_provider.py
+D	tests/unit/test_llm_router_hardening.py
+D	tests/unit/test_model_handover.py
+D	tests/unit/test_presence_npu_backend.py
+D	tests/unit/test_privacy_direct_audio.py
+D	tests/unit/test_runtime_status.py
+D	tests/unit/test_speculative_audio_side_effects.py
+D	tests/unit/test_stop_fastpath_integration.py
+D	tests/unit/test_turn_assembler.py
+D	tests/unit/test_vision_gate.py
+D	tests/unit/test_voice_routing_hardening.py
+D	tests/unit/test_watchdog_listener_idle.py
+M	tools/backup_jarvis.sh
+D	tools/openvino_npu_worker.py
+M	tools/validate_skill.py
+M	web/dashboard.html
+M	web/dashboard_governance.html
+M	web/dashboard_health.html
+M	web/dashboard_pipeline.html
+M	web/index.html
+M	web/memory.html
+
+===== DIFF STAT VS REFERENCE =====
+ .github/CODEOWNERS                                 |    1 -
+ .github/dependabot.yml                             |   12 -
+ .github/workflows/ci-python.yml                    |   37 -
+ CLAUDE.md                                          |   58 -
+ Dokumentation/00_PROJECT_STATUS.md                 |   76 -
+ Dokumentation/01_ARCHITECTURE.md                   |   69 -
+ Dokumentation/02_COMPONENTS.md                     |   28 -
+ Dokumentation/03_RUNTIME_AND_MODELS.md             |   83 -
+ Dokumentation/04_AGENTS_AND_ORCHESTRATION.md       |   28 -
+ Dokumentation/05_MEMORY.md                         |   29 -
+ Dokumentation/06_VOICE_STT_TTS.md                  |   56 -
+ Dokumentation/07_TOOLS_MCP_SKILLS.md               |   23 -
+ Dokumentation/08_SCHOOL_MOBILITY.md                |   27 -
+ Dokumentation/09_SECURITY_PRIVACY.md               |   27 -
+ Dokumentation/10_CONFIGURATION.md                  |   42 -
+ Dokumentation/11_INSTALLATION_OPERATION.md         |   27 -
+ Dokumentation/12_TESTING_QA.md                     |   40 -
+ Dokumentation/13_KNOWN_ISSUES.md                   |   40 -
+ Dokumentation/14_ROADMAP.md                        |   26 -
+ Dokumentation/15_CHANGELOG_DEVELOPMENT.md          |   37 -
+ Dokumentation/16_UI_CONTROL_HUB.md                 |  104 -
+ Dokumentation/17_TOOLING_UND_GITHUB.md             |   27 -
+ Dokumentation/18_DESKTOP_REDESIGN_LOVABLE.md       |   63 -
+ Dokumentation/ADR/README.md                        |    5 -
+ Dokumentation/COMPONENTS/ENTRYPOINTS.md            |   23 -
+ .../COMPONENTS/OBSERVATION_AND_PRIVACY.md          |   20 -
+ Dokumentation/COMPONENTS/README.md                 |   26 -
+ Dokumentation/COMPONENTS/STORAGE.md                |   17 -
+ Dokumentation/INVENTORY.md                         |   55 -
+ Dokumentation/LEGACY/README.md                     |    5 -
+ Dokumentation/LEGACY/SOURCE_REGISTER.md            |  157 -
+ Dokumentation/README.md                            |   64 -
+ INHALTSVERZEICHNIS.md                              |  434 --
+ JARVIS-Runtime.ps1                                 |   63 -
+ Mobile-App/.gitattributes                          |   38 -
+ Mobile-App/.gitignore                              |   63 -
+ Mobile-App/.prettierignore                         |    8 -
+ Mobile-App/.prettierrc                             |    6 -
+ Mobile-App/README.md                               |  153 -
+ Mobile-App/android/.gitignore                      |   11 -
+ Mobile-App/android/OPEN_DECISIONS.md               |   81 -
+ Mobile-App/android/PORTING_PLAN.md                 |  234 -
+ Mobile-App/android/app/build.gradle.kts            |   97 -
+ Mobile-App/android/app/proguard-rules.pro          |    1 -
+ .../designsystem/component/JarvisTextFieldTest.kt  |   91 -
+ .../android/app/src/main/AndroidManifest.xml       |   27 -
+ .../kotlin/com/jarvis/mobile/JarvisApplication.kt  |    7 -
+ .../main/kotlin/com/jarvis/mobile/MainActivity.kt  |   22 -
+ .../jarvis/mobile/core/designsystem/JarvisColor.kt |   32 -
+ .../mobile/core/designsystem/JarvisDimens.kt       |   38 -
+ .../mobile/core/designsystem/JarvisMotion.kt       |   37 -
+ .../core/designsystem/JarvisSemanticColor.kt       |   34 -
+ .../jarvis/mobile/core/designsystem/JarvisTheme.kt |   41 -
+ .../jarvis/mobile/core/designsystem/JarvisType.kt  |   36 -
+ .../designsystem/component/JarvisContentBlocks.kt  |  109 -
+ .../core/designsystem/component/JarvisControls.kt  |  201 -
+ .../designsystem/component/JarvisDetailHeader.kt   |   63 -
+ .../designsystem/component/JarvisListPrimitives.kt |  187 -
+ .../core/designsystem/component/JarvisOverlays.kt  |  177 -
+ .../component/JarvisPrototypeSupport.kt            |   86 -
+ .../core/designsystem/component/JarvisShell.kt     |  164 -
+ .../core/designsystem/component/JarvisStates.kt    |  182 -
+ .../core/designsystem/component/JarvisTags.kt      |  101 -
+ .../com/jarvis/mobile/core/di/RuntimeModule.kt     |   41 -
+ .../jarvis/mobile/core/model/ComparisonBaseline.kt |   29 -
+ .../main/kotlin/com/jarvis/mobile/core/model/Ia.kt |  357 -
+ .../com/jarvis/mobile/core/privacy/PrivacyGate.kt  |   29 -
+ .../mobile/core/privacy/StaticPrivacyGate.kt       |   22 -
+ .../mobile/core/runtime/DesignStateGateways.kt     |   27 -
+ .../jarvis/mobile/core/runtime/RuntimeGateways.kt  |   37 -
+ .../jarvis/mobile/core/util/StringFieldCodec.kt    |   76 -
+ .../jarvis/mobile/feature/chat/ChatAttachment.kt   |  196 -
+ .../mobile/feature/chat/ChatAttachmentViews.kt     |  107 -
+ .../com/jarvis/mobile/feature/chat/ChatModels.kt   |   66 -
+ .../com/jarvis/mobile/feature/chat/ChatScreen.kt   |  382 -
+ .../jarvis/mobile/feature/chat/ChatViewModel.kt    |  141 -
+ .../jarvis/mobile/feature/common/DetailScaffold.kt |   30 -
+ .../com/jarvis/mobile/feature/more/AboutScreen.kt  |   71 -
+ .../mobile/feature/more/AutomationEditorScreen.kt  |  437 --
+ .../jarvis/mobile/feature/more/AutomationModels.kt |  245 -
+ .../mobile/feature/more/AutomationsScreen.kt       |  162 -
+ .../com/jarvis/mobile/feature/more/MemoryModels.kt |  237 -
+ .../com/jarvis/mobile/feature/more/MemoryScreen.kt |  221 -
+ .../mobile/feature/more/MoreOverviewScreen.kt      |   72 -
+ .../jarvis/mobile/feature/more/SettingsScreen.kt   |  120 -
+ .../com/jarvis/mobile/feature/more/VoiceModels.kt  |   36 -
+ .../com/jarvis/mobile/feature/more/VoiceScreen.kt  |  232 -
+ .../com/jarvis/mobile/feature/start/StartScreen.kt |  147 -
+ .../jarvis/mobile/feature/system/AgentModels.kt    |  187 -
+ .../jarvis/mobile/feature/system/AgentsScreen.kt   |  224 -
+ .../jarvis/mobile/feature/system/DeviceScreen.kt   |   92 -
+ .../mobile/feature/system/DiagnosticsDemoModels.kt |   39 -
+ .../feature/system/DiagnosticsDemoSection.kt       |  203 -
+ .../mobile/feature/system/DiagnosticsScreen.kt     |   59 -
+ .../mobile/feature/system/ModelDemoModels.kt       |  154 -
+ .../mobile/feature/system/ModelImportCatalog.kt    |  159 -
+ .../mobile/feature/system/ModelsDemoSection.kt     |  290 -
+ .../jarvis/mobile/feature/system/ModelsScreen.kt   |  111 -
+ .../mobile/feature/system/PermissionModels.kt      |  116 -
+ .../mobile/feature/system/PermissionsScreen.kt     |  106 -
+ .../jarvis/mobile/feature/system/PrivacyModels.kt  |   96 -
+ .../jarvis/mobile/feature/system/PrivacyScreen.kt  |  191 -
+ .../mobile/feature/system/RuntimesDemoModels.kt    |   47 -
+ .../mobile/feature/system/RuntimesDemoSections.kt  |  197 -
+ .../jarvis/mobile/feature/system/RuntimesScreen.kt |   93 -
+ .../mobile/feature/system/SystemOverviewScreen.kt  |  109 -
+ .../jarvis/mobile/feature/system/ToolsScreen.kt    |  121 -
+ .../jarvis/mobile/navigation/AppShellViewModel.kt  |   49 -
+ .../com/jarvis/mobile/navigation/JarvisAppShell.kt |  135 -
+ .../jarvis/mobile/navigation/JarvisDestinations.kt |   61 -
+ .../src/main/res/drawable-xxhdpi/jarvis_symbol.png |  Bin 13729 -> 0 bytes
+ .../main/res/drawable-xxhdpi/jarvis_wordmark.png   |  Bin 39410 -> 0 bytes
+ .../main/res/drawable/ic_launcher_background.xml   |    4 -
+ .../main/res/drawable/ic_launcher_foreground.xml   |   12 -
+ .../src/main/res/mipmap-anydpi-v26/ic_launcher.xml |    5 -
+ .../res/mipmap-anydpi-v26/ic_launcher_round.xml    |    5 -
+ .../android/app/src/main/res/values/colors.xml     |    7 -
+ .../android/app/src/main/res/values/strings.xml    |    4 -
+ .../android/app/src/main/res/values/themes.xml     |   11 -
+ .../android/app/src/main/res/xml/backup_rules.xml  |    5 -
+ .../app/src/main/res/xml/data_extraction_rules.xml |   12 -
+ .../mobile/core/util/StringFieldCodecTest.kt       |  106 -
+ .../mobile/feature/chat/ChatAttachmentTest.kt      |  158 -
+ .../feature/more/AutomationDraftCodecTest.kt       |  174 -
+ .../mobile/feature/more/MemoryEntryCodecTest.kt    |   67 -
+ .../mobile/feature/system/AgentEntryCodecTest.kt   |   56 -
+ .../feature/system/DemoModelEntryCodecTest.kt      |   49 -
+ .../feature/system/PrivacyOverlayCodecTest.kt      |   27 -
+ Mobile-App/android/build.gradle.kts                |    7 -
+ Mobile-App/android/gradle.properties               |    6 -
+ Mobile-App/android/gradle/libs.versions.toml       |   57 -
+ .../android/gradle/wrapper/gradle-wrapper.jar      |  Bin 43764 -> 0 bytes
+ .../gradle/wrapper/gradle-wrapper.properties       |    7 -
+ Mobile-App/android/gradlew                         |  251 -
+ Mobile-App/android/gradlew.bat                     |   94 -
+ Mobile-App/android/settings.gradle.kts             |   18 -
+ Mobile-App/bun.lock                                |  987 ---
+ Mobile-App/bunfig.toml                             |    4 -
+ Mobile-App/components.json                         |   22 -
+ Mobile-App/eslint.config.js                        |   40 -
+ Mobile-App/package.json                            |   92 -
+ Mobile-App/public/favicon.png                      |  Bin 1683 -> 0 bytes
+ Mobile-App/public/robots.txt                       |   14 -
+ Mobile-App/src/assets/jarvis-symbol.png            |  Bin 13729 -> 0 bytes
+ Mobile-App/src/assets/jarvis-wordmark.png          |  Bin 39410 -> 0 bytes
+ Mobile-App/src/components/brand/jarvis-mark.tsx    |   65 -
+ Mobile-App/src/components/jarvis/blocks.tsx        |  293 -
+ .../src/components/jarvis/chat-attachment.tsx      |  261 -
+ Mobile-App/src/components/jarvis/controls.tsx      |  453 --
+ Mobile-App/src/components/jarvis/motion.tsx        |  108 -
+ Mobile-App/src/components/jarvis/primitives.tsx    |  247 -
+ .../src/components/jarvis/prototype-state.tsx      |   92 -
+ .../src/components/jarvis/screens/about-screen.tsx |   87 -
+ .../components/jarvis/screens/agents-screen.tsx    |  404 -
+ .../jarvis/screens/automation-editor.tsx           |  685 --
+ .../jarvis/screens/automations-screen.tsx          |  305 -
+ .../src/components/jarvis/screens/chat-screen.tsx  |  635 --
+ .../components/jarvis/screens/detail-header.tsx    |   57 -
+ .../components/jarvis/screens/device-screen.tsx    |  110 -
+ .../components/jarvis/screens/diagnostics-demo.tsx |  259 -
+ .../jarvis/screens/diagnostics-screen.tsx          |  132 -
+ .../components/jarvis/screens/memory-screen.tsx    |  612 --
+ .../src/components/jarvis/screens/models-demo.tsx  |  596 --
+ .../components/jarvis/screens/models-screen.tsx    |  316 -
+ .../src/components/jarvis/screens/more-screen.tsx  |  128 -
+ .../jarvis/screens/permissions-screen.tsx          |  380 -
+ .../components/jarvis/screens/privacy-screen.tsx   |  277 -
+ .../components/jarvis/screens/runtimes-demo.tsx    |  305 -
+ .../components/jarvis/screens/runtimes-screen.tsx  |  120 -
+ .../components/jarvis/screens/settings-screen.tsx  |  160 -
+ .../src/components/jarvis/screens/start-screen.tsx |  149 -
+ .../components/jarvis/screens/system-screen.tsx    |  281 -
+ .../src/components/jarvis/screens/tools-screen.tsx |  138 -
+ .../src/components/jarvis/screens/voice-screen.tsx |  480 --
+ Mobile-App/src/components/jarvis/shell.tsx         |  155 -
+ .../src/components/prototype/phone-frame.tsx       |  120 -
+ .../src/components/prototype/variant-picker.tsx    |   77 -
+ .../components/prototype/variants/variant-a.tsx    |  172 -
+ .../components/prototype/variants/variant-b.tsx    |  228 -
+ .../components/prototype/variants/variant-c.tsx    |  191 -
+ .../components/prototype/variants/variant-d.tsx    |   98 -
+ Mobile-App/src/components/ui/accordion.tsx         |   51 -
+ Mobile-App/src/components/ui/alert-dialog.tsx      |  115 -
+ Mobile-App/src/components/ui/alert.tsx             |   49 -
+ Mobile-App/src/components/ui/aspect-ratio.tsx      |    5 -
+ Mobile-App/src/components/ui/avatar.tsx            |   47 -
+ Mobile-App/src/components/ui/badge.tsx             |   32 -
+ Mobile-App/src/components/ui/breadcrumb.tsx        |  101 -
+ Mobile-App/src/components/ui/button.tsx            |   49 -
+ Mobile-App/src/components/ui/calendar.tsx          |  177 -
+ Mobile-App/src/components/ui/card.tsx              |   55 -
+ Mobile-App/src/components/ui/carousel.tsx          |  240 -
+ Mobile-App/src/components/ui/chart.tsx             |  331 -
+ Mobile-App/src/components/ui/checkbox.tsx          |   26 -
+ Mobile-App/src/components/ui/collapsible.tsx       |   11 -
+ Mobile-App/src/components/ui/command.tsx           |  143 -
+ Mobile-App/src/components/ui/context-menu.tsx      |  186 -
+ Mobile-App/src/components/ui/dialog.tsx            |  104 -
+ Mobile-App/src/components/ui/drawer.tsx            |   98 -
+ Mobile-App/src/components/ui/dropdown-menu.tsx     |  187 -
+ Mobile-App/src/components/ui/form.tsx              |  171 -
+ Mobile-App/src/components/ui/hover-card.tsx        |   27 -
+ Mobile-App/src/components/ui/input-otp.tsx         |   73 -
+ Mobile-App/src/components/ui/input.tsx             |   22 -
+ Mobile-App/src/components/ui/label.tsx             |   21 -
+ Mobile-App/src/components/ui/menubar.tsx           |  228 -
+ Mobile-App/src/components/ui/navigation-menu.tsx   |  120 -
+ Mobile-App/src/components/ui/pagination.tsx        |   98 -
+ Mobile-App/src/components/ui/popover.tsx           |   31 -
+ Mobile-App/src/components/ui/progress.tsx          |   25 -
+ Mobile-App/src/components/ui/radio-group.tsx       |   36 -
+ Mobile-App/src/components/ui/resizable.tsx         |   37 -
+ Mobile-App/src/components/ui/scroll-area.tsx       |   44 -
+ Mobile-App/src/components/ui/select.tsx            |  152 -
+ Mobile-App/src/components/ui/separator.tsx         |   24 -
+ Mobile-App/src/components/ui/sheet.tsx             |  122 -
+ Mobile-App/src/components/ui/sidebar.tsx           |  744 --
+ Mobile-App/src/components/ui/skeleton.tsx          |    7 -
+ Mobile-App/src/components/ui/slider.tsx            |   23 -
+ Mobile-App/src/components/ui/sonner.tsx            |   23 -
+ Mobile-App/src/components/ui/switch.tsx            |   27 -
+ Mobile-App/src/components/ui/table.tsx             |   94 -
+ Mobile-App/src/components/ui/tabs.tsx              |   53 -
+ Mobile-App/src/components/ui/textarea.tsx          |   21 -
+ Mobile-App/src/components/ui/toggle-group.tsx      |   57 -
+ Mobile-App/src/components/ui/toggle.tsx            |   42 -
+ Mobile-App/src/components/ui/tooltip.tsx           |   32 -
+ Mobile-App/src/hooks/use-mobile.tsx                |   19 -
+ Mobile-App/src/hooks/use-reduced-motion.ts         |   20 -
+ Mobile-App/src/lib/error-capture.ts                |  102 -
+ Mobile-App/src/lib/error-page.ts                   |   30 -
+ Mobile-App/src/lib/jarvis/comparison.ts            |   24 -
+ Mobile-App/src/lib/jarvis/ia.ts                    |  379 -
+ Mobile-App/src/lib/jarvis/tokens.ts                |  135 -
+ Mobile-App/src/lib/utils.ts                        |    6 -
+ Mobile-App/src/routeTree.gen.ts                    |  105 -
+ Mobile-App/src/router.tsx                          |   16 -
+ Mobile-App/src/routes/README.md                    |   21 -
+ Mobile-App/src/routes/__root.tsx                   |  127 -
+ Mobile-App/src/routes/design-system.tsx            | 1026 ---
+ Mobile-App/src/routes/index.tsx                    |  155 -
+ Mobile-App/src/routes/prototypes.shell.tsx         |  124 -
+ Mobile-App/src/server.ts                           |  103 -
+ Mobile-App/src/start.ts                            |   29 -
+ Mobile-App/src/styles.css                          |  476 --
+ Mobile-App/tsconfig.json                           |   30 -
+ Mobile-App/vite.config.ts                          |   57 -
+ README.md                                          |  378 +-
+ UI/.gitignore                                      |   32 -
+ UI/.prettierignore                                 |    8 -
+ UI/.prettierrc                                     |    6 -
+ UI/README.md                                       |   23 -
+ UI/WindowsApp/App.xaml                             |   20 -
+ UI/WindowsApp/App.xaml.cs                          |    7 -
+ UI/WindowsApp/Jarvis.ControlHub.csproj             |   22 -
+ UI/WindowsApp/JarvisApiClient.cs                   |  186 -
+ UI/WindowsApp/JarvisListItem.cs                    |    3 -
+ UI/WindowsApp/MainWindow.xaml                      |  336 -
+ UI/WindowsApp/MainWindow.xaml.cs                   |  144 -
+ UI/WindowsApp/MainWindowViewModel.cs               | 1964 -----
+ UI/WindowsApp/MetricBreakdown.cs                   |    6 -
+ UI/WindowsApp/MetricBucket.cs                      |    7 -
+ UI/WindowsApp/RuntimeSupervisorClient.cs           |  431 --
+ UI/WindowsApp/app.manifest                         |   18 -
+ UI/WindowsApp/publish.ps1                          |   32 -
+ UI/components.json                                 |   22 -
+ UI/eslint.config.js                                |   40 -
+ UI/package-lock.json                               | 7930 --------------------
+ UI/package.json                                    |   97 -
+ UI/public/favicon.ico                              |  Bin 20373 -> 0 bytes
+ UI/public/robots.txt                               |   14 -
+ UI/src-tauri/Cargo.lock                            | 4529 -----------
+ UI/src-tauri/Cargo.toml                            |   17 -
+ UI/src-tauri/build.rs                              |    3 -
+ UI/src-tauri/gen/schemas/acl-manifests.json        |    1 -
+ UI/src-tauri/gen/schemas/capabilities.json         |    1 -
+ UI/src-tauri/gen/schemas/desktop-schema.json       | 2316 ------
+ UI/src-tauri/gen/schemas/windows-schema.json       | 2316 ------
+ UI/src-tauri/icons/128x128.png                     |  Bin 6003 -> 0 bytes
+ UI/src-tauri/icons/128x128@2x.png                  |  Bin 12628 -> 0 bytes
+ UI/src-tauri/icons/32x32.png                       |  Bin 1297 -> 0 bytes
+ UI/src-tauri/icons/64x64.png                       |  Bin 2727 -> 0 bytes
+ UI/src-tauri/icons/Square107x107Logo.png           |  Bin 5060 -> 0 bytes
+ UI/src-tauri/icons/Square142x142Logo.png           |  Bin 6801 -> 0 bytes
+ UI/src-tauri/icons/Square150x150Logo.png           |  Bin 6891 -> 0 bytes
+ UI/src-tauri/icons/Square284x284Logo.png           |  Bin 14151 -> 0 bytes
+ UI/src-tauri/icons/Square30x30Logo.png             |  Bin 1234 -> 0 bytes
+ UI/src-tauri/icons/Square310x310Logo.png           |  Bin 15426 -> 0 bytes
+ UI/src-tauri/icons/Square44x44Logo.png             |  Bin 1823 -> 0 bytes
+ UI/src-tauri/icons/Square71x71Logo.png             |  Bin 3018 -> 0 bytes
+ UI/src-tauri/icons/Square89x89Logo.png             |  Bin 4000 -> 0 bytes
+ UI/src-tauri/icons/StoreLogo.png                   |  Bin 2090 -> 0 bytes
+ .../android/mipmap-anydpi-v26/ic_launcher.xml      |    5 -
+ .../icons/android/mipmap-hdpi/ic_launcher.png      |  Bin 4373 -> 0 bytes
+ .../android/mipmap-hdpi/ic_launcher_foreground.png |  Bin 7662 -> 0 bytes
+ .../android/mipmap-hdpi/ic_launcher_round.png      |  Bin 3801 -> 0 bytes
+ .../icons/android/mipmap-mdpi/ic_launcher.png      |  Bin 2747 -> 0 bytes
+ .../android/mipmap-mdpi/ic_launcher_foreground.png |  Bin 5015 -> 0 bytes
+ .../android/mipmap-mdpi/ic_launcher_round.png      |  Bin 2448 -> 0 bytes
+ .../icons/android/mipmap-xhdpi/ic_launcher.png     |  Bin 6178 -> 0 bytes
+ .../mipmap-xhdpi/ic_launcher_foreground.png        |  Bin 10491 -> 0 bytes
+ .../android/mipmap-xhdpi/ic_launcher_round.png     |  Bin 5657 -> 0 bytes
+ .../icons/android/mipmap-xxhdpi/ic_launcher.png    |  Bin 9820 -> 0 bytes
+ .../mipmap-xxhdpi/ic_launcher_foreground.png       |  Bin 16332 -> 0 bytes
+ .../android/mipmap-xxhdpi/ic_launcher_round.png    |  Bin 8839 -> 0 bytes
+ .../icons/android/mipmap-xxxhdpi/ic_launcher.png   |  Bin 13740 -> 0 bytes
+ .../mipmap-xxxhdpi/ic_launcher_foreground.png      |  Bin 21935 -> 0 bytes
+ .../android/mipmap-xxxhdpi/ic_launcher_round.png   |  Bin 12626 -> 0 bytes
+ .../android/values/ic_launcher_background.xml      |    4 -
+ UI/src-tauri/icons/icon.icns                       |  Bin 157764 -> 0 bytes
+ UI/src-tauri/icons/icon.ico                        |  Bin 24622 -> 0 bytes
+ UI/src-tauri/icons/icon.png                        |  Bin 26546 -> 0 bytes
+ UI/src-tauri/icons/icon.svg                        |   16 -
+ UI/src-tauri/icons/ios/AppIcon-20x20@1x.png        |  Bin 783 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-20x20@2x-1.png      |  Bin 1636 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-20x20@2x.png        |  Bin 1636 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-20x20@3x.png        |  Bin 2570 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-29x29@1x.png        |  Bin 1149 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-29x29@2x-1.png      |  Bin 2497 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-29x29@2x.png        |  Bin 2497 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-29x29@3x.png        |  Bin 3849 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-40x40@1x.png        |  Bin 1636 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-40x40@2x-1.png      |  Bin 3568 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-40x40@2x.png        |  Bin 3568 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-40x40@3x.png        |  Bin 5709 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-512@2x.png          |  Bin 64989 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-60x60@2x.png        |  Bin 5709 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-60x60@3x.png        |  Bin 8617 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-76x76@1x.png        |  Bin 3387 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-76x76@2x.png        |  Bin 6992 -> 0 bytes
+ UI/src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png    |  Bin 8016 -> 0 bytes
+ UI/src-tauri/scripts/assert-frontend-dist.mjs      |   28 -
+ UI/src-tauri/src/main.rs                           |  453 --
+ UI/src-tauri/tauri.conf.json                       |   39 -
+ UI/src/components/jarvis/app-shell.tsx             |  194 -
+ UI/src/components/jarvis/charts.tsx                |   81 -
+ UI/src/components/jarvis/data-table.tsx            |   83 -
+ UI/src/components/jarvis/mode-context.ts           |   12 -
+ UI/src/components/jarvis/primitives.tsx            |  220 -
+ UI/src/components/jarvis/sections.tsx              | 2294 ------
+ UI/src/components/ui/accordion.tsx                 |   51 -
+ UI/src/components/ui/alert-dialog.tsx              |  115 -
+ UI/src/components/ui/alert.tsx                     |   49 -
+ UI/src/components/ui/aspect-ratio.tsx              |    5 -
+ UI/src/components/ui/avatar.tsx                    |   47 -
+ UI/src/components/ui/badge.tsx                     |   32 -
+ UI/src/components/ui/breadcrumb.tsx                |  101 -
+ UI/src/components/ui/button.tsx                    |   49 -
+ UI/src/components/ui/calendar.tsx                  |  177 -
+ UI/src/components/ui/card.tsx                      |   55 -
+ UI/src/components/ui/carousel.tsx                  |  240 -
+ UI/src/components/ui/chart.tsx                     |  331 -
+ UI/src/components/ui/checkbox.tsx                  |   26 -
+ UI/src/components/ui/collapsible.tsx               |   11 -
+ UI/src/components/ui/command.tsx                   |  143 -
+ UI/src/components/ui/context-menu.tsx              |  186 -
+ UI/src/components/ui/dialog.tsx                    |  104 -
+ UI/src/components/ui/drawer.tsx                    |   98 -
+ UI/src/components/ui/dropdown-menu.tsx             |  187 -
+ UI/src/components/ui/form.tsx                      |  171 -
+ UI/src/components/ui/hover-card.tsx                |   27 -
+ UI/src/components/ui/input-otp.tsx                 |   73 -
+ UI/src/components/ui/input.tsx                     |   22 -
+ UI/src/components/ui/label.tsx                     |   21 -
+ UI/src/components/ui/menubar.tsx                   |  228 -
+ UI/src/components/ui/navigation-menu.tsx           |  120 -
+ UI/src/components/ui/pagination.tsx                |   98 -
+ UI/src/components/ui/popover.tsx                   |   31 -
+ UI/src/components/ui/progress.tsx                  |   25 -
+ UI/src/components/ui/radio-group.tsx               |   36 -
+ UI/src/components/ui/resizable.tsx                 |   37 -
+ UI/src/components/ui/scroll-area.tsx               |   44 -
+ UI/src/components/ui/select.tsx                    |  152 -
+ UI/src/components/ui/separator.tsx                 |   24 -
+ UI/src/components/ui/sheet.tsx                     |  122 -
+ UI/src/components/ui/sidebar.tsx                   |  744 --
+ UI/src/components/ui/skeleton.tsx                  |    7 -
+ UI/src/components/ui/slider.tsx                    |   23 -
+ UI/src/components/ui/sonner.tsx                    |   23 -
+ UI/src/components/ui/switch.tsx                    |   27 -
+ UI/src/components/ui/table.tsx                     |   94 -
+ UI/src/components/ui/tabs.tsx                      |   53 -
+ UI/src/components/ui/textarea.tsx                  |   21 -
+ UI/src/components/ui/toggle-group.tsx              |   57 -
+ UI/src/components/ui/toggle.tsx                    |   42 -
+ UI/src/components/ui/tooltip.tsx                   |   32 -
+ UI/src/hooks/use-mobile.tsx                        |   19 -
+ UI/src/lib/error-capture.ts                        |   81 -
+ UI/src/lib/error-page.ts                           |   30 -
+ UI/src/lib/jarvis/adapter.ts                       |   10 -
+ UI/src/lib/jarvis/live-data.ts                     |  310 -
+ UI/src/lib/jarvis/production-adapter.ts            |  843 ---
+ UI/src/lib/jarvis/prototype-adapter.ts             |  323 -
+ UI/src/lib/jarvis/runtime-control.ts               |  218 -
+ UI/src/lib/jarvis/runtime-status.ts                |   18 -
+ UI/src/lib/jarvis/transport.ts                     |  145 -
+ UI/src/lib/jarvis/types.ts                         |  336 -
+ UI/src/lib/jarvis/use-jarvis.ts                    |   79 -
+ UI/src/lib/lovable-error-reporting.ts              |   59 -
+ UI/src/lib/utils.ts                                |    6 -
+ UI/src/routeTree.gen.ts                            |   69 -
+ UI/src/router.tsx                                  |   16 -
+ UI/src/routes/__root.tsx                           |  131 -
+ UI/src/routes/index.tsx                            |   95 -
+ UI/src/server.ts                                   |   61 -
+ UI/src/start.ts                                    |   29 -
+ UI/src/styles.css                                  |  143 -
+ UI/tests/WindowsAppFreshness.Tests/Program.cs      |  665 --
+ UI/tests/WindowsAppFreshness.Tests/README.md       |   15 -
+ .../WindowsAppFreshness.Tests.csproj               |   14 -
+ UI/tests/live-data.test.mjs                        |  252 -
+ UI/tsconfig.json                                   |   30 -
+ UI/vite.config.ts                                  |  164 -
+ core/audio_turn_routing.py                         |   62 -
+ core/context_window.py                             |   25 +-
+ core/direct_audio.py                               |  371 -
+ core/expert_policy.py                              |  160 -
+ core/live_telemetry.py                             |   48 -
+ core/memory_manager.py                             |   95 +-
+ core/model_handover.py                             |  590 --
+ core/npu_face_backend.py                           |  346 -
+ core/privacy_gate.py                               |    4 +
+ core/runtime_state.py                              |  305 -
+ core/speculative_turn.py                           |  240 -
+ core/tools/delegate_to_expert.py                   |  152 -
+ core/turn_assembler.py                             |  183 -
+ core/vision_gate.py                                |  172 -
+ core/wake_word_utils.py                            |   33 -
+ docs/RUNTIME_SUPERVISOR.md                         |  212 -
+ jarvis_continuous.py                               |   21 +
+ jarvis_web.py                                      |  333 +-
+ killswitch.sh                                      |    0
+ pyproject.toml                                     |   17 -
+ requirements-anthropic.txt                         |    3 -
+ requirements-ci.txt                                |   12 -
+ restart.sh                                         |    0
+ scripts/install_desktop_extension.sh               |    0
+ scripts/jarvis-approve                             |    0
+ scripts/jarvis-circuit-reset                       |    0
+ scripts/jarvis-confirm                             |    0
+ scripts/jarvis-governance-setup                    |    0
+ scripts/query_reminders.py                         |    0
+ scripts/runtime_status.py                          |  482 --
+ scripts/session_init.sh                            |    0
+ scripts/unit_tests.sh                              |    0
+ scripts/weekly_journal_audit.sh                    |    0
+ scripts/ws_test.py                                 |    0
+ scripts/wsl-pytest.ps1                             |   41 -
+ start.sh                                           |    0
+ start_jarvis_gpu.sh                                |    0
+ startup_checks.sh                                  |    0
+ status.sh                                          |    0
+ stop.sh                                            |    0
+ systemd/llama-server-expert.service                |   53 -
+ systemd/llama-server-primary.service               |   56 -
+ tests/integration/test_desktop_manager.py          |    0
+ tests/integration/test_voice.py                    |    0
+ tests/powershell/Test-JarvisRuntimeSupervisor.ps1  |  224 -
+ tests/unit/test_active_voice_event_telemetry.py    |  100 -
+ tests/unit/test_audio_turn_routing.py              |  546 --
+ tests/unit/test_direct_audio_routing.py            |  381 -
+ tests/unit/test_expert_delegation.py               |  162 -
+ tests/unit/test_expert_handover_integration.py     |  335 -
+ tests/unit/test_jarvis_web_app.py                  |  653 --
+ tests/unit/test_live_telemetry.py                  |   26 -
+ tests/unit/test_llm_cloud_provider.py              |  296 -
+ tests/unit/test_llm_router_hardening.py            |  269 -
+ tests/unit/test_model_handover.py                  |  490 --
+ tests/unit/test_presence_npu_backend.py            |  305 -
+ tests/unit/test_privacy_direct_audio.py            |  269 -
+ tests/unit/test_runtime_status.py                  |  823 --
+ tests/unit/test_speculative_audio_side_effects.py  |  334 -
+ tests/unit/test_stop_fastpath_integration.py       |  235 -
+ tests/unit/test_turn_assembler.py                  |  381 -
+ tests/unit/test_vision_gate.py                     |  280 -
+ tests/unit/test_voice_routing_hardening.py         |  164 -
+ tests/unit/test_watchdog_listener_idle.py          |   76 -
+ tools/backup_jarvis.sh                             |    0
+ tools/openvino_npu_worker.py                       |  150 -
+ tools/validate_skill.py                            |    0
+ web/dashboard.html                                 |    1 +
+ web/dashboard_governance.html                      |    1 +
+ web/dashboard_health.html                          |    1 +
+ web/dashboard_pipeline.html                        |    1 +
+ web/index.html                                     |    3 +-
+ web/memory.html                                    |    1 +
+ 486 files changed, 651 insertions(+), 72069 deletions(-)
+
+===== UNTRACKED FILES =====
+.github/CODEOWNERS
+.github/dependabot.yml
+.github/workflows/ci-python.yml
+CLAUDE.md
+JARVIS-Runtime.ps1
+core/audio_turn_routing.py
+core/direct_audio.py
+core/expert_policy.py
+core/live_telemetry.py
+core/mail_integration.py
+core/model_handover.py
+core/npu_face_backend.py
+core/runtime_state.py
+core/speculative_turn.py
+core/tools/delegate_to_expert.py
+core/tools/mail_status.py
+core/turn_assembler.py
+core/vision_gate.py
+core/wake_word_utils.py
+docs/RUNTIME_SUPERVISOR.md
+pyproject.toml
+requirements-anthropic.txt
+requirements-ci.txt
+scripts/runtime_status.py
+scripts/wsl-pytest.ps1
+systemd/llama-server-expert.service
+systemd/llama-server-primary.service
+tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+tests/unit/test_active_voice_event_telemetry.py
+tests/unit/test_audio_turn_routing.py
+tests/unit/test_context_window_read_only.py
+tests/unit/test_direct_audio_routing.py
+tests/unit/test_expert_delegation.py
+tests/unit/test_expert_handover_integration.py
+tests/unit/test_jarvis_web_app.py
+tests/unit/test_jarvis_web_desktop_mode.py
+tests/unit/test_live_telemetry.py
+tests/unit/test_llm_cloud_provider.py
+tests/unit/test_llm_router_hardening.py
+tests/unit/test_mail_integration.py
+tests/unit/test_memory_read_only.py
+tests/unit/test_model_handover.py
+tests/unit/test_presence_npu_backend.py
+tests/unit/test_privacy_direct_audio.py
+tests/unit/test_runtime_status.py
+tests/unit/test_speculative_audio_side_effects.py
+tests/unit/test_stop_fastpath_integration.py
+tests/unit/test_turn_assembler.py
+tests/unit/test_vision_gate.py
+tests/unit/test_voice_routing_hardening.py
+tests/unit/test_watchdog_listener_idle.py
+tools/openvino_npu_worker.py
+web/dashboard_mail.css
+web/dashboard_mail.html
+web/dashboard_mail.js
+
+===== MAILCOW RELATED =====
+?? core/mail_integration.py
+?? core/tools/mail_status.py
+?? tests/unit/test_mail_integration.py
+?? web/dashboard_mail.css
+?? web/dashboard_mail.html
+?? web/dashboard_mail.js
+core/mail_integration.py
+core/tools/mail_status.py
+tests/unit/test_mail_integration.py
+web/dashboard_mail.css
+web/dashboard_mail.html
+web/dashboard_mail.js
+
+===== GENERATED / CACHE CANDIDATES =====
+.pytest_cache
+__pycache__
+core\__pycache__
+core\tools\__pycache__
+scripts\__pycache__
+skills\personal\conversation\__pycache__
+skills\personal\news\__pycache__
+skills\personal\reminders\__pycache__
+skills\personal\school\__pycache__
+skills\personal\social_introductions\__pycache__
+skills\system\app_launcher\__pycache__
+skills\system\developer_tools\__pycache__
+skills\system\filesystem\__pycache__
+skills\system\file_editor\__pycache__
+skills\system\mobility\__pycache__
+skills\system\privacy\__pycache__
+skills\system\system_info\__pycache__
+skills\system\time_info\__pycache__
+skills\system\weather\__pycache__
+skills\system\web_navigation\__pycache__
+tests\__pycache__
+tests\components\__pycache__
+tests\integration\__pycache__
+tests\routing\__pycache__
+tests\unit\__pycache__
+tools\__pycache__
+
+===== BACKUP SUMMARY =====
+BACKUP=C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Main-PreConsolidation
+BACKUP_FILES=58
+MANIFEST=C:\Users\Alex\Projekte\JARVIS-Sleepy\Handoff\Cleanup-2026-09-29\Main-PreConsolidation\manifest-sha256.txt
+End: 2026-09-29 16:48:54 +02:00

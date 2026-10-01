@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "provider_id": "example_local_calendar",
+  "provider_version": "0.1.0",
+  "provides": ["calendar.list", "calendar.read", "calendar.search"],
+  "execution_context": "LOCAL",
+  "additional_risk": {
+    "calendar.read": ["SENSITIVE"]
+  },
+  "merge_semantics": "UNION"
+}

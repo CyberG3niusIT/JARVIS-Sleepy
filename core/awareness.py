@@ -230,7 +230,8 @@ class AwarenessAssembler:
             phrase = self.memory_manager._fact_to_phrase(f) or f["content"]
 
             # Special handling for computed values (e.g., age)
-            if "currently " in phrase and "years old" in phrase:
+            if (("currently " in phrase and "years old" in phrase)
+                or ("derzeit " in phrase and "Jahre alt" in phrase)):
                 text = (f"KNOWN FACT: {phrase}. Use this pre-computed "
                         f"value — do NOT calculate it yourself.")
             else:

@@ -68,6 +68,23 @@ def reset_privacy_gate_singleton_for_tests() -> None:
         _instance = None
 
 
+_CURRENT_GATE = object()
+
+
+def persistence_allowed(capability, gate=_CURRENT_GATE) -> bool:
+    """Writer boundary: only an explicit True permits persistence.
+
+    A missing/broken authority skips the write, not the volatile operation.
+    Diagnostics intentionally exclude content and exception text.
+    """
+    try:
+        authority = get_privacy_gate() if gate is _CURRENT_GATE else gate
+        return authority is not None and authority.allow(capability) is True
+    except Exception:
+        logger.warning("privacy.persistence_check_failed capability=%s", capability.value)
+        return False
+
+
 class PrivacyMode(enum.Enum):
     NORMAL = "normal"
     PRIVACY = "privacy"

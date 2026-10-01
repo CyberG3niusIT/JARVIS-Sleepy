@@ -45,7 +45,7 @@ from core.logger import Logger
 from core.conversation import ConversationManager
 from core.responses import get_response_library
 from core.llm_router import LLMRouter, ToolCallRequest
-from core.web_research import WebResearcher, format_search_results
+from core.web_research import WebResearcher, format_search_results, run_search
 from core.skill_manager import SkillManager
 from core.reminder_manager import get_reminder_manager
 from core.news_manager import get_news_manager
@@ -140,7 +140,7 @@ def _configured_web_auth_token(config):
     return ''
 
 
-_PUBLIC_EXTENSIONS = {'.css', '.js', '.svg', '.png', '.ico', '.woff', '.woff2'}
+_PUBLIC_STATIC_EXTENSIONS = {'.css', '.js', '.svg', '.png', '.ico', '.woff', '.woff2'}
 
 
 # Paths that use their own authentication (not web auth token)
@@ -152,7 +152,13 @@ async def auth_middleware(request, handler):
     """Reject requests without a valid auth token."""
     if request.path == '/dashboard/mail':
         return await handler(request)  # Empty shell; every mail API call authenticates.
-    if Path(request.path).suffix in _PUBLIC_EXTENSIONS:
+    # Only registered static resources may serve public assets. A dynamic API
+    # parameter ending in .js/.png is still an authenticated API request.
+    if (request.method in {'GET', 'HEAD'}
+            and not request.path.startswith(('/api/', '/ws/'))
+            and request.path not in {'/api', '/ws'}
+            and request.match_info.route.resource in request.app.get('public_static_resources', ())
+            and Path(request.path).suffix in _PUBLIC_STATIC_EXTENSIONS):
         return await handler(request)
     # Governance endpoints with their own auth (sudo + governance password)
     if request.path.startswith('/api/governance/') and (
@@ -160,7 +166,7 @@ async def auth_middleware(request, handler):
     ):
         return await handler(request)
     if not _check_auth_token(request):
-        raise web.HTTPUnauthorized(text='Invalid or missing auth token')
+        raise web.HTTPUnauthorized(text='Ungültiger oder fehlender Authentifizierungstoken')
     return await handler(request)
 
 
@@ -364,6 +370,7 @@ def init_components(config, tts_proxy, desktop_mode=False):
     components['skill_manager'] = SkillManager(
         config, conversation, tts_proxy, components['responses'], components['llm'],
         embedding_device=web_embedding_device,
+        preload_embeddings=not desktop_mode,
     )
     components['skill_manager'].load_all_skills()
 
@@ -592,40 +599,42 @@ def init_components(config, tts_proxy, desktop_mode=False):
 
 _AFFIRM_WORDS = {"yes", "yeah", "yep", "yup", "sure", "please", "go ahead",
                  "yes please", "go for it", "read it", "absolutely", "ok",
-                 "okay", "definitely"}
+                 "okay", "definitely", "ja", "ja bitte", "bitte", "gern", "gerne", "mach weiter"}
 
 # Delivery mode keyword sets — checked after affirm prefix is stripped
 _DELIVERY_MODES = {
     "read": {"read it", "read it to me", "read through it", "go through it",
-             "read it out", "read that"},
+             "read it out", "read that", "lies es vor", "lies vor", "vorlesen"},
     "display": {"display it", "show it in chat", "in the chat", "put it in chat",
-                "in chat", "display it in chat", "text it"},
+                "in chat", "display it in chat", "text it", "hier anzeigen", "im chat anzeigen", "anzeigen"},
     "print": {"print it", "print it out", "send it to the printer",
-              "print that", "print that out"},
+              "print that", "print that out", "druck es", "drucke es", "drucken"},
     "browse": {"open it online", "see it online", "open the link",
                "open the page", "open it in the browser", "open the url",
-               "pull it up"},
+               "pull it up", "im browser öffnen", "öffne den link", "öffne die seite", "online öffnen"},
 }
 _DELIVERY_CLARIFY = {"show me", "show it to me", "can i see it", "let me see",
-                     "show it", "let me see it"}
+                     "show it", "let me see it", "zeig es mir", "zeige es mir", "zeig mir", "zeige mir"}
 
 # Phrases that resolve "show me X" to a specific mode (checked before clarify)
 _SHOW_ME_RESOLVERS = {
     "display": {"in the chat", "in chat", "on screen", "on the screen",
-                "here", "in our chat"},
-    "print": {"on paper", "a printout", "a hard copy"},
+                "here", "in our chat", "hier", "im chat", "auf dem bildschirm"},
+    "print": {"on paper", "a printout", "a hard copy", "auf papier", "als ausdruck"},
     "browse": {"online", "in the browser", "in my browser", "the link",
-               "the page", "the website"},
+               "the page", "the website", "im browser", "den link", "die seite"},
 }
 
 # Phrases in JARVIS's last response that indicate a delivery offer
 _OFFER_PHRASES = ["would you like me to read", "want me to read",
-                  "shall i read", "like me to go through"]
+                  "shall i read", "like me to go through", "soll ich es vorlesen",
+                  "möchten sie, dass ich vorlese", "möchtest du, dass ich vorlese"]
 # Phrases that indicate JARVIS asked a clarification about delivery mode
 _CLARIFY_PHRASES = ["read it to you", "show it here", "display it in chat",
                     "print it", "open the page", "pull it up in your browser",
                     "send it to the printer", "open it online",
-                    "which works best", "what would you prefer"]
+                    "which works best", "what would you prefer", "vorlesen", "hier anzeigen",
+                    "drucken", "im browser öffnen", "was bevorzugen sie", "online öffnen"]
 
 
 def _detect_delivery_mode(command: str, last_response: str) -> str | None:
@@ -636,6 +645,9 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
     """
     cmd = command.strip().lower().rstrip(".,!?")
     lower_resp = (last_response or "").lower()
+
+    def affirm_prefix(value, phrase):
+        return value == phrase or (value.startswith(phrase) and value[len(phrase):len(phrase) + 1] in (" ", ",", ".", "!", "?"))
 
     # 1) Check for explicit delivery mode keywords (no affirm needed)
     for mode, phrases in _DELIVERY_MODES.items():
@@ -667,7 +679,7 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
     matched = cmd in _AFFIRM_WORDS
     if not matched:
         sorted_affirms = sorted(_AFFIRM_WORDS, key=len, reverse=True)
-        matched = any(cmd.startswith(a) for a in sorted_affirms)
+        matched = any(affirm_prefix(cmd, a) for a in sorted_affirms)
     if not matched:
         return None
 
@@ -677,7 +689,7 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
         # User said "yes" to clarification — strip affirm prefix, check remainder
         remainder = cmd
         for a in sorted(_AFFIRM_WORDS, key=len, reverse=True):
-            if remainder.startswith(a):
+            if affirm_prefix(remainder, a):
                 remainder = remainder[len(a):].lstrip(" ,.")
                 break
         if remainder:
@@ -692,7 +704,7 @@ def _detect_delivery_mode(command: str, last_response: str) -> str | None:
         # Check if affirm has a trailing delivery mode: "yes print it"
         remainder = cmd
         for a in sorted(_AFFIRM_WORDS, key=len, reverse=True):
-            if remainder.startswith(a):
+            if affirm_prefix(remainder, a):
                 remainder = remainder[len(a):].lstrip(" ,.")
                 break
         if remainder:
@@ -735,7 +747,8 @@ def _primary_chat_url() -> str:
 
 async def _stream_readback(ws, llm, cached_tool_result: str,
                                    conv_state=None,
-                                   prior_synthesis: str = None) -> tuple:
+                                   prior_synthesis: str = None,
+                                   current_request: str = None) -> tuple:
     """Stream full content (recipe, instructions, steps) from cached search results."""
     import requests as _requests
     from core.honorific import get_honorific, get_formal_address
@@ -743,39 +756,40 @@ async def _stream_readback(ws, llm, cached_tool_result: str,
     h = get_honorific()
     formal = get_formal_address()
     if formal:
-        honorific_rule = f"YOU MUST address the user as '{h}' or '{formal}'."
+        honorific_rule = f"Sprich den Benutzer an mit '{h}' oder '{formal}'."
     else:
-        honorific_rule = f"YOU MUST address the user as '{h}'."
+        honorific_rule = f"Sprich den Benutzer an mit '{h}'."
 
     # Tell readback which result was picked — prefer cache artifact over conv_state
     prior_pick = ""
     _pick_source = prior_synthesis or (conv_state.last_response_text if conv_state else "")
     if _pick_source:
         prior_pick = (
-            f"\nIn your previous response you recommended this:\n"
+            f"\nIn deiner vorherigen Antwort hast du dies empfohlen:\n"
             f'"{_pick_source}"\n'
-            "YOU MUST read from the SAME source you recommended above.\n"
+            "Lies aus derselben zuvor empfohlenen Quelle.\n"
         )
 
     # Build a simple messages list: system + tool result + read instruction
     messages = [
-        {"role": "system", "content": "You are JARVIS, a personal AI assistant."},
+        {"role": "system", "content": persona.system_prompt()},
         {"role": "user", "content": (
-            f"Here are search results:\n\n{cached_tool_result}\n\n"
+            f"Aktuelle Anfrage: {current_request or 'Lies den Inhalt vor.'}\n\n"
+            f"Hier sind Suchergebnisse:\n\n{cached_tool_result}\n\n"
             f"{prior_pick}"
-            "The user has asked you to read the full content (recipe, instructions, steps, etc.).\n"
-            "RULES — follow these EXACTLY:\n"
-            "1. YOU MUST read from the SAME source you recommended in your previous response. "
-            "DO NOT switch to a different source. DO NOT combine, consolidate, or merge "
-            "content from multiple sources.\n"
-            "2. Read ALL of the content from that single result in full. If it is a recipe, "
-            "list ALL ingredients with exact quantities, then ALL steps in order. If it is "
-            "instructions or a how-to, read every step. DO NOT summarize or skip anything.\n"
+            "Der Benutzer möchte den vollständigen Inhalt hören (Rezept, Anleitung, Schritte usw.).\n"
+            "REGELN, genau befolgen:\n"
+            "1. Verwende dieselbe Quelle, die du zuvor empfohlen hast. "
+            "Wechsle nicht die Quelle. Kombiniere oder vermische keine "
+            "Inhalte verschiedener Quellen.\n"
+            "2. Lies den vollständigen Inhalt dieses einzelnen Ergebnisses. Bei einem Rezept "
+            "nenne alle Zutaten mit genauen Mengen, danach alle Schritte in Reihenfolge. Bei "
+            "Anleitungen lies jeden Schritt. Fasse nichts zusammen und lasse nichts aus.\n"
             f"3. {honorific_rule}\n"
-            "4. DO NOT start with filler. Jump straight into the content.\n"
-            "5. Present it clearly and in logical order.\n"
-            "6. DO NOT explain your reasoning about which rules you are following. "
-            "Just deliver the content naturally."
+            "4. Beginne direkt mit dem Inhalt, ohne Füllsätze.\n"
+            "5. Stelle den Inhalt klar und in logischer Reihenfolge dar.\n"
+            "6. Erläutere nicht, welchen Regeln du folgst. "
+            "Gib den Inhalt natürlich wieder."
         )},
     ]
 
@@ -878,7 +892,7 @@ async def _stream_readback(ws, llm, cached_tool_result: str,
 # Structured readback — section-based interactive delivery
 # ---------------------------------------------------------------------------
 
-async def _start_structured_readback(ws, llm, conv_state, tts_proxy) -> tuple:
+async def _start_structured_readback(ws, llm, conv_state, tts_proxy, current_request=None) -> tuple:
     """Parse content into structured JSON, then begin section-based delivery.
 
     Falls back to _stream_readback() if parse fails.
@@ -904,13 +918,13 @@ async def _start_structured_readback(ws, llm, conv_state, tts_proxy) -> tuple:
         _cached_text = conv_state.last_tool_result_text
 
     if not _cached_text:
-        return ("I don't have any content to read back.", False)
+        return ("Es gibt keinen Inhalt zum Vorlesen.", False)
 
     # Try structured parse
     session = ReadbackSession()
     prior_pick = _prior_synthesis or conv_state.last_response_text or ""
     parse_ok = await asyncio.to_thread(
-        session.parse_content, _cached_text, prior_pick, llm,
+        session.parse_content, _cached_text, prior_pick, llm, current_request=current_request,
     )
 
     if not parse_ok:
@@ -919,6 +933,7 @@ async def _start_structured_readback(ws, llm, conv_state, tts_proxy) -> tuple:
         result = await _stream_readback(
             ws, llm, _cached_text, conv_state=conv_state,
             prior_synthesis=_prior_synthesis,
+            current_request=current_request,
         )
         conv_state.last_tool_result_text = ""
         return result
@@ -1023,11 +1038,11 @@ async def _deliver_readback_section(ws, conv_state, tts_proxy, section_name: str
     """Re-deliver a specific section by name.  Returns (text, streamed)."""
     session = conv_state.readback_session
     if not session:
-        return ("I don't have an active readback.", False)
+        return ("Es gibt keine aktive Vorlesesitzung.", False)
 
     chunk = session.get_section(section_name)
     if not chunk:
-        return (f"I don't have a {section_name} section in the current content.", False)
+        return (f"Im aktuellen Inhalt gibt es keinen Abschnitt {section_name}.", False)
 
     section_text = _ensure_honorific_tail(chunk.content)
 
@@ -1079,7 +1094,7 @@ async def _display_in_chat(ws, llm, conv_state, tts_proxy) -> tuple:
 
     cached_text, _prov = _get_cached_content(conv_state)
     if not cached_text:
-        return ("I don't have any content to display.", False)
+        return ("Es gibt keinen Inhalt zum Anzeigen.", False)
 
     # Try structured parse for nice formatting
     session = ReadbackSession()
@@ -1128,7 +1143,7 @@ async def _print_content(ws, llm, conv_state, tts_proxy) -> tuple:
 
     cached_text, _prov = _get_cached_content(conv_state)
     if not cached_text:
-        return ("I don't have any content to print.", False)
+        return ("Es gibt keinen Inhalt zum Drucken.", False)
 
     # Parse for nice formatting
     session = ReadbackSession()
@@ -1170,11 +1185,11 @@ async def _print_content(ws, llm, conv_state, tts_proxy) -> tuple:
                     break
     except Exception as e:
         logger.error(f"Printer detection failed: {e}")
-        resp = f"I couldn't detect a printer, {persona.get_honorific()}. Please check that your printer is connected."
+        resp = f"Ich konnte keinen Drucker erkennen, {persona.get_honorific()}. Bitte prüfe die Verbindung zum Drucker."
         return (resp, False)
 
     if not printer:
-        resp = f"No printers found on the system, {persona.get_honorific()}. Please check your printer connection."
+        resp = f"Keine Drucker gefunden, {persona.get_honorific()}. Bitte prüfe die Verbindung zum Drucker."
         return (resp, False)
 
     # Write to temp file and send
@@ -1190,13 +1205,13 @@ async def _print_content(ws, llm, conv_state, tts_proxy) -> tuple:
         )
         if result.returncode == 0:
             logger.info(f"Sent content to printer {printer}")
-            resp = f"Sent to the printer, {persona.get_honorific()}."
+            resp = f"An den Drucker gesendet, {persona.get_honorific()}."
         else:
             logger.error(f"lp failed: {result.stderr}")
-            resp = f"The print command failed, {persona.get_honorific()}. {result.stderr.strip()}"
+            resp = f"Der Druckauftrag ist fehlgeschlagen, {persona.get_honorific()}."
     except Exception as e:
         logger.error(f"Print failed: {e}")
-        resp = f"I couldn't send it to the printer, {persona.get_honorific()}. Error: {e}"
+        resp = f"Ich konnte den Inhalt nicht an den Drucker senden, {persona.get_honorific()}."
     finally:
         import os
         try:
@@ -1221,7 +1236,7 @@ async def _open_in_browser(ws, conv_state, tts_proxy, config: dict) -> tuple:
             url = urls[0].get("url")
 
     if not url:
-        resp = f"I don't have a URL to open, {persona.get_honorific()}."
+        resp = f"Keine URL zum Öffnen vorhanden, {persona.get_honorific()}."
         return (resp, False)
 
     browser = config.get("web_navigation", {}).get("default_browser", "brave") if config else "brave"
@@ -1230,10 +1245,10 @@ async def _open_in_browser(ws, conv_state, tts_proxy, config: dict) -> tuple:
     try:
         subprocess.Popen([browser_cmd, url])
         logger.info(f"Opened {url} in {browser_cmd}")
-        resp = f"Opening that up for you, {persona.get_honorific()}."
+        resp = f"Ich öffne die Seite für dich, {persona.get_honorific()}."
     except Exception as e:
         logger.error(f"Browser open failed: {e}")
-        resp = f"I couldn't open the browser, {persona.get_honorific()}. Error: {e}"
+        resp = f"Ich konnte den Browser nicht öffnen, {persona.get_honorific()}."
 
     conv_state.last_tool_result_text = ""
     return (resp, False)
@@ -1274,8 +1289,8 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
 
     _user_id = conn_ctx.user_id if conn_ctx else conversation.current_user
     _client_type = conn_ctx.client_type if conn_ctx else getattr(conversation, 'client_type', None)
-    logger.debug("process_command: raw=%r image=%s client_type=%s",
-                 command[:200], bool(image_data), _client_type)
+    logger.debug("process_command: length=%d image=%s client_type=%s",
+                 len(command), bool(image_data), _client_type)
 
     from core.debug_logger import get_debug_logger
     _dbg = get_debug_logger()
@@ -1469,7 +1484,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
             # "Read that to me" — route cached content to structured readback
             used_llm = True
             response, streamed = await _start_structured_readback(
-                ws, llm, conv_state, tts_proxy,
+                ws, llm, conv_state, tts_proxy, current_request=command,
             )
 
     # --- Delivery mode dispatch: user responds to content offer ---
@@ -1481,7 +1496,7 @@ async def process_command(command: str, components: dict, tts_proxy: WebTTSProxy
         if delivery_mode == "read":
             used_llm = True
             response, streamed = await _start_structured_readback(
-                ws, llm, conv_state, tts_proxy,
+                ws, llm, conv_state, tts_proxy, current_request=command,
             )
         elif delivery_mode == "display":
             used_llm = True
@@ -1696,7 +1711,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                 context_messages=conversation_messages,
                 tools=use_tools_list,
             )
-            logger.debug(f"LLM input (first 200): {command[:200]}")
+            logger.debug("LLM input length=%d", len(command))
             logger.debug(f"Tools: {[t['function']['name'] for t in use_tools_list] if use_tools_list else 'none'}")
             source = (
                 llm.stream_with_tools(
@@ -1766,7 +1781,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                         # Quality retry — fall back to non-streaming
                         await ws.send_json({
                             'type': 'info',
-                            'content': f'Quality retry: {quality_issue}',
+                            'content': f'Erneute Qualitätsprüfung: {quality_issue}',
                         })
                         retry = await asyncio.to_thread(
                             llm.chat,
@@ -1819,7 +1834,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                 )
                 break
 
-            logger.info(f"Tool call: {tool_call_request.name}({tool_call_request.arguments})")
+            logger.info("Tool call: %s", tool_call_request.name)
             # Record tool name for anaphoric context in next turn
             if conv_state is not None and tool_call_request.name not in conv_state.last_tools_called:
                 conv_state.last_tools_called.append(tool_call_request.name)
@@ -1834,7 +1849,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                 query = tool_call_request.arguments.get('query', command)
                 await ws.send_json({
                     'type': 'info',
-                    'content': f'Searching: {query}',
+                    'content': f'Suche: {query}',
                 })
                 # Trim fetch volume on 2nd+ search — snippets alone
                 # provide sufficient factual density for sub-queries.
@@ -1842,13 +1857,14 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                 _max_res = 3 if _is_followup else 5
                 _max_chars = 2000 if _is_followup else 4000
                 _ws_t0 = time.perf_counter()
-                results = await asyncio.to_thread(
-                    web_researcher.search, query, max_results=_max_res,
+                search_outcome = await asyncio.to_thread(
+                    run_search, web_researcher, query, max_results=_max_res,
                 )
+                results = search_outcome.results
                 page_sections = await asyncio.to_thread(
                     web_researcher.fetch_pages_parallel, results,
                     max_results=_max_res, max_chars=_max_chars,
-                )
+                ) if search_outcome.has_results else []
                 _ws_elapsed = (time.perf_counter() - _ws_t0) * 1000
                 # Structured event: web_search tool execution
                 try:
@@ -1858,24 +1874,33 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                         _el.emit(
                             category="tool_execution",
                             event="tool_completed",
-                            message=f"web_search: {query[:80]} → {len(results)} results in {_ws_elapsed:.0f}ms",
+                            message="Web search completed",
                             severity="info",
                             source="tool_registry",
                             stage="tool",
-                            status="success",
+                            status=search_outcome.event_status,
                             latency_ms=round(_ws_elapsed, 1),
                             metadata={
                                 "tool_name": "web_search",
-                                "query": query[:200],
+                                "search_status": search_outcome.status,
+                                "backend": search_outcome.backend,
+                                "error_type": search_outcome.error_type,
                                 "result_count": len(results),
                                 "pages_fetched": len(page_sections) if page_sections else 0,
                             },
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Search event persistence failed (%s)", type(exc).__name__)
+                if not search_outcome.has_results:
+                    if conv_state is not None:
+                        conv_state.research_results = []
+                        conv_state.last_tool_result_text = ""
+                    response = search_outcome.failure_message
+                    await ws.send_json({'type': 'stream_end', 'full_response': response})
+                    return (response, True, None)
                 page_content = ""
                 if page_sections:
-                    page_content = ("\n\nFull article content:\n\n"
+                    page_content = ("\n\nVollständiger Artikelinhalt:\n\n"
                                     + "\n\n---\n\n".join(page_sections))
                 tool_result = format_search_results(results) + page_content
                 # Cache for recipe-offer follow-ups
@@ -1910,7 +1935,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
 
                 await ws.send_json({
                     'type': 'info',
-                    'content': f'Found {len(results)} results',
+                    'content': f'{len(results)} Ergebnisse gefunden',
                 })
             else:
                 # Skill tool — dispatch via tool_executor
@@ -1918,7 +1943,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                 from core.tool_registry import parse_tool_result, save_tool_image
                 await ws.send_json({
                     'type': 'info',
-                    'content': f'Running: {tool_call_request.name}',
+                    'content': f'Ausführung: {tool_call_request.name}',
                 })
                 _tool_args = tool_call_request.arguments
                 # Force capture_webcam to mobile when client is mobile —
@@ -1941,7 +1966,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
                 tool_result, tool_image_data = parse_tool_result(raw_result)
                 await ws.send_json({
                     'type': 'info',
-                    'content': f'Tool result: {tool_call_request.name} returned {len(tool_result)} chars',
+                    'content': f'Werkzeugergebnis: {tool_call_request.name} liefert {len(tool_result)} Zeichen',
                 })
                 # Emit raw tool output for test framework assertions
                 await ws.send_json({
@@ -2082,10 +2107,10 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
             ]
             if _summaries:
                 _fallback_prompt = (
-                    f"The user asked: {command}\n\n"
-                    "Here is the information gathered:\n\n"
+                    f"Die aktuelle Anfrage lautet: {command}\n\n"
+                    "Gesammelte Informationen:\n\n"
                     + "\n\n".join(_summaries)
-                    + "\n\nSynthesize a concise, complete answer."
+                    + "\n\nFormuliere eine kurze, vollständige Antwort. " + persona.OWNER_LANGUAGE_RULE
                 )
                 try:
                     synthesis = await asyncio.to_thread(
@@ -2166,7 +2191,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
             if quality_issue:
                 await ws.send_json({
                     'type': 'info',
-                    'content': f'Quality retry: {quality_issue}',
+                    'content': f'Erneute Qualitätsprüfung: {quality_issue}',
                 })
                 retry = await asyncio.to_thread(
                     llm.chat,
@@ -2189,7 +2214,7 @@ async def _stream_llm_ws(ws, llm, command, history, web_researcher,
     if full_response and web_researcher and _is_deflection(full_response):
         await ws.send_json({
             'type': 'info',
-            'content': 'Searching for current information...',
+            'content': 'Aktuelle Informationen werden gesucht ...',
         })
         fallback = await _do_web_search(command, web_researcher, llm)
         await ws.send_json({
@@ -2248,13 +2273,14 @@ async def _llm_fallback(llm, command, history, web_researcher,
         if tool_call_request:
             if tool_call_request.name == "web_search":
                 query = tool_call_request.arguments.get("query", command)
-                results = await asyncio.to_thread(web_researcher.search, query)
+                search_outcome = await asyncio.to_thread(run_search, web_researcher, query)
+                results = search_outcome.results
                 page_sections = await asyncio.to_thread(
                     web_researcher.fetch_pages_parallel, results
-                )
+                ) if search_outcome.has_results else []
                 page_content = ""
                 if page_sections:
-                    page_content = "\n\nFull article content:\n\n" + \
+                    page_content = "\n\nVollständiger Artikelinhalt:\n\n" + \
                         "\n\n---\n\n".join(page_sections)
                 tool_result = format_search_results(results) + page_content
                 # Emit tool_completed for fallback web_search path
@@ -2263,12 +2289,16 @@ async def _llm_fallback(llm, command, history, web_researcher,
                     _el = get_event_logger()
                     if _el:
                         _el.emit(event="tool_completed", category="tool_execution",
-                                 stage="web_search", status="success",
-                                 message=f"web_search: {query[:80]}",
-                                 metadata={"tool": "web_search", "query": query,
-                                           "results_count": len(results) if results else 0})
-                except Exception:
-                    pass
+                                 stage="web_search", status=search_outcome.event_status,
+                                 message="Web search completed",
+                                 metadata={"tool": "web_search", "search_status": search_outcome.status,
+                                           "backend": search_outcome.backend,
+                                           "error_type": search_outcome.error_type,
+                                           "results_count": len(results)})
+                except Exception as exc:
+                    logger.warning("Search event persistence failed (%s)", type(exc).__name__)
+                if not search_outcome.has_results:
+                    return search_outcome.failure_message
             else:
                 # Skill tool — dispatch via tool_executor
                 from core.tool_executor import execute_tool
@@ -2293,8 +2323,6 @@ async def _llm_fallback(llm, command, history, web_researcher,
                 for token in llm.continue_after_tool_call(
                     tool_call_request, tool_result,
                     tools=None,  # fallback path — web search only, no chaining
-                    synthesis_temperature=synthesis_temperature,
-                    synthesis_category=synthesis_category,
                 ):
                     if isinstance(token, ToolCallRequest):
                         break
@@ -2337,20 +2365,21 @@ def _is_deflection(response: str) -> bool:
 
 async def _do_web_search(command: str, web_researcher, llm) -> str:
     """Fallback web search when deflection detected."""
-    results = await asyncio.to_thread(web_researcher.search, command)
-    if not results:
-        return await asyncio.to_thread(llm.chat, user_message=command, conversation_history=[])
+    search_outcome = await asyncio.to_thread(run_search, web_researcher, command)
+    results = search_outcome.results
+    if not search_outcome.has_results:
+        return search_outcome.failure_message
 
     page_sections = await asyncio.to_thread(web_researcher.fetch_pages_parallel, results)
     page_content = ""
     if page_sections:
-        page_content = "\n\nFull article content:\n\n" + "\n\n---\n\n".join(page_sections)
+        page_content = "\n\nVollständiger Artikelinhalt:\n\n" + "\n\n---\n\n".join(page_sections)
 
     search_context = format_search_results(results) + page_content
 
     return await asyncio.to_thread(
         llm.chat,
-        user_message=f"Based on these search results:\n\n{search_context}\n\nAnswer: {command}",
+        user_message=f"Beantworte die aktuelle Anfrage anhand dieser Suchergebnisse:\n\n{search_context}\n\nAnfrage: {command}\n{persona.OWNER_LANGUAGE_RULE}",
         conversation_history=[],
     )
 
@@ -2474,7 +2503,7 @@ async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
             if health_data and health_data.get('brief'):
                 response_text = health_data['brief']
 
-            logger.info("JARVIS: %s%s", (response_text or "")[:200],
+            logger.info("JARVIS response length=%d%s", len(response_text or ""),
                         " [streamed]" if result.get('streamed') else "")
 
             # Always send response message (even empty) so every command
@@ -2513,7 +2542,7 @@ async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
             try:
                 await ws.send_json({
                     'type': 'error',
-                    'content': "An error occurred processing your request.",
+                    'content': "Bei der Verarbeitung deiner Anfrage ist ein Fehler aufgetreten.",
                 })
             except Exception:
                 pass  # WS may have closed
@@ -2528,7 +2557,7 @@ async def _handle_chat_message(ws, conn_ctx, components, tts_proxy, config,
 async def websocket_handler(request):
     """Handle a single WebSocket client connection."""
     if not _check_auth_token(request):
-        raise web.HTTPUnauthorized(text='Invalid or missing auth token')
+        raise web.HTTPUnauthorized(text='Ungültiger oder fehlender Authentifizierungstoken')
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
@@ -2634,7 +2663,7 @@ async def websocket_handler(request):
                     # Hidden restart command (replaces UI button)
                     if content == '_restart_serv':
                         logger.info("Restart requested via _restart_serv command")
-                        await ws.send_json({'type': 'info', 'content': 'Restarting...'})
+                        await ws.send_json({'type': 'info', 'content': 'Neustart läuft ...'})
                         asyncio.get_event_loop().call_later(0.5, _restart_server)
                         continue
 
@@ -2660,7 +2689,7 @@ async def websocket_handler(request):
                     if ext in BINARY_EXTENSIONS:
                         await ws.send_json({
                             'type': 'info',
-                            'content': f"Cannot load binary file ({ext}): {filename}",
+                            'content': f"Binärdatei kann nicht geladen werden ({ext}): {filename}",
                         })
                     elif content:
                         doc_buffer.load(content, f"file:{filename}")
@@ -2668,7 +2697,7 @@ async def websocket_handler(request):
                     else:
                         await ws.send_json({
                             'type': 'info',
-                            'content': f"File is empty: {filename}",
+                            'content': f"Datei ist leer: {filename}",
                         })
 
                 elif msg_type == 'toggle_voice':
@@ -2814,7 +2843,7 @@ async def websocket_handler(request):
 
                 elif msg_type == 'restart':
                     logger.info("Restart requested via web UI")
-                    await ws.send_json({'type': 'info', 'content': 'Restarting...'})
+                    await ws.send_json({'type': 'info', 'content': 'Neustart läuft ...'})
                     # Schedule restart after WebSocket closes cleanly
                     asyncio.get_event_loop().call_later(0.5, _restart_server)
 
@@ -2878,7 +2907,7 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
             doc_buffer.load(content, "paste")
             await _send_doc_loaded(ws, doc_buffer, "paste", content)
         else:
-            await ws.send_json({'type': 'info', 'content': "Nothing pasted."})
+            await ws.send_json({'type': 'info', 'content': "Kein Text eingefügt."})
 
     elif cmd == '/append':
         content = data.get('content', '').strip()
@@ -2893,10 +2922,10 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
             })
             await ws.send_json({
                 'type': 'info',
-                'content': f"Appended {lines} lines (~{doc_buffer.token_estimate} tokens total)",
+                'content': f"{lines} Zeilen ergänzt (insgesamt etwa {doc_buffer.token_estimate} Token)",
             })
         else:
-            await ws.send_json({'type': 'info', 'content': "Nothing to append."})
+            await ws.send_json({'type': 'info', 'content': "Kein Text zum Ergänzen."})
 
     elif cmd == '/clear':
         old_source, old_tokens = doc_buffer.clear()
@@ -2909,18 +2938,18 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
         if old_source:
             await ws.send_json({
                 'type': 'info',
-                'content': f"Document buffer cleared ({old_source}, ~{old_tokens} tokens).",
+                'content': f"Dokumentenpuffer geleert ({old_source}, etwa {old_tokens} Token).",
             })
         else:
             await ws.send_json({
                 'type': 'info',
-                'content': "Document buffer is already empty.",
+                'content': "Dokumentenpuffer ist bereits leer.",
             })
 
     elif cmd == '/file':
         file_path = data.get('path', '').strip()
         if not file_path:
-            await ws.send_json({'type': 'info', 'content': "Usage: /file <path>"})
+            await ws.send_json({'type': 'info', 'content': "Verwendung: /file <path>"})
             return
         await _load_file_into_buffer(ws, doc_buffer, file_path)
 
@@ -2938,12 +2967,12 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
             else:
                 await ws.send_json({
                     'type': 'info',
-                    'content': "Clipboard is empty.",
+                    'content': "Zwischenablage ist leer.",
                 })
         except Exception as e:
             await ws.send_json({
                 'type': 'info',
-                'content': f"Failed to read clipboard: {e}",
+                'content': "Zwischenablage konnte nicht gelesen werden.",
             })
 
     elif cmd == '/context':
@@ -2954,15 +2983,15 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
             await ws.send_json({
                 'type': 'info',
                 'content': (
-                    f"Document buffer active: ~{doc_buffer.token_estimate} tokens, "
-                    f"source: {doc_buffer.source}\n"
-                    f"Preview: {preview}"
+                    f"Dokumentenpuffer aktiv: etwa {doc_buffer.token_estimate} Token, "
+                    f"Quelle: {doc_buffer.source}\n"
+                    f"Vorschau: {preview}"
                 ),
             })
         else:
             await ws.send_json({
                 'type': 'info',
-                'content': "Document buffer is empty.",
+                'content': "Dokumentenpuffer ist leer.",
             })
 
     elif cmd == '/new':
@@ -2984,14 +3013,14 @@ async def _handle_ws_slash(ws, cmd: str, data: dict, doc_buffer: DocumentBuffer,
         })
         await ws.send_json({
             'type': 'info',
-            'content': "New session started.",
+            'content': "Neue Sitzung gestartet.",
         })
 
     elif cmd == '/help':
         await ws.send_json({
             'type': 'info',
-            'content': "J.A.R.V.I.S. Web UI — type naturally to interact. "
-                       "Use the toolbar buttons for paste, clear, file, clipboard, and help.",
+            'content': "J.A.R.V.I.S. Weboberfläche: Schreibe deine Anfrage. "
+                       "Die Werkzeugleiste bietet Einfügen, Leeren, Datei, Zwischenablage und Hilfe.",
         })
 
 
@@ -3006,7 +3035,7 @@ async def _send_doc_loaded(ws, doc_buffer, source_label, content):
     lines = content.count('\n') + 1
     await ws.send_json({
         'type': 'info',
-        'content': f"Document loaded: ~{doc_buffer.token_estimate} tokens, {lines} lines ({source_label})",
+        'content': f"Dokument geladen: etwa {doc_buffer.token_estimate} Token, {lines} Zeilen ({source_label})",
     })
 
 
@@ -3014,19 +3043,19 @@ async def _load_file_into_buffer(ws, doc_buffer, file_path):
     """Load a file from the server filesystem into the document buffer."""
     p = Path(file_path).expanduser().resolve()
     if not _is_path_allowed(p):
-        await ws.send_json({'type': 'info', 'content': "Access denied: path outside allowed directories"})
+        await ws.send_json({'type': 'info', 'content': "Zugriff verweigert: Pfad außerhalb der erlaubten Verzeichnisse"})
         return
     if not p.exists():
-        await ws.send_json({'type': 'info', 'content': f"File not found: {file_path}"})
+        await ws.send_json({'type': 'info', 'content': f"Datei nicht gefunden: {file_path}"})
         return
     if not p.is_file():
-        await ws.send_json({'type': 'info', 'content': f"Not a file: {file_path}"})
+        await ws.send_json({'type': 'info', 'content': f"Keine Datei: {file_path}"})
         return
     ext = p.suffix.lower()
     if ext in BINARY_EXTENSIONS:
         await ws.send_json({
             'type': 'info',
-            'content': f"Cannot load binary file ({ext}): {p.name}",
+            'content': f"Binärdatei kann nicht geladen werden ({ext}): {p.name}",
         })
         return
     try:
@@ -3034,14 +3063,14 @@ async def _load_file_into_buffer(ws, doc_buffer, file_path):
         if size > 500_000:
             await ws.send_json({
                 'type': 'info',
-                'content': f"File too large ({size:,} bytes, max 500KB): {p.name}",
+                'content': f"Datei zu groß ({size:,} Bytes, höchstens 500 KB): {p.name}",
             })
             return
         content = p.read_text(errors='replace')
         doc_buffer.load(content, f"file:{p.name}")
         await _send_doc_loaded(ws, doc_buffer, f"file:{p.name}", content)
     except Exception as e:
-        await ws.send_json({'type': 'info', 'content': f"Failed to read file: {e}"})
+        await ws.send_json({'type': 'info', 'content': "Datei konnte nicht gelesen werden."})
 
 
 # ---------------------------------------------------------------------------
@@ -3153,7 +3182,7 @@ async def sessions_handler(request):
     """
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     config = request.app['config']
     conversation = components['conversation']
@@ -3185,7 +3214,7 @@ async def session_messages_handler(request):
     """GET /api/session/{session_id} — Return messages for a specific session."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     session_id = request.match_info['session_id']
     conversation = components['conversation']
@@ -3205,7 +3234,7 @@ async def session_messages_handler(request):
             ]
             return web.json_response({'messages': msgs, 'session': s})
 
-    return web.json_response({'error': 'Session not found'}, status=404)
+    return web.json_response({'error': 'Sitzung nicht gefunden'}, status=404)
 
 
 async def session_rename_handler(request):
@@ -3216,13 +3245,13 @@ async def session_rename_handler(request):
     try:
         body = await request.json()
     except json.JSONDecodeError:
-        return web.json_response({'error': 'Invalid JSON'}, status=400)
+        return web.json_response({'error': 'Ungültiges JSON'}, status=400)
 
     name = body.get('name', '').strip()
     if not name:
-        return web.json_response({'error': 'Name required'}, status=400)
+        return web.json_response({'error': 'Name erforderlich'}, status=400)
     if len(name) > 200:
-        return web.json_response({'error': 'Name too long (max 200 chars)'}, status=400)
+        return web.json_response({'error': 'Name zu lang (höchstens 200 Zeichen)'}, status=400)
 
     async with _sessions_meta_lock:
         meta = _load_sessions_meta(config)
@@ -3241,7 +3270,7 @@ async def history_handler(request):
     """
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     conversation = components['conversation']
     before = request.query.get('before')
@@ -3272,7 +3301,7 @@ async def upload_handler(request):
     """Handle file upload via POST /api/upload."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     doc_buffer = components['doc_buffer']
 
@@ -3280,13 +3309,13 @@ async def upload_handler(request):
         reader = await request.multipart()
         field = await reader.next()
         if field is None or field.name != 'file':
-            return web.json_response({'error': 'No file field'}, status=400)
+            return web.json_response({'error': 'Dateifeld fehlt'}, status=400)
 
         filename = field.filename or 'upload'
         ext = Path(filename).suffix.lower()
         if ext in BINARY_EXTENSIONS:
             return web.json_response({
-                'error': f'Binary file type not supported: {ext}',
+                'error': f'Binärer Dateityp wird nicht unterstützt: {ext}',
             }, status=400)
 
         # Read content with size limit
@@ -3298,7 +3327,7 @@ async def upload_handler(request):
             content += chunk
             if len(content) > 500_000:
                 return web.json_response({
-                    'error': 'File too large (max 500KB)',
+                    'error': 'Datei zu groß (höchstens 500 KB)',
                 }, status=400)
 
         text = content.decode('utf-8', errors='replace')
@@ -3312,7 +3341,7 @@ async def upload_handler(request):
         })
     except Exception as e:
         logger.exception("Upload error")
-        return web.json_response({'error': str(e)}, status=500)
+        return web.json_response({'error': 'Die Anfrage konnte nicht verarbeitet werden'}, status=500)
 
 
 _IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
@@ -3331,13 +3360,13 @@ async def upload_image_handler(request):
         reader = await request.multipart()
         field = await reader.next()
         if field is None or field.name != 'image':
-            return web.json_response({'error': 'No image field'}, status=400)
+            return web.json_response({'error': 'Bildfeld fehlt'}, status=400)
 
         filename = field.filename or 'image.jpg'
         ext = Path(filename).suffix.lower()
         if ext not in _IMAGE_EXTENSIONS:
             return web.json_response({
-                'error': f'Unsupported image type: {ext}',
+                'error': f'Nicht unterstützter Bildtyp: {ext}',
             }, status=400)
 
         # Read with size limit
@@ -3349,7 +3378,7 @@ async def upload_image_handler(request):
             raw += chunk
             if len(raw) > _MAX_IMAGE_BYTES:
                 return web.json_response({
-                    'error': 'Image too large (max 10 MB)',
+                    'error': 'Bild zu groß (höchstens 10 MB)',
                 }, status=400)
 
         b64 = base64.b64encode(raw).decode('ascii')
@@ -3372,7 +3401,7 @@ async def upload_image_handler(request):
         })
     except Exception as e:
         logger.exception("Image upload error")
-        return web.json_response({'error': str(e)}, status=500)
+        return web.json_response({'error': 'Die Anfrage konnte nicht verarbeitet werden'}, status=500)
 
 
 def _gather_system_stats(components: dict) -> dict:
@@ -3466,10 +3495,10 @@ async def browse_handler(request):
     p = Path(raw_path).expanduser().resolve()
 
     if not _is_path_allowed(p):
-        return web.json_response({'error': 'Access denied'}, status=403)
+        return web.json_response({'error': 'Zugriff verweigert'}, status=403)
 
     if not p.is_dir():
-        return web.json_response({'error': f'Not a directory: {raw_path}'}, status=400)
+        return web.json_response({'error': f'Kein Verzeichnis: {raw_path}'}, status=400)
 
     entries = []
     try:
@@ -3488,7 +3517,7 @@ async def browse_handler(request):
             if len(entries) >= 200:
                 break
     except PermissionError:
-        return web.json_response({'error': f'Permission denied: {p}'}, status=403)
+        return web.json_response({'error': f'Zugriff verweigert: {p}'}, status=403)
 
     parent = str(p.parent) if p != p.parent else None
 
@@ -3503,7 +3532,7 @@ async def stats_overview_handler(request):
     """GET /api/stats — Return system overview stats for header readout."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     data = _gather_system_stats(components)
     return web.json_response(data)
@@ -3845,7 +3874,7 @@ async def desktop_snapshot_handler(request):
     """GET /api/desktop/snapshot — sanitized configuration and capability inventory."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
     return web.json_response(_desktop_snapshot(
         request.app['config'], components, bool(request.app.get('desktop_mode'))))
 
@@ -3863,11 +3892,11 @@ async def metrics_summary_handler(request):
     """GET /api/metrics/summary?hours=24 — Aggregated dashboard cards."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     hours = int(request.query.get('hours', 24))
     data = await asyncio.to_thread(metrics.get_summary, hours)
@@ -3878,11 +3907,11 @@ async def metrics_timeseries_handler(request):
     """GET /api/metrics/timeseries?hours=24&bucket=hour — Chart data."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     hours = int(request.query.get('hours', 24))
     bucket = request.query.get('bucket', 'hour')
@@ -3897,11 +3926,11 @@ async def metrics_skills_handler(request):
     """GET /api/metrics/skills?hours=24 — Skill breakdown."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     hours = int(request.query.get('hours', 24))
     data = await asyncio.to_thread(metrics.get_skill_breakdown, hours)
@@ -3912,11 +3941,11 @@ async def metrics_search_stats_handler(request):
     """GET /api/metrics/search_stats?hours=24 — Web search performance data."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     hours = int(request.query.get('hours', 24))
     data = await asyncio.to_thread(metrics.get_search_stats, hours)
@@ -3927,11 +3956,11 @@ async def metrics_routes_handler(request):
     """GET /api/metrics/routes?hours=24 — Route layer breakdown."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     hours = int(request.query.get('hours', 24))
     data = await asyncio.to_thread(metrics.get_route_breakdown, hours)
@@ -3942,11 +3971,11 @@ async def metrics_interactions_handler(request):
     """GET /api/metrics/interactions?offset=0&limit=50&provider=&skill= — Paginated raw data."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     offset = int(request.query.get('offset', 0))
     limit = min(int(request.query.get('limit', 50)), 200)
@@ -3973,11 +4002,11 @@ async def metrics_filters_handler(request):
     """GET /api/metrics/filters — Distinct values for filter dropdowns."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     data = await asyncio.to_thread(metrics.get_filter_options)
     return web.json_response(data)
@@ -3987,11 +4016,11 @@ async def metrics_export_handler(request):
     """GET /api/metrics/export?format=csv — CSV download."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     filters = {}
     for key in ('provider', 'skill', 'method', 'input_method', 'start', 'end'):
@@ -4040,7 +4069,7 @@ async def _mail_call(fn, *args, **kwargs):
     try:
         return web.json_response(await asyncio.to_thread(fn, *args, **kwargs))
     except (MailDenied, PrivacyViolation) as exc:
-        raise web.HTTPForbidden(text=str(exc)) from exc
+        raise web.HTTPForbidden(text='Zugriff verweigert') from exc
     except MailUnavailable as exc:
         raise web.HTTPServiceUnavailable(text=str(exc)) from exc
 
@@ -4150,7 +4179,7 @@ async def governance_proposals_handler(request):
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
-        return web.json_response({'error': 'Governance not initialized'}, status=503)
+        return web.json_response({'error': 'Governance nicht initialisiert'}, status=503)
 
     status_filter = request.query.get('status')
     proposals = gov.get_proposals(status=status_filter or None)
@@ -4162,12 +4191,12 @@ async def governance_proposal_detail_handler(request):
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
-        return web.json_response({'error': 'Governance not initialized'}, status=503)
+        return web.json_response({'error': 'Governance nicht initialisiert'}, status=503)
 
     proposal_id = request.match_info['id']
     proposal = gov.get_proposal(proposal_id)
     if not proposal:
-        return web.json_response({'error': 'Not found'}, status=404)
+        return web.json_response({'error': 'Nicht gefunden'}, status=404)
     return web.json_response(proposal)
 
 
@@ -4180,25 +4209,25 @@ async def governance_review_handler(request):
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
-        return web.json_response({'error': 'Governance not initialized'}, status=503)
+        return web.json_response({'error': 'Governance nicht initialisiert'}, status=503)
 
     proposal_id = request.match_info['id']
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({'error': 'Invalid JSON'}, status=400)
+        return web.json_response({'error': 'Ungültiges JSON'}, status=400)
 
     decision = body.get('decision')
     comment = body.get('comment')
 
     if decision not in ('approve', 'reject', 'defer', 'edit'):
-        return web.json_response({'error': 'Invalid decision'}, status=400)
+        return web.json_response({'error': 'Ungültige Entscheidung'}, status=400)
 
     result = await asyncio.to_thread(
         gov.review_proposal, proposal_id, decision, comment)
 
     if result is None:
-        return web.json_response({'error': 'Proposal not found or not pending'}, status=404)
+        return web.json_response({'error': 'Vorschlag nicht gefunden oder nicht ausstehend'}, status=404)
 
     return web.json_response(result)
 
@@ -4207,11 +4236,11 @@ async def metrics_tools_aggregate_handler(request):
     """GET /api/metrics/tools?hours=24 — Aggregated tool usage respecting time range."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     metrics = components.get('metrics')
     if not metrics:
-        return web.json_response({'error': 'Metrics not enabled'}, status=503)
+        return web.json_response({'error': 'Metriken nicht aktiviert'}, status=503)
 
     hours = int(request.query.get('hours', 24))
 
@@ -4253,34 +4282,34 @@ async def governance_circuit_reset_handler(request):
     remote_ip = peername[0] if peername else None
     if remote_ip not in ('127.0.0.1', '::1'):
         return web.json_response(
-            {'error': 'Reset endpoint only accessible from localhost'},
+            {'error': 'Zurücksetzen nur über localhost erlaubt'},
             status=403)
 
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
-        return web.json_response({'error': 'Governance not initialized'}, status=503)
+        return web.json_response({'error': 'Governance nicht initialisiert'}, status=503)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({'error': 'Invalid JSON'}, status=400)
+        return web.json_response({'error': 'Ungültiges JSON'}, status=400)
 
     password_hash = body.get('password_hash')
     if not password_hash:
-        return web.json_response({'error': 'Missing password_hash'}, status=400)
+        return web.json_response({'error': 'password_hash fehlt'}, status=400)
 
     # Verify password hash against stored hash
     try:
         with open('/etc/jarvis/.governance_pw', 'r') as f:
             stored_hash = f.read().strip()
         if password_hash != stored_hash:
-            return web.json_response({'error': 'Invalid governance password'}, status=401)
+            return web.json_response({'error': 'Ungültiges Governance-Passwort'}, status=401)
     except PermissionError:
         # Web service can't read root-only file — trust the console script's verification
         pass
     except FileNotFoundError:
-        return web.json_response({'error': 'Governance password not configured'}, status=500)
+        return web.json_response({'error': 'Governance-Passwort nicht eingerichtet'}, status=500)
 
     gov.reset_circuit_breaker()
     return web.json_response({
@@ -4303,29 +4332,29 @@ async def governance_confirm_handler(request):
     remote_ip = peername[0] if peername else None
     if remote_ip not in ('127.0.0.1', '::1'):
         return web.json_response(
-            {'error': 'Confirm endpoint only accessible from localhost'},
+            {'error': 'Bestätigung nur über localhost erlaubt'},
             status=403)
 
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
-        return web.json_response({'error': 'Governance not initialized'}, status=503)
+        return web.json_response({'error': 'Governance nicht initialisiert'}, status=503)
 
     proposal_id = request.match_info['id']
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({'error': 'Invalid JSON'}, status=400)
+        return web.json_response({'error': 'Ungültiges JSON'}, status=400)
 
     code = body.get('confirmation_code', '')
     password_verified = body.get('password_verified', False)
 
     if not code:
-        return web.json_response({'error': 'confirmation_code required'}, status=400)
+        return web.json_response({'error': 'confirmation_code erforderlich'}, status=400)
 
     if not password_verified:
         return web.json_response(
-            {'error': 'Password must be verified by console script'},
+            {'error': 'Passwort muss durch das Konsolenskript geprüft werden'},
             status=403)
 
     # Password already verified by the sudo console script — just check the code
@@ -4345,7 +4374,7 @@ async def observations_findings_handler(request):
     from core.observation_collector import get_observation_collector
     oc = get_observation_collector()
     if not oc:
-        return web.json_response({'error': 'Observation collector not initialized'}, status=503)
+        return web.json_response({'error': 'Beobachtungserfassung nicht initialisiert'}, status=503)
     latest = oc.get_latest_findings()
     history = oc.get_history(limit=10)
     return web.json_response({
@@ -4360,7 +4389,7 @@ async def observations_collect_handler(request):
     from core.observation_collector import get_observation_collector
     oc = get_observation_collector()
     if not oc:
-        return web.json_response({'error': 'Observation collector not initialized'}, status=503)
+        return web.json_response({'error': 'Beobachtungserfassung nicht initialisiert'}, status=503)
     findings = await asyncio.to_thread(oc.run_now)
     return web.json_response({
         'findings': [
@@ -4390,9 +4419,9 @@ async def observations_consult_handler(request):
     oc = get_observation_collector()
     cc = get_claude_consultation()
     if not oc:
-        return web.json_response({'error': 'Observation collector not initialized'}, status=503)
+        return web.json_response({'error': 'Beobachtungserfassung nicht initialisiert'}, status=503)
     if not cc:
-        return web.json_response({'error': 'Consultation service not initialized'}, status=503)
+        return web.json_response({'error': 'Beratungsdienst nicht initialisiert'}, status=503)
 
     # Collect findings
     findings = await asyncio.to_thread(oc.run_now)
@@ -4430,7 +4459,7 @@ async def governance_status_handler(request):
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
-        return web.json_response({'error': 'Governance not initialized'}, status=503)
+        return web.json_response({'error': 'Governance nicht initialisiert'}, status=503)
     return web.json_response(gov.get_status())
 
 
@@ -4439,7 +4468,7 @@ async def governance_test_proposal_handler(request):
     from core.governance import get_governance
     gov = get_governance()
     if not gov:
-        return web.json_response({'error': 'Governance not initialized'}, status=503)
+        return web.json_response({'error': 'Governance nicht initialisiert'}, status=503)
 
     pid = gov.propose(
         'adjust_threshold',
@@ -4458,7 +4487,7 @@ async def events_tts_stats_handler(request):
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
-        return web.json_response({'error': 'Event logger not initialized'}, status=503)
+        return web.json_response({'error': 'Ereignisprotokoll nicht initialisiert'}, status=503)
 
     hours = float(request.query.get('hours', 24))
 
@@ -4509,7 +4538,7 @@ async def events_stt_stats_handler(request):
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
-        return web.json_response({'error': 'Event logger not initialized'}, status=503)
+        return web.json_response({'error': 'Ereignisprotokoll nicht initialisiert'}, status=503)
 
     hours = float(request.query.get('hours', 24))
 
@@ -4548,7 +4577,7 @@ async def events_speaker_id_handler(request):
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
-        return web.json_response({'error': 'Event logger not initialized'}, status=503)
+        return web.json_response({'error': 'Ereignisprotokoll nicht initialisiert'}, status=503)
 
     hours = float(request.query.get('hours', 24))
 
@@ -4669,7 +4698,7 @@ async def events_watchdog_handler(request):
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
-        return web.json_response({'error': 'Event logger not initialized'}, status=503)
+        return web.json_response({'error': 'Ereignisprotokoll nicht initialisiert'}, status=503)
 
     hours = float(request.query.get('hours', 168))
 
@@ -4700,12 +4729,12 @@ async def events_aggregate_handler(request):
     from core.event_logger import get_event_logger
     event_logger = get_event_logger()
     if not event_logger:
-        return web.json_response({'error': 'Event logger not initialized'}, status=503)
+        return web.json_response({'error': 'Ereignisprotokoll nicht initialisiert'}, status=503)
 
     try:
         hours = min(max(float(request.query.get('hours', 24)), 1), 168)
     except (TypeError, ValueError):
-        return web.json_response({'error': 'Invalid hours'}, status=400)
+        return web.json_response({'error': 'Ungültige Stundenanzahl'}, status=400)
 
     def _aggregate():
         import time
@@ -4763,7 +4792,7 @@ async def events_recent_handler(request):
 
     event_logger = get_event_logger()
     if not event_logger:
-        return web.json_response({'error': 'Event logger not initialized'}, status=503)
+        return web.json_response({'error': 'Ereignisprotokoll nicht initialisiert'}, status=503)
 
     try:
         hours = float(request.query.get('hours', 24))
@@ -4771,7 +4800,7 @@ async def events_recent_handler(request):
         if not 1 <= hours <= 168 or not 1 <= limit <= 200:
             raise ValueError
     except (TypeError, ValueError, OverflowError):
-        return web.json_response({'error': 'Invalid hours or limit'}, status=400)
+        return web.json_response({'error': 'Ungültige Stundenanzahl oder Begrenzung'}, status=400)
 
     def _fetch():
         cutoff = time.time() - hours * 3600
@@ -4808,7 +4837,7 @@ async def events_health_trends_handler(request):
     from core.event_logger import get_event_logger
     el = get_event_logger()
     if not el:
-        return web.json_response({'error': 'Event logger not initialized'}, status=503)
+        return web.json_response({'error': 'Ereignisprotokoll nicht initialisiert'}, status=503)
 
     hours = float(request.query.get('hours', 168))
     requested_metrics = request.query.get('metrics', '').split(',')
@@ -4848,7 +4877,7 @@ async def memory_summary_handler(request):
     """GET /api/memory/summary — Fact counts, context stats, FAISS size (all users combined)."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     memory_manager = components.get('memory_manager')
     context_window = components.get('context_window')
@@ -4880,7 +4909,7 @@ async def memory_summary_handler(request):
                 'by_category_user': by_cat_user,
             }
         except Exception as e:
-            result['facts'] = {'total': 0, 'by_category_user': [], 'error': str(e)}
+            result['facts'] = {'total': 0, 'by_category_user': [], 'error': 'Daten derzeit nicht verfügbar'}
 
         # Recent interaction log stats (7 days), split by user
         try:
@@ -4905,7 +4934,7 @@ async def memory_summary_handler(request):
                 'by_type_user': by_type_user,
             }
         except Exception as e:
-            result['interactions'] = {'total_7d': 0, 'by_type_user': [], 'error': str(e)}
+            result['interactions'] = {'total_7d': 0, 'by_type_user': [], 'error': 'Daten derzeit nicht verfügbar'}
 
         # FAISS index size
         try:
@@ -4914,7 +4943,7 @@ async def memory_summary_handler(request):
             faiss_size = sum(f.stat().st_size for f in faiss_dir.iterdir() if f.is_file()) if faiss_dir.is_dir() else 0
             result['faiss'] = {'vectors': faiss_vectors, 'size_bytes': faiss_size}
         except Exception as e:
-            result['faiss'] = {'vectors': 0, 'size_bytes': 0, 'error': str(e)}
+            result['faiss'] = {'vectors': 0, 'size_bytes': 0, 'error': 'Daten derzeit nicht verfügbar'}
     else:
         result['facts'] = {'total': 0, 'by_category_user': []}
         result['interactions'] = {'total_7d': 0, 'by_type_user': []}
@@ -4931,7 +4960,7 @@ async def memory_summary_handler(request):
                 'estimated_tokens': ctx_stats.get('estimated_tokens', 0),
             }
         except Exception as e:
-            result['context'] = {'usage_pct': 0.0, 'segments': 0, 'estimated_tokens': 0, 'error': str(e)}
+            result['context'] = {'usage_pct': 0.0, 'segments': 0, 'estimated_tokens': 0, 'error': 'Daten derzeit nicht verfügbar'}
     else:
         result['context'] = {'usage_pct': 0.0, 'segments': 0, 'estimated_tokens': 0}
 
@@ -4942,11 +4971,11 @@ async def memory_facts_handler(request):
     """GET /api/memory/facts?category=&user_id=&sort=&offset=0&limit=50 — Paginated facts."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     memory_manager = components.get('memory_manager')
     if not memory_manager:
-        return web.json_response({'error': 'Memory not enabled'}, status=503)
+        return web.json_response({'error': 'Gedächtnis nicht aktiviert'}, status=503)
 
     category = request.query.get('category', '') or None
     user_id = request.query.get('user_id', '') or None  # None = all users
@@ -5000,28 +5029,28 @@ async def memory_fact_delete_handler(request):
     """DELETE /api/memory/facts/{fact_id} — Soft-delete a fact."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     memory_manager = components.get('memory_manager')
     if not memory_manager:
-        return web.json_response({'error': 'Memory not enabled'}, status=503)
+        return web.json_response({'error': 'Gedächtnis nicht aktiviert'}, status=503)
 
     fact_id = request.match_info['fact_id']
     ok = await asyncio.to_thread(memory_manager.delete_fact, fact_id, True)
     if ok:
         return web.json_response({'deleted': fact_id})
-    return web.json_response({'error': 'Not found'}, status=404)
+    return web.json_response({'error': 'Nicht gefunden'}, status=404)
 
 
 async def memory_interactions_handler(request):
     """GET /api/memory/interactions?type=&days=7&offset=0&limit=50 — Paginated interaction log."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     memory_manager = components.get('memory_manager')
     if not memory_manager:
-        return web.json_response({'error': 'Memory not enabled'}, status=503)
+        return web.json_response({'error': 'Gedächtnis nicht aktiviert'}, status=503)
 
     type_filter = request.query.get('type', '') or None
     days = int(request.query.get('days', 30))
@@ -5063,11 +5092,11 @@ async def memory_timeseries_handler(request):
     """GET /api/memory/timeseries?days=30 — Interaction counts over time by type."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
 
     memory_manager = components.get('memory_manager')
     if not memory_manager:
-        return web.json_response({'error': 'Memory not enabled'}, status=503)
+        return web.json_response({'error': 'Gedächtnis nicht aktiviert'}, status=503)
 
     days = min(int(request.query.get('days', 30)), 365)
 
@@ -5224,7 +5253,7 @@ async def memory_db_health_handler(request):
                     entry['status'] = 'warning' if stale else 'ok'
                 except Exception as e:
                     entry['status'] = 'error'
-                    entry['error'] = str(e)
+                    entry['error'] = 'Datenspeicher konnte nicht gelesen werden'
                     entry['timeline'] = []
             results.append(entry)
 
@@ -5249,7 +5278,7 @@ async def memory_db_health_handler(request):
                 jsonl_entry['status'] = 'ok'
             except Exception as e:
                 jsonl_entry['status'] = 'error'
-                jsonl_entry['error'] = str(e)
+                jsonl_entry['error'] = 'Gesprächsverlauf konnte nicht gelesen werden'
         results.append(jsonl_entry)
 
         # FAISS index directory
@@ -5276,7 +5305,7 @@ async def memory_db_health_handler(request):
                     faiss_entry['status'] = 'ok'
                 except Exception as e:
                     faiss_entry['status'] = 'error'
-                    faiss_entry['error'] = str(e)
+                    faiss_entry['error'] = 'Gedächtnisindex konnte nicht gelesen werden'
             else:
                 faiss_entry['status'] = 'ok'
         results.append(faiss_entry)
@@ -5293,21 +5322,21 @@ async def memory_fact_update_handler(request):
     """PATCH /api/memory/facts/{fact_id} — Update editable fields of a fact."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
     memory_manager = components.get('memory_manager')
     if not memory_manager:
-        return web.json_response({'error': 'Memory not enabled'}, status=503)
+        return web.json_response({'error': 'Gedächtnis nicht aktiviert'}, status=503)
 
     fact_id = request.match_info['fact_id']
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({'error': 'Invalid JSON'}, status=400)
+        return web.json_response({'error': 'Ungültiges JSON'}, status=400)
 
     ALLOWED = {'category', 'subject', 'content', 'source'}
     updates = {k: str(v) for k, v in body.items() if k in ALLOWED and v is not None}
     if not updates:
-        return web.json_response({'error': 'No valid fields to update'}, status=400)
+        return web.json_response({'error': 'Keine gültigen Felder zum Aktualisieren'}, status=400)
 
     def _update():
         import sqlite3
@@ -5327,7 +5356,7 @@ async def memory_fact_update_handler(request):
 
     rowcount = await asyncio.to_thread(_update)
     if rowcount == 0:
-        return web.json_response({'error': 'Not found'}, status=404)
+        return web.json_response({'error': 'Nicht gefunden'}, status=404)
     return web.json_response({'updated': fact_id})
 
 
@@ -5335,10 +5364,10 @@ async def memory_interaction_delete_handler(request):
     """DELETE /api/memory/interactions/{interaction_id} — Delete an interaction log entry."""
     components = request.app.get('components')
     if not components:
-        return web.json_response({'error': 'Not initialized'}, status=503)
+        return web.json_response({'error': 'Nicht initialisiert'}, status=503)
     memory_manager = components.get('memory_manager')
     if not memory_manager:
-        return web.json_response({'error': 'Memory not enabled'}, status=503)
+        return web.json_response({'error': 'Gedächtnis nicht aktiviert'}, status=503)
 
     interaction_id = request.match_info['interaction_id']
 
@@ -5358,14 +5387,14 @@ async def memory_interaction_delete_handler(request):
 
     rowcount = await asyncio.to_thread(_delete)
     if rowcount == 0:
-        return web.json_response({'error': 'Not found'}, status=404)
+        return web.json_response({'error': 'Nicht gefunden'}, status=404)
     return web.json_response({'deleted': interaction_id})
 
 
 async def dashboard_ws_handler(request):
     """WebSocket endpoint for live dashboard metric updates."""
     if not _check_auth_token(request):
-        raise web.HTTPUnauthorized(text='Invalid or missing auth token')
+        raise web.HTTPUnauthorized(text='Ungültiger oder fehlender Authentifizierungstoken')
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
@@ -5440,7 +5469,7 @@ async def webcam_stream_handler(request):
 
             return response
     except (_aiohttp_lib.ClientError, asyncio.TimeoutError) as exc:
-        return web.Response(status=503, text=f"Webcam not available: {exc}")
+        return web.Response(status=503, text="Webcam nicht verfügbar")
 
 
 async def webcam_snapshot_handler(request):
@@ -5461,7 +5490,7 @@ async def webcam_snapshot_handler(request):
                 headers={'Cache-Control': 'no-cache'},
             )
     except (_aiohttp_lib.ClientError, asyncio.TimeoutError) as exc:
-        return web.Response(status=503, text=f"Webcam not available: {exc}")
+        return web.Response(status=503, text="Webcam nicht verfügbar")
 
 
 async def webcam_status_handler(request):
@@ -5491,16 +5520,16 @@ async def generate_image_handler(request):
     Body (img2img): {"prompt": "...", "image": "<base64>", "strength": 0.75}
     """
     if not _check_auth_token(request):
-        raise web.HTTPUnauthorized(text='Invalid or missing auth token')
+        raise web.HTTPUnauthorized(text='Ungültiger oder fehlender Authentifizierungstoken')
 
     try:
         data = await request.json()
     except Exception:
-        return web.json_response({'error': 'Invalid JSON'}, status=400)
+        return web.json_response({'error': 'Ungültiges JSON'}, status=400)
 
     prompt = data.get('prompt', '').strip()
     if not prompt:
-        return web.json_response({'error': 'No prompt provided'}, status=400)
+        return web.json_response({'error': 'Keine Bildbeschreibung angegeben'}, status=400)
 
     source_image = data.get('image')  # base64 string or None
     width = data.get('width', 1024)
@@ -5512,12 +5541,12 @@ async def generate_image_handler(request):
     swap = get_gpu_swap_manager()
 
     if swap.is_swapping:
-        return web.json_response({'error': 'GPU swap already in progress'}, status=409)
+        return web.json_response({'error': 'GPU-Wechsel läuft bereits'}, status=409)
 
     def _generate():
         import requests as req
         if not swap.swap_to("flux"):
-            return {'error': 'GPU swap failed'}, 500
+            return {'error': 'GPU-Wechsel fehlgeschlagen'}, 500
         try:
             if source_image:
                 resp = req.post(
@@ -5533,9 +5562,9 @@ async def generate_image_handler(request):
                 )
             if resp.status_code == 200:
                 return resp.json(), 200
-            return {'error': resp.text}, resp.status_code
+            return {'error': 'Bilderzeugung fehlgeschlagen'}, resp.status_code
         except Exception as e:
-            return {'error': str(e)}, 500
+            return {'error': 'Die Anfrage konnte nicht verarbeitet werden'}, 500
         finally:
             swap.swap_back()
 
@@ -5568,7 +5597,7 @@ async def gpu_status_handler(request):
     GET /api/gpu-status
     """
     if not _check_auth_token(request):
-        raise web.HTTPUnauthorized(text='Invalid or missing auth token')
+        raise web.HTTPUnauthorized(text='Ungültiger oder fehlender Authentifizierungstoken')
 
     from core import runtime_state
     from core.gpu_swap import get_gpu_swap_manager
@@ -5682,14 +5711,15 @@ def create_app(config, desktop_mode=False) -> web.Application:
     from core.tool_registry import get_images_dir
     _images_dir = Path(get_images_dir())
     _images_dir.mkdir(parents=True, exist_ok=True)
-    app.router.add_static('/images', _images_dir)
+    image_resource = app.router.add_static('/images', _images_dir)
     # Serve Flux-generated images from the configured runtime storage path.
     _flux_dir = Path(config.get(
         'image_generation.output_dir', '/home/alex/jarvis-data/generated_images'
     )).expanduser()
     _flux_dir.mkdir(parents=True, exist_ok=True)
-    app.router.add_static('/generated', _flux_dir)
-    app.router.add_static('/', web_dir)
+    generated_resource = app.router.add_static('/generated', _flux_dir)
+    asset_resource = app.router.add_static('/', web_dir)
+    app['public_static_resources'] = (image_resource, generated_resource, asset_resource)
 
     return app
 

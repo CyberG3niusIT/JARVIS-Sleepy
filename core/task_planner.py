@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Callable, Optional
 
 from core.logger import get_logger
+from core.persona import OWNER_LANGUAGE_RULE
 logger = get_logger("jarvis.task_planner")
 
 
@@ -348,7 +349,7 @@ class TaskPlanner:
             logger.warning("No capability manifest available — skipping plan generation")
             return None
 
-        prompt = _PLAN_PROMPT.format(manifest=manifest, command=command)
+        prompt = OWNER_LANGUAGE_RULE + "\n" + _PLAN_PROMPT.format(manifest=manifest, command=command)
 
         # Bias toward multi-step when a strong conjunctive signal was detected
         if signal:
@@ -435,7 +436,7 @@ class TaskPlanner:
 
             steps.append(PlanStep(
                 step_id=i + 1,
-                description=raw.get("description", f"Step {i+1}"),
+                description=raw.get("description", f"Schritt {i+1}"),
                 skill_name=skill,
                 input_text=input_text,
             ))
@@ -785,7 +786,7 @@ class TaskPlanner:
                     break
             except Exception as e:
                 step.status = StepStatus.FAILED
-                step.result = f"Error: {e}"
+                step.result = f"Fehler: {e}"
                 _step_ms = (time.time() - _step_start) * 1000
                 logger.error(f"Step {step.step_id} failed: {e} — breaking plan")
                 _dbg.log_plan_step_result(
@@ -1015,7 +1016,7 @@ class TaskPlanner:
         """Use LLM to synthesize/summarize content."""
         try:
             return self._llm.chat(
-                user_message=input_text,
+                user_message=f"{OWNER_LANGUAGE_RULE}\n{input_text}",
                 max_tokens=300,
             )
         except Exception as e:
@@ -1026,11 +1027,11 @@ class TaskPlanner:
         """Execute web research step using WebResearcher.
 
         Searches DuckDuckGo, fetches top pages, then synthesizes via LLM.
-        Falls back to LLM parametric knowledge if web_researcher unavailable.
+        Without usable search data the step fails; no parametric substitution.
         """
         if not self._web_researcher:
-            logger.warning("Web research requested but no web_researcher available — LLM fallback")
-            return self._llm_synthesis(f"Based on your knowledge, answer: {input_text}")
+            logger.warning("Web research unavailable: provider_unavailable")
+            return ""
 
         # Extract a clean search query — input_text may contain adjustment
         # instructions and prior step context that would poison the search.
@@ -1038,14 +1039,16 @@ class TaskPlanner:
         search_query = input_text.split('\n\n')[0].strip()
         if len(search_query) > 200:
             search_query = search_query[:200]
-        logger.info(f"Web research query: {search_query[:80]}")
+        logger.info("Web research requested")
 
         try:
             # Search the web with the clean query
-            results = self._web_researcher.search(search_query, max_results=5)
-            if not results:
-                logger.warning(f"Web research returned no results for: {search_query[:80]}")
-                return self._llm_synthesis(f"Based on your knowledge, answer: {input_text}")
+            from core.web_research import run_search
+            outcome = run_search(self._web_researcher, search_query, max_results=5)
+            results = outcome.results
+            if not outcome.has_results:
+                logger.warning("Web research incomplete: %s", outcome.status)
+                return ""
 
             # Fetch top pages in parallel
             pages = self._web_researcher.fetch_pages_parallel(
@@ -1065,11 +1068,12 @@ class TaskPlanner:
                 research_text = "\n\n".join(snippets) if snippets else ""
 
             if not research_text:
-                return self._llm_synthesis(f"Based on your knowledge, answer: {input_text}")
+                return ""
 
             # Synthesize research — pass full context so LLM has prior step info
             logger.info(f"Web research complete: {len(results)} results, {len(pages)} pages fetched")
             synthesis_prompt = (
+                f"{OWNER_LANGUAGE_RULE}\n"
                 f"Based on the following web research results, answer this question: {search_query}\n\n"
                 f"RESEARCH DATA:\n{research_text[:8000]}\n\n"
                 f"Provide a factual, concise answer using specific data from the research."
@@ -1077,8 +1081,8 @@ class TaskPlanner:
             return self._llm.chat(user_message=synthesis_prompt, max_tokens=400)
 
         except Exception as e:
-            logger.warning(f"Web research failed: {e}")
-            return self._llm_synthesis(f"Based on your knowledge, answer: {input_text}")
+            logger.warning("Web research failed (%s)", type(e).__name__)
+            return ""
 
     def _synthesize_results(self, plan: TaskPlan, results: list[str]) -> str:
         """Combine step results into a final response.
@@ -1097,13 +1101,14 @@ class TaskPlanner:
         if not results:
             return "Ich konnte keinen der Schritte für diese Anfrage abschließen."
 
-        # Single completed step — return its result directly
+        # Single completed step — preserve source content with a German frame.
         if len(completed) == 1 and not failed and not skipped:
-            return completed[0].result
+            return f"Ergebnis des Werkzeugs:\n{completed[0].result}"
 
         # Multiple steps or partial — ask LLM to synthesize
         combined = "\n\n".join(results)
         synthesis_prompt = (
+            f"{OWNER_LANGUAGE_RULE}\n"
             f"The user asked: \"{plan.original_request}\"\n\n"
             f"Here are the results from multiple steps:\n{combined}\n\n"
             f"Synthesize these into a single, natural spoken response. "
@@ -1124,8 +1129,9 @@ class TaskPlanner:
         try:
             return self._llm.chat(user_message=synthesis_prompt, max_tokens=400)
         except Exception:
-            # Fallback: just return the last successful result
-            return completed[-1].result if completed else "I completed the task but had trouble summarizing the results."
+            # Keep source data distinct from JARVIS's own failure response.
+            return (f"Ich konnte die Ergebnisse nicht zusammenfassen. Das letzte erfolgreiche Werkzeug meldet:\n{completed[-1].result}"
+                    if completed else "Die Aufgabe wurde abgeschlossen, aber ich konnte die Ergebnisse nicht zusammenfassen.")
 
     # ------------------------------------------------------------------
     # Cancellation

@@ -237,51 +237,51 @@ class WeatherSkill(BaseSkill):
         # Temperature commentary with feels-like
         if temp >= 95:
             if feels_like > temp + 5:
-                response_parts.append(f"It's sweltering outside, {self.honorific} - {temp} degrees but feels like {feels_like}.")
+                response_parts.append(f"Draußen ist es sehr heiß, {self.honorific}: {temp} Grad, gefühlt {feels_like}.")
             else:
-                response_parts.append(f"It's quite hot outside, {self.honorific} - {temp} degrees.")
+                response_parts.append(f"Draußen ist es heiß, {self.honorific}: {temp} Grad.")
         elif temp >= 85:
             if feels_like > temp + 5:
-                response_parts.append(f"It's rather warm, {self.honorific} - {temp} degrees but feels like {feels_like}.")
+                response_parts.append(f"Es ist warm, {self.honorific}: {temp} Grad, gefühlt {feels_like}.")
             else:
-                response_parts.append(f"It's warm outside, {self.honorific} - {temp} degrees.")
+                response_parts.append(f"Draußen ist es warm, {self.honorific}: {temp} Grad.")
         elif temp >= 70:
-            response_parts.append(f"It's pleasant outside, {self.honorific} - {temp} degrees.")
+            response_parts.append(f"Draußen ist es angenehm, {self.honorific}: {temp} Grad.")
         elif temp >= 50:
             if feels_like < temp - 5:
-                response_parts.append(f"It's mild, {self.honorific} - {temp} degrees but feels cooler, around {feels_like}.")
+                response_parts.append(f"Es ist mild, {self.honorific}: {temp} Grad, gefühlt kühler mit etwa {feels_like} Grad.")
             else:
-                response_parts.append(f"It's mild outside, {self.honorific} - {temp} degrees.")
+                response_parts.append(f"Draußen ist es mild, {self.honorific}: {temp} Grad.")
         elif temp >= 32:
             if feels_like < temp - 5:
-                response_parts.append(f"It's chilly, {self.honorific} - {temp} degrees but feels like {feels_like} with the wind.")
+                response_parts.append(f"Es ist kühl, {self.honorific}: {temp} Grad, mit dem Wind gefühlt {feels_like} Grad.")
             else:
-                response_parts.append(f"It's rather chilly, {self.honorific} - {temp} degrees.")
+                response_parts.append(f"Es ist kühl, {self.honorific}: {temp} Grad.")
         else:
-            response_parts.append(f"It's quite cold, {self.honorific} - {temp} degrees.")
+            response_parts.append(f"Es ist kalt, {self.honorific}: {temp} Grad.")
 
         # Weather conditions
         if "rain" in weather_main or "drizzle" in weather_main:
-            response_parts.append("Currently raining.")
+            response_parts.append("Es regnet gerade.")
         elif "thunderstorm" in weather_main:
-            response_parts.append("Thunderstorms in the area.")
+            response_parts.append("In der Umgebung gibt es Gewitter.")
         elif "snow" in weather_main:
-            response_parts.append("Snow falling.")
+            response_parts.append("Es schneit.")
         elif "clear" in weather_main:
-            response_parts.append("Clear skies at the moment.")
+            response_parts.append("Der Himmel ist gerade klar.")
         elif "cloud" in weather_main:
             if "few" in description or "scattered" in description:
-                response_parts.append("A few clouds overhead.")
+                response_parts.append("Es gibt wenige Wolken.")
             elif "overcast" in description:
-                response_parts.append("Overcast conditions.")
+                response_parts.append("Der Himmel ist bedeckt.")
             else:
-                response_parts.append("Cloudy skies.")
+                response_parts.append("Es ist bewölkt.")
 
         # Wind advisory if significant
         if wind_speed >= 20:
-            response_parts.append(f"Quite windy - {wind_speed} miles per hour.")
+            response_parts.append(f"Es ist windig mit {wind_speed} Meilen pro Stunde.")
         elif wind_speed >= 15:
-            response_parts.append(f"Breezy conditions, {wind_speed} miles per hour.")
+            response_parts.append(f"Es weht Wind mit {wind_speed} Meilen pro Stunde.")
 
         response_text = " ".join(response_parts)
         return self.respond(response_text)
@@ -290,7 +290,7 @@ class WeatherSkill(BaseSkill):
         """Fallback: fetch current weather from live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -317,17 +317,17 @@ class WeatherSkill(BaseSkill):
             return self._format_current_response(current)
 
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Weather API error: {e}")
-            return self.respond(f"I'm having trouble fetching the weather right now, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann die Wetterdaten gerade nicht abrufen, {self.honorific}.")
         except Exception as e:
-            self.logger.error(f"Weather processing error: {e}")
-            return self.respond(f"I encountered an error getting the current weather, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Die aktuellen Wetterdaten konnten nicht verarbeitet werden, {self.honorific}.")
 
     def _fetch_current_for_coords(self, lat: float, lon: float) -> str:
         """Fetch current weather for arbitrary coordinates via live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -351,11 +351,11 @@ class WeatherSkill(BaseSkill):
             return self._format_current_response(current)
 
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Weather API error for coords ({lat}, {lon}): {e}")
-            return self.respond(f"I'm having trouble fetching the weather right now, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann die Wetterdaten gerade nicht abrufen, {self.honorific}.")
         except Exception as e:
-            self.logger.error(f"Weather processing error for coords: {e}")
-            return self.respond(f"I encountered an error getting the current weather, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Die aktuellen Wetterdaten konnten nicht verarbeitet werden, {self.honorific}.")
 
     # ------------------------------------------------------------------
     # Location-based weather (always live API)
@@ -365,7 +365,7 @@ class WeatherSkill(BaseSkill):
         """Get weather for a specific location"""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         if not location:
@@ -385,7 +385,7 @@ class WeatherSkill(BaseSkill):
             geo_data = geo_response.json()
 
             if not geo_data:
-                return self.respond(f"I couldn't find weather data for {location}, {self.honorific}.")
+                return self.respond(f"Ich konnte keine Wetterdaten für {location} finden, {self.honorific}.")
 
             lat = geo_data[0]["lat"]
             lon = geo_data[0]["lon"]
@@ -408,19 +408,19 @@ class WeatherSkill(BaseSkill):
             feels_like = round(data["main"]["feels_like"])
             description = data["weather"][0]["description"]
 
-            response_text = f"In {city_name}, it's {temp} degrees"
+            response_text = f"In {city_name} sind es {temp} Grad"
             if abs(temp - feels_like) > 3:
-                response_text += f", feels like {feels_like}"
-            response_text += f", with {description}."
+                response_text += f", gefühlt {feels_like}"
+            response_text += f". Quellenbeschreibung: „{description}“."
 
             return self.respond(response_text)
 
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Weather API error: {e}")
-            return self.respond(f"I'm having trouble fetching weather for {location}, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann die Wetterdaten für {location} gerade nicht abrufen, {self.honorific}.")
         except Exception as e:
-            self.logger.error(f"Weather processing error: {e}")
-            return self.respond(f"I encountered an error getting weather for {location}, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Die Wetterdaten für {location} konnten nicht verarbeitet werden, {self.honorific}.")
 
     # ------------------------------------------------------------------
     # Forecast
@@ -443,7 +443,7 @@ class WeatherSkill(BaseSkill):
                 return self._format_forecast_response(rows)
 
         # Fallback to live API
-        self.tts.speak(f"Let me pull up the extended forecast, {self.honorific}.")
+        self.tts.speak(f"Ich rufe die erweiterte Vorhersage ab, {self.honorific}.")
         return self._fetch_forecast_live()
 
     def _format_forecast_response(self, rows: list) -> str:
@@ -451,41 +451,41 @@ class WeatherSkill(BaseSkill):
         response_parts = []
         for row in rows[:3]:
             dt = datetime.strptime(row["date"], "%Y-%m-%d")
-            day_name = dt.strftime("%A")
+            day_name = dt.strftime("%d.%m.%Y")
             high = round(row["temp_high"])
             weather_main = row.get("weather_main", "").lower()
 
             day_parts = [day_name]
             if high >= 95:
-                day_parts.append(f"will be hot, reaching {high}")
+                day_parts.append(f"wird heiß mit bis zu {high} Grad")
             elif high >= 85:
-                day_parts.append(f"will be warm, with a high of {high}")
+                day_parts.append(f"wird warm mit einem Höchstwert von {high} Grad")
             elif high >= 70:
-                day_parts.append(f"looks pleasant, high of {high}")
+                day_parts.append(f"wird angenehm mit einem Höchstwert von {high} Grad")
             elif high >= 50:
-                day_parts.append(f"will be mild, high of {high}")
+                day_parts.append(f"wird mild mit einem Höchstwert von {high} Grad")
             else:
-                day_parts.append(f"will be cool, high of {high}")
+                day_parts.append(f"wird kühl mit einem Höchstwert von {high} Grad")
 
             if "thunderstorm" in weather_main:
-                day_parts.append("with thunderstorms likely")
+                day_parts.append("mit wahrscheinlichen Gewittern")
             elif "rain" in weather_main or "drizzle" in weather_main:
-                day_parts.append("with rain expected")
+                day_parts.append("mit erwartetem Regen")
             elif "clear" in weather_main:
-                day_parts.append("and clear skies")
+                day_parts.append("und klarem Himmel")
             elif "cloud" in weather_main:
-                day_parts.append("with cloudy skies")
+                day_parts.append("mit bewölktem Himmel")
 
             response_parts.append(", ".join(day_parts))
 
-        response_text = f"Here's what to expect, {self.honorific}. " + ". ".join(response_parts) + "."
+        response_text = f"Das ist die Vorhersage, {self.honorific}. " + ". ".join(response_parts) + "."
         return self.respond(response_text)
 
     def _fetch_forecast_live(self) -> str:
         """Fallback: fetch forecast from live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -504,7 +504,7 @@ class WeatherSkill(BaseSkill):
             forecasts_by_day = {}
             for item in data["list"][:32]:
                 dt = datetime.fromtimestamp(item["dt"])
-                day_name = dt.strftime("%A")
+                day_name = dt.strftime("%d.%m.%Y")
                 weather_main = item["weather"][0]["main"].lower()
 
                 if day_name not in forecasts_by_day:
@@ -546,38 +546,38 @@ class WeatherSkill(BaseSkill):
                 weather_main = forecast["weather_main"]
                 day_parts = [day_name]
                 if high >= 95:
-                    day_parts.append(f"will be hot, reaching {high}")
+                    day_parts.append(f"wird heiß mit bis zu {high} Grad")
                 elif high >= 85:
-                    day_parts.append(f"will be warm, with a high of {high}")
+                    day_parts.append(f"wird warm mit einem Höchstwert von {high} Grad")
                 elif high >= 70:
-                    day_parts.append(f"looks pleasant, high of {high}")
+                    day_parts.append(f"wird angenehm mit einem Höchstwert von {high} Grad")
                 elif high >= 50:
-                    day_parts.append(f"will be mild, high of {high}")
+                    day_parts.append(f"wird mild mit einem Höchstwert von {high} Grad")
                 else:
-                    day_parts.append(f"will be cool, high of {high}")
+                    day_parts.append(f"wird kühl mit einem Höchstwert von {high} Grad")
 
                 if "thunderstorm" in weather_main:
-                    day_parts.append("with thunderstorms likely")
+                    day_parts.append("mit wahrscheinlichen Gewittern")
                 elif "rain" in weather_main or "drizzle" in weather_main:
-                    day_parts.append("with rain expected")
+                    day_parts.append("mit erwartetem Regen")
                 elif "clear" in weather_main:
-                    day_parts.append("and clear skies")
+                    day_parts.append("und klarem Himmel")
                 elif "cloud" in weather_main:
-                    day_parts.append("with cloudy skies")
+                    day_parts.append("mit bewölktem Himmel")
                 response_parts.append(", ".join(day_parts))
 
-            response_text = f"Here's what to expect, {self.honorific}. " + ". ".join(response_parts) + "."
+            response_text = f"Das ist die Vorhersage, {self.honorific}. " + ". ".join(response_parts) + "."
             return self.respond(response_text)
 
         except Exception as e:
-            self.logger.error(f"Forecast error: {e}")
-            return self.respond(f"I'm having trouble getting the forecast right now, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann die Vorhersage gerade nicht abrufen, {self.honorific}.")
 
     def _fetch_forecast_for_coords(self, lat: float, lon: float) -> str:
         """Fetch forecast for arbitrary coordinates via live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -593,7 +593,7 @@ class WeatherSkill(BaseSkill):
             forecasts_by_day = {}
             for item in data["list"][:32]:
                 dt = datetime.fromtimestamp(item["dt"])
-                day_name = dt.strftime("%A")
+                day_name = dt.strftime("%d.%m.%Y")
                 weather_main = item["weather"][0]["main"].lower()
 
                 if day_name not in forecasts_by_day:
@@ -619,32 +619,32 @@ class WeatherSkill(BaseSkill):
                 weather_main = forecast["weather_main"]
                 day_parts = [day_name]
                 if high >= 95:
-                    day_parts.append(f"will be hot, reaching {high}")
+                    day_parts.append(f"wird heiß mit bis zu {high} Grad")
                 elif high >= 85:
-                    day_parts.append(f"will be warm, with a high of {high}")
+                    day_parts.append(f"wird warm mit einem Höchstwert von {high} Grad")
                 elif high >= 70:
-                    day_parts.append(f"looks pleasant, high of {high}")
+                    day_parts.append(f"wird angenehm mit einem Höchstwert von {high} Grad")
                 elif high >= 50:
-                    day_parts.append(f"will be mild, high of {high}")
+                    day_parts.append(f"wird mild mit einem Höchstwert von {high} Grad")
                 else:
-                    day_parts.append(f"will be cool, high of {high}")
+                    day_parts.append(f"wird kühl mit einem Höchstwert von {high} Grad")
 
                 if "thunderstorm" in weather_main:
-                    day_parts.append("with thunderstorms likely")
+                    day_parts.append("mit wahrscheinlichen Gewittern")
                 elif "rain" in weather_main or "drizzle" in weather_main:
-                    day_parts.append("with rain expected")
+                    day_parts.append("mit erwartetem Regen")
                 elif "clear" in weather_main:
-                    day_parts.append("and clear skies")
+                    day_parts.append("und klarem Himmel")
                 elif "cloud" in weather_main:
-                    day_parts.append("with cloudy skies")
+                    day_parts.append("mit bewölktem Himmel")
                 response_parts.append(", ".join(day_parts))
 
-            response_text = f"Here's what to expect, {self.honorific}. " + ". ".join(response_parts) + "."
+            response_text = f"Das ist die Vorhersage, {self.honorific}. " + ". ".join(response_parts) + "."
             return self.respond(response_text)
 
         except Exception as e:
-            self.logger.error(f"Forecast error for coords ({lat}, {lon}): {e}")
-            return self.respond(f"I'm having trouble getting the forecast right now, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann die Vorhersage gerade nicht abrufen, {self.honorific}.")
 
     # ------------------------------------------------------------------
     # Period-based Weather (temporal phrases)
@@ -667,8 +667,8 @@ class WeatherSkill(BaseSkill):
         # Clamp to available forecast window
         if start_date > max_forecast:
             return self.respond(
-                f"I'm sorry {self.honorific}, that's beyond my 16-day forecast window. "
-                f"I can only see through {max_forecast.strftime('%A, %B %-d')}."
+                f"{self.honorific}, das liegt außerhalb meines Vorhersagefensters von 16 Tagen. "
+                f"Ich kann nur bis zum {max_forecast.strftime('%d.%m.%Y')} vorhersagen."
             )
         if end_date > max_forecast:
             end_date = max_forecast
@@ -703,34 +703,34 @@ class WeatherSkill(BaseSkill):
         response_parts = []
         for row in rows:
             dt = datetime.strptime(row["date"], "%Y-%m-%d")
-            day_name = dt.strftime("%A")
+            day_name = dt.strftime("%d.%m.%Y")
             high = round(row["temp_high"])
             low = round(row["temp_low"])
             weather_main = row.get("weather_main", "").lower()
             rain_chance = row.get("rain_chance", 0)
 
-            day_desc = f"{day_name}: high of {high}, low of {low}"
+            day_desc = f"{day_name}: Höchstwert {high}, Tiefstwert {low}"
 
             if "thunderstorm" in weather_main:
-                day_desc += ", thunderstorms likely"
+                day_desc += ", Gewitter wahrscheinlich"
             elif "rain" in weather_main or "drizzle" in weather_main:
-                day_desc += ", rain expected"
+                day_desc += ", Regen erwartet"
             elif "snow" in weather_main:
-                day_desc += ", snow expected"
+                day_desc += ", Schnee erwartet"
             elif "clear" in weather_main:
-                day_desc += ", clear skies"
+                day_desc += ", klarer Himmel"
             elif "cloud" in weather_main:
-                day_desc += ", cloudy"
+                day_desc += ", bewölkt"
 
             if not rain_chance or rain_chance < 1:
-                day_desc += ", no chance of rain"
+                day_desc += ", keine Regenwahrscheinlichkeit"
             else:
-                day_desc += f", {round(rain_chance)}% chance of rain"
+                day_desc += f", {round(rain_chance)} Prozent Regenwahrscheinlichkeit"
 
             response_parts.append(day_desc)
 
         joined = ". ".join(response_parts) + "."
-        return self.respond(f"Here's the outlook for {label}, {self.honorific}. {joined}")
+        return self.respond(f"Das ist die Vorhersage für {label}, {self.honorific}. {joined}")
 
     @staticmethod
     def _period_label(start: date, end: date) -> str:
@@ -740,26 +740,26 @@ class WeatherSkill(BaseSkill):
         # Single day
         if start == end:
             if start == today:
-                return "today"
-            return start.strftime("%A")
+                return "heute"
+            return start.strftime("%d.%m.%Y")
 
         # Weekend detection
         if start.weekday() == 5 and end.weekday() == 6 and (end - start).days == 1:
             days_out = (start - today).days
             if 0 <= days_out <= 6:
-                return "this weekend"
+                return "dieses Wochenende"
             elif 7 <= days_out <= 13:
-                return "next weekend"
-            return f"the weekend of {start.strftime('%B %-d')}"
+                return "nächstes Wochenende"
+            return f"das Wochenende ab {start.strftime('%d.%m.%Y')}"
 
         # Full week
         if start.weekday() == 0 and end.weekday() == 6 and (end - start).days == 6:
             if (start - today).days <= 7:
-                return "next week"
-            return f"the week of {start.strftime('%B %-d')}"
+                return "nächste Woche"
+            return f"die Woche ab {start.strftime('%d.%m.%Y')}"
 
         # Generic range
-        return f"{start.strftime('%A')} through {end.strftime('%A')}"
+        return f"{start.strftime('%d.%m.%Y')} bis {end.strftime('%d.%m.%Y')}"
 
     # ------------------------------------------------------------------
     # Rain Check
@@ -789,34 +789,34 @@ class WeatherSkill(BaseSkill):
                 return self._format_rain_response(target_row, today=asking_today)
 
         # Fallback to live API
-        self.tts.speak(f"Let me check the forecast, {self.honorific}.")
+        self.tts.speak(f"Ich prüfe die Vorhersage, {self.honorific}.")
         return self._fetch_rain_live()
 
     def _format_rain_response(self, row: dict, today: bool = False) -> str:
         """Format rain check from DB forecast row."""
         weather_main = row.get("weather_main", "").lower()
         rain_chance = row.get("rain_chance", 0)
-        when = "today" if today else "tomorrow"
+        when = "heute" if today else "morgen"
 
         has_storm = "thunderstorm" in weather_main
         has_rain = "rain" in weather_main or "drizzle" in weather_main
 
         if has_storm:
             if rain_chance > 70:
-                text = f"Yes {self.honorific}, thunderstorms are very likely {when} - about {round(rain_chance)}% chance. I'd recommend keeping plans flexible."
+                text = f"Ja, {self.honorific}, Gewitter sind {when} sehr wahrscheinlich: etwa {round(rain_chance)} Prozent. Halten Sie Ihre Pläne möglichst flexibel."
             else:
-                text = f"Thunderstorms are possible {when}, {self.honorific}. You may want to keep an eye on the forecast."
+                text = f"Gewitter sind {when} möglich, {self.honorific}. Behalten Sie die Vorhersage im Blick."
         elif has_rain:
             if rain_chance >= 80:
-                text = f"Yes {self.honorific}, rain is quite likely {when} - {round(rain_chance)}% chance. I'd bring an umbrella."
+                text = f"Ja, {self.honorific}, Regen ist {when} wahrscheinlich: {round(rain_chance)} Prozent. Nehmen Sie einen Regenschirm mit."
             elif rain_chance >= 50:
-                text = f"There's a {round(rain_chance)}% chance of rain {when}, {self.honorific}. An umbrella might be wise."
+                text = f"Die Regenwahrscheinlichkeit liegt {when} bei {round(rain_chance)} Prozent, {self.honorific}. Ein Regenschirm ist sinnvoll."
             elif rain_chance > 0:
-                text = f"There's a slight chance of rain {when}, {self.honorific} - about {round(rain_chance)}%. Probably nothing to worry about."
+                text = f"Es gibt {when} eine geringe Regenwahrscheinlichkeit von etwa {round(rain_chance)} Prozent, {self.honorific}."
             else:
-                text = f"Rain is expected {when}, {self.honorific}. Best to be prepared."
+                text = f"Regen wird {when} erwartet, {self.honorific}. Seien Sie darauf vorbereitet."
         else:
-            text = f"No {self.honorific}, it doesn't look like rain {when}. Should be dry."
+            text = f"Nein, {self.honorific}, {when} wird kein Regen erwartet. Es sollte trocken bleiben."
 
         return self.respond(text)
 
@@ -824,7 +824,7 @@ class WeatherSkill(BaseSkill):
         """Fallback: fetch rain check from live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -859,32 +859,32 @@ class WeatherSkill(BaseSkill):
 
             if has_thunderstorm:
                 if rain_chance > 70:
-                    text = f"Yes {self.honorific}, thunderstorms are very likely tomorrow - about {round(rain_chance)}% chance. I'd recommend keeping plans flexible."
+                    text = f"Ja, {self.honorific}, Gewitter sind morgen sehr wahrscheinlich: etwa {round(rain_chance)} Prozent. Halten Sie Ihre Pläne möglichst flexibel."
                 else:
-                    text = f"Thunderstorms are possible tomorrow, {self.honorific}. You may want to keep an eye on the forecast."
+                    text = f"Gewitter sind morgen möglich, {self.honorific}. Behalten Sie die Vorhersage im Blick."
             elif will_rain:
                 if rain_chance >= 80:
-                    text = f"Yes {self.honorific}, rain is quite likely tomorrow - {round(rain_chance)}% chance. I'd bring an umbrella."
+                    text = f"Ja, {self.honorific}, Regen ist morgen wahrscheinlich: {round(rain_chance)} Prozent. Nehmen Sie einen Regenschirm mit."
                 elif rain_chance >= 50:
-                    text = f"There's a {round(rain_chance)}% chance of rain tomorrow, {self.honorific}. An umbrella might be wise."
+                    text = f"Die Regenwahrscheinlichkeit liegt morgen bei {round(rain_chance)} Prozent, {self.honorific}. Ein Regenschirm ist sinnvoll."
                 elif rain_chance > 0:
-                    text = f"There's a slight chance of rain tomorrow, {self.honorific} - about {round(rain_chance)}%. Probably nothing to worry about."
+                    text = f"Es gibt morgen eine geringe Regenwahrscheinlichkeit von etwa {round(rain_chance)} Prozent, {self.honorific}."
                 else:
-                    text = f"Rain is expected tomorrow, {self.honorific}. Best to be prepared."
+                    text = f"Regen wird morgen erwartet, {self.honorific}. Seien Sie darauf vorbereitet."
             else:
-                text = f"No {self.honorific}, it doesn't look like rain tomorrow. Should be dry."
+                text = f"Nein, {self.honorific}, morgen wird kein Regen erwartet. Es sollte trocken bleiben."
 
             return self.respond(text)
 
         except Exception as e:
-            self.logger.error(f"Rain check error: {e}")
-            return self.respond(f"I'm having trouble checking tomorrow's forecast, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann die Vorhersage für morgen gerade nicht prüfen, {self.honorific}.")
 
     def _fetch_rain_for_coords(self, lat: float, lon: float) -> str:
         """Fetch rain check for arbitrary coordinates via live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -916,26 +916,26 @@ class WeatherSkill(BaseSkill):
 
             if has_thunderstorm:
                 if rain_chance > 70:
-                    text = f"Yes {self.honorific}, thunderstorms are very likely tomorrow - about {round(rain_chance)}% chance. I'd recommend keeping plans flexible."
+                    text = f"Ja, {self.honorific}, Gewitter sind morgen sehr wahrscheinlich: etwa {round(rain_chance)} Prozent. Halten Sie Ihre Pläne möglichst flexibel."
                 else:
-                    text = f"Thunderstorms are possible tomorrow, {self.honorific}. You may want to keep an eye on the forecast."
+                    text = f"Gewitter sind morgen möglich, {self.honorific}. Behalten Sie die Vorhersage im Blick."
             elif will_rain:
                 if rain_chance >= 80:
-                    text = f"Yes {self.honorific}, rain is quite likely tomorrow - {round(rain_chance)}% chance. I'd bring an umbrella."
+                    text = f"Ja, {self.honorific}, Regen ist morgen wahrscheinlich: {round(rain_chance)} Prozent. Nehmen Sie einen Regenschirm mit."
                 elif rain_chance >= 50:
-                    text = f"There's a {round(rain_chance)}% chance of rain tomorrow, {self.honorific}. An umbrella might be wise."
+                    text = f"Die Regenwahrscheinlichkeit liegt morgen bei {round(rain_chance)} Prozent, {self.honorific}. Ein Regenschirm ist sinnvoll."
                 elif rain_chance > 0:
-                    text = f"There's a slight chance of rain tomorrow, {self.honorific} - about {round(rain_chance)}%. Probably nothing to worry about."
+                    text = f"Es gibt morgen eine geringe Regenwahrscheinlichkeit von etwa {round(rain_chance)} Prozent, {self.honorific}."
                 else:
-                    text = f"Rain is expected tomorrow, {self.honorific}. Best to be prepared."
+                    text = f"Regen wird morgen erwartet, {self.honorific}. Seien Sie darauf vorbereitet."
             else:
-                text = f"No {self.honorific}, it doesn't look like rain tomorrow. Should be dry."
+                text = f"Nein, {self.honorific}, morgen wird kein Regen erwartet. Es sollte trocken bleiben."
 
             return self.respond(text)
 
         except Exception as e:
-            self.logger.error(f"Rain check error for coords ({lat}, {lon}): {e}")
-            return self.respond(f"I'm having trouble checking tomorrow's forecast, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann die Vorhersage für morgen gerade nicht prüfen, {self.honorific}.")
 
     # ------------------------------------------------------------------
     # Tomorrow's Weather
@@ -959,7 +959,7 @@ class WeatherSkill(BaseSkill):
                 return self._format_tomorrow_response(tomorrow_row)
 
         # Fallback to live API
-        self.tts.speak(f"Let me check that for you, {self.honorific}.")
+        self.tts.speak(f"Ich prüfe das für Sie, {self.honorific}.")
         return self._fetch_tomorrow_live()
 
     def _format_tomorrow_response(self, row: dict) -> str:
@@ -972,34 +972,34 @@ class WeatherSkill(BaseSkill):
         response_parts = []
 
         if high >= 95:
-            response_parts.append(f"Tomorrow will be a scorcher, {self.honorific} - a high of {high} degrees.")
+            response_parts.append(f"Morgen wird es sehr heiß, {self.honorific}, mit einem Höchstwert von {high} Grad.")
         elif high >= 85:
-            response_parts.append(f"Tomorrow will be quite warm, {self.honorific} - expect a high of {high}.")
+            response_parts.append(f"Morgen wird es warm, {self.honorific}, mit einem Höchstwert von {high} Grad.")
         elif high >= 70:
-            response_parts.append(f"Tomorrow looks pleasant, {self.honorific} - a high of {high} degrees.")
+            response_parts.append(f"Morgen wird es angenehm, {self.honorific}, mit einem Höchstwert von {high} Grad.")
         elif high >= 50:
-            response_parts.append(f"Tomorrow will be mild, {self.honorific} - a high of {high} degrees.")
+            response_parts.append(f"Morgen wird es mild, {self.honorific}, mit einem Höchstwert von {high} Grad.")
         elif high >= 32:
-            response_parts.append(f"Tomorrow will be rather chilly, {self.honorific} - only reaching {high} degrees.")
+            response_parts.append(f"Morgen wird es kühl, {self.honorific}, mit höchstens {high} Grad.")
         else:
-            response_parts.append(f"Tomorrow will be quite cold, {self.honorific} - a high of just {high} degrees.")
+            response_parts.append(f"Morgen wird es kalt, {self.honorific}, mit einem Höchstwert von {high} Grad.")
 
         if abs(high - low) > 20:
-            response_parts.append(f"It will drop to {low} overnight.")
+            response_parts.append(f"Nachts sinkt die Temperatur auf {low} Grad.")
 
         if "rain" in weather_main or "drizzle" in weather_main:
-            response_parts.append("Rain is expected, so you'll want an umbrella.")
+            response_parts.append("Es wird Regen erwartet. Nehmen Sie einen Regenschirm mit.")
         elif "thunderstorm" in weather_main:
-            response_parts.append(f"Thunderstorms are in the forecast, {self.honorific}.")
+            response_parts.append(f"Gewitter sind vorhergesagt, {self.honorific}.")
         elif "snow" in weather_main:
-            response_parts.append("Snow is expected.")
+            response_parts.append("Es wird Schnee erwartet.")
         elif "clear" in weather_main:
-            response_parts.append("Clear skies expected.")
+            response_parts.append("Es wird klarer Himmel erwartet.")
         elif "cloud" in weather_main:
             if "few" in description or "scattered" in description:
-                response_parts.append("Partly cloudy conditions.")
+                response_parts.append("Es wird teilweise bewölkt.")
             else:
-                response_parts.append("Expect overcast skies.")
+                response_parts.append("Es wird bedeckter Himmel erwartet.")
 
         return self.respond(" ".join(response_parts))
 
@@ -1007,7 +1007,7 @@ class WeatherSkill(BaseSkill):
         """Fallback: fetch tomorrow's weather from live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -1031,7 +1031,7 @@ class WeatherSkill(BaseSkill):
                     tomorrow_data.append(item)
 
             if not tomorrow_data:
-                return self.respond(f"I don't have tomorrow's forecast available, {self.honorific}.")
+                return self.respond(f"Die Vorhersage für morgen ist nicht verfügbar, {self.honorific}.")
 
             row = {
                 "temp_high": max(item["main"]["temp"] for item in tomorrow_data),
@@ -1042,14 +1042,14 @@ class WeatherSkill(BaseSkill):
             return self._format_tomorrow_response(row)
 
         except Exception as e:
-            self.logger.error(f"Tomorrow weather error: {e}")
-            return self.respond(f"I'm having trouble getting tomorrow's weather, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann das Wetter für morgen gerade nicht abrufen, {self.honorific}.")
 
     def _fetch_tomorrow_for_coords(self, lat: float, lon: float) -> str:
         """Fetch tomorrow's weather for arbitrary coordinates via live API."""
         if not self.api_key:
             return self.respond(
-                f"Live weather data is unavailable right now, {self.honorific}."
+                f"Aktuelle Wetterdaten sind derzeit nicht verfügbar, {self.honorific}."
             )
 
         try:
@@ -1070,7 +1070,7 @@ class WeatherSkill(BaseSkill):
                     tomorrow_data.append(item)
 
             if not tomorrow_data:
-                return self.respond(f"I don't have tomorrow's forecast available, {self.honorific}.")
+                return self.respond(f"Die Vorhersage für morgen ist nicht verfügbar, {self.honorific}.")
 
             row = {
                 "temp_high": max(item["main"]["temp"] for item in tomorrow_data),
@@ -1081,8 +1081,8 @@ class WeatherSkill(BaseSkill):
             return self._format_tomorrow_response(row)
 
         except Exception as e:
-            self.logger.error(f"Tomorrow weather error for coords ({lat}, {lon}): {e}")
-            return self.respond(f"I'm having trouble getting tomorrow's weather, {self.honorific}.")
+            self.logger.error("Weather operation failed (%s)", type(e).__name__)
+            return self.respond(f"Ich kann das Wetter für morgen gerade nicht abrufen, {self.honorific}.")
 
     # ------------------------------------------------------------------
     # Sunrise / Sunset
@@ -1104,7 +1104,7 @@ class WeatherSkill(BaseSkill):
         from datetime import timedelta
         target_date = date.today() + timedelta(days=1) if is_tomorrow else date.today()
         target_str = target_date.isoformat()
-        day_label = "tomorrow" if is_tomorrow else "today"
+        day_label = "morgen" if is_tomorrow else "heute"
 
         if self.db:
             sun = self.db.get_sun_times(target_str)
@@ -1112,13 +1112,13 @@ class WeatherSkill(BaseSkill):
                 time_val = sun.get(which, "")
                 if time_val:
                     return self.respond(
-                        f"{which.capitalize()} {day_label} is at {time_val}, {self.honorific}."
+                        f"{'Sonnenaufgang' if which == 'sunrise' else 'Sonnenuntergang'} {day_label} ist um {time_val}, {self.honorific}."
                     )
 
         # No DB data available
         return self.respond(
-            f"I don't have {which} data available right now, {self.honorific}. "
-            "The data should be populated shortly."
+            f"Die Daten für den {'Sonnenaufgang' if which == 'sunrise' else 'Sonnenuntergang'} sind derzeit nicht verfügbar, {self.honorific}. "
+            "Die Daten werden noch geladen."
         )
 
     # ------------------------------------------------------------------
@@ -1165,7 +1165,7 @@ class WeatherSkill(BaseSkill):
                         return handler(location=location)
                     return handler()
             self.logger.error(f"Semantic handler not found: {handler_name}")
-            return "I'm not sure how to help with that weather query."
+            return "Diese Wetteranfrage habe ich nicht verstanden."
 
         handler = self.intents.get(intent, {}).get("handler")
         if handler:
@@ -1173,7 +1173,7 @@ class WeatherSkill(BaseSkill):
             if location:
                 return handler(location=location)
             return handler()
-        return "I'm not sure how to help with that weather query."
+        return "Diese Wetteranfrage habe ich nicht verstanden."
 
 
 def create_skill(config, conversation, tts, responses, llm):

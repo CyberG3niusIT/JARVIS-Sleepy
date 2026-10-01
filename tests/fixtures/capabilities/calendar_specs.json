@@ -1,0 +1,38 @@
+[
+  {
+    "id": "calendar.list",
+    "contract_version": 1,
+    "minimum_risk": ["READ"],
+    "privacy_policy_refs": ["CALENDAR_CONTENT"]
+  },
+  {
+    "id": "calendar.read",
+    "contract_version": 1,
+    "minimum_risk": ["READ"],
+    "privacy_policy_refs": ["CALENDAR_CONTENT"]
+  },
+  {
+    "id": "calendar.search",
+    "contract_version": 1,
+    "minimum_risk": ["READ"],
+    "privacy_policy_refs": ["CALENDAR_CONTENT"]
+  },
+  {
+    "id": "calendar.create",
+    "contract_version": 1,
+    "minimum_risk": ["WRITE"],
+    "privacy_policy_refs": ["CALENDAR_CONTENT"]
+  },
+  {
+    "id": "calendar.update",
+    "contract_version": 1,
+    "minimum_risk": ["WRITE"],
+    "privacy_policy_refs": ["CALENDAR_CONTENT"]
+  },
+  {
+    "id": "calendar.delete",
+    "contract_version": 1,
+    "minimum_risk": ["WRITE", "DESTRUCTIVE"],
+    "privacy_policy_refs": ["CALENDAR_CONTENT"]
+  }
+]

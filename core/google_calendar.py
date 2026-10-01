@@ -19,8 +19,21 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Callable
+from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo
+
+
+@dataclass
+class CalendarReadOutcome:
+    status: str
+    events: list = field(default_factory=list)
+
+    @property
+    def available(self):
+        return self.status == "success"
 
 from core.logger import get_logger
+from core.privacy_gate import Capability, get_privacy_gate
 
 # Singleton instance
 _instance: Optional["GoogleCalendarManager"] = None
@@ -44,6 +57,11 @@ class GoogleCalendarManager:
     # Google Calendar API scopes
     SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
+    def can_access_user(self, user_id):
+        """The existing configured primary identity owns this global OAuth token."""
+        owner = self.config.get("user_profiles.primary_user_id", "primary_user")
+        return isinstance(owner, str) and bool(owner.strip()) and isinstance(user_id, str) and user_id == owner
+
     def __init__(self, config):
         self.config = config
         self.logger = get_logger(__name__, config)
@@ -65,7 +83,10 @@ class GoogleCalendarManager:
         self._sync_interval = config.get("google_calendar.sync_interval_seconds", 300)
         self._calendar_name = config.get("google_calendar.jarvis_calendar_name", "JARVIS")
         self._include_primary = config.get("google_calendar.include_primary_in_rundown", True)
-        self._timezone = config.get("google_calendar.timezone", "America/Your_Timezone")
+        self._timezone = config.get("google_calendar.timezone", "Europe/Berlin")
+        self.auth_status = "GOOGLE_AUTH_BLOCKED_PENDING_OWNER"
+        self._primary_timezone = self._timezone
+        self.timezone_verified = False
 
         # State
         self.creds = None
@@ -84,6 +105,7 @@ class GoogleCalendarManager:
         try:
             self._authenticate()
             self._authenticated = True
+            self.auth_status = "ready"
             self._load_sync_token()
             self._ensure_jarvis_calendar()
             self.logger.info("Google Calendar authenticated and ready")
@@ -93,36 +115,31 @@ class GoogleCalendarManager:
                 "Calendar sync disabled. Download credentials.json from Google Cloud Console."
             )
         except Exception as e:
-            self.logger.error(f"Google Calendar auth failed: {e}")
+            self.logger.error("Google Calendar auth failed (%s)", type(e).__name__)
 
     # ------------------------------------------------------------------
     # Authentication
     # ------------------------------------------------------------------
 
     def _authenticate(self):
-        """Load token.json or trigger first-time OAuth browser flow."""
+        """Reuse existing scopes and token; interactive authorization requires owner."""
+        get_privacy_gate().assert_allowed(Capability.REMOTE_TOOL)
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
-
-        if not os.path.exists(self._credentials_path):
-            raise FileNotFoundError(f"No credentials.json at {self._credentials_path}")
 
         creds = None
         if os.path.exists(self._token_path):
-            creds = Credentials.from_authorized_user_file(self._token_path, self.SCOPES)
+            creds = Credentials.from_authorized_user_file(self._token_path)
+            if not (creds.has_scopes(self.SCOPES) or creds.has_scopes(
+                    ["https://www.googleapis.com/auth/calendar.readonly"])):
+                raise PermissionError("Existing Calendar token scope is insufficient")
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 self.logger.info("Refreshing Google Calendar token...")
                 creds.refresh(Request())
             else:
-                self.logger.info("Starting Google Calendar OAuth flow (browser)...")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self._credentials_path, self.SCOPES
-                )
-                creds = flow.run_local_server(port=0)
-                self.logger.info("Google Calendar OAuth completed")
+                raise PermissionError("Calendar authorization requires owner")
 
             # Persist token
             os.makedirs(os.path.dirname(self._token_path), exist_ok=True)
@@ -140,6 +157,8 @@ class GoogleCalendarManager:
 
     def _ensure_valid(self):
         """Refresh access token if expired. Persist refreshed token."""
+        if not get_privacy_gate().allow(Capability.REMOTE_TOOL):
+            return False
         if not self._authenticated or not self.creds:
             return False
 
@@ -172,26 +191,35 @@ class GoogleCalendarManager:
             return
 
         try:
-            # List existing calendars
-            calendar_list = self.service.calendarList().list().execute()
-            for cal in calendar_list.get("items", []):
-                if cal.get("summary") == self._calendar_name:
-                    self._jarvis_calendar_id = cal["id"]
-                    self.logger.info(f"Found JARVIS calendar: {self._jarvis_calendar_id}")
-                    return
-
-            # Create new calendar
-            body = {
-                "summary": self._calendar_name,
-                "description": "Reminders managed by JARVIS voice assistant",
-                "timeZone": self._timezone,
-            }
-            created = self.service.calendars().insert(body=body).execute()
-            self._jarvis_calendar_id = created["id"]
-            self.logger.info(f"Created JARVIS calendar: {self._jarvis_calendar_id}")
+            # Metadata only: honor the actual Google timezone when available.
+            candidates = []
+            token = None
+            while True:
+                params = {"pageToken": token} if token else {}
+                calendar_list = self.service.calendarList().list(**params).execute()
+                for cal in calendar_list.get("items", []):
+                    zone = cal.get("timeZone")
+                    if zone:
+                        ZoneInfo(zone)  # Validate IANA timezone before adopting it.
+                    if cal.get("primary") and zone:
+                        self._primary_timezone = zone
+                        self.timezone_verified = True
+                    if cal.get("summary") == self._calendar_name and not cal.get("primary"):
+                        candidates.append(cal)
+                token = calendar_list.get("nextPageToken")
+                if not token:
+                    break
+            if len(candidates) == 1:
+                cal = candidates[0]
+                self._jarvis_calendar_id = cal["id"]
+                if cal.get("timeZone"):
+                    self._timezone = cal["timeZone"]
+                self.logger.info("Existing dedicated Calendar selected")
+            else:
+                self.logger.warning("Dedicated Calendar absent or ambiguous; owner setup required")
 
         except Exception as e:
-            self.logger.error(f"Failed to ensure JARVIS calendar: {e}")
+            self.logger.error("Calendar operation: content suppressed")
 
     # ------------------------------------------------------------------
     # Event CRUD
@@ -205,8 +233,11 @@ class GoogleCalendarManager:
         """
         if not self._authenticated or not self._jarvis_calendar_id:
             return None
+        if not self.creds or not self.creds.has_scopes(self.SCOPES):
+            return None
 
-        self._ensure_valid()
+        if not self._ensure_valid():
+            return None
 
         # Build reminder overrides based on priority
         if priority <= 2:
@@ -250,18 +281,21 @@ class GoogleCalendarManager:
                 body=event_body,
             ).execute()
             event_id = created["id"]
-            self.logger.info(f"Google Calendar event created: {event_id} ({title})")
+            self.logger.info("Calendar operation: content suppressed")
             return event_id
         except Exception as e:
-            self.logger.error(f"Failed to create Google Calendar event: {e}")
+            self.logger.error("Calendar operation: content suppressed")
             return None
 
     def update_event(self, event_id: str, **kwargs) -> bool:
         """Update an existing event (title, start_time, description)."""
         if not self._authenticated or not self._jarvis_calendar_id or not event_id:
             return False
+        if not self.creds or not self.creds.has_scopes(self.SCOPES):
+            return False
 
-        self._ensure_valid()
+        if not self._ensure_valid():
+            return False
 
         try:
             # Fetch current event
@@ -275,9 +309,16 @@ class GoogleCalendarManager:
                 event["summary"] = kwargs["title"]
             if "start_time" in kwargs:
                 start = kwargs["start_time"]
-                end = start + timedelta(minutes=15)
+                old_start = datetime.fromisoformat(event["start"]["dateTime"].replace("Z", "+00:00"))
+                old_end = datetime.fromisoformat(event["end"]["dateTime"].replace("Z", "+00:00"))
+                duration = old_end - old_start
+                if duration <= timedelta(0):
+                    return False
+                end = start + duration
                 event["start"]["dateTime"] = start.strftime("%Y-%m-%dT%H:%M:%S")
                 event["end"]["dateTime"] = end.strftime("%Y-%m-%dT%H:%M:%S")
+                event["start"]["timeZone"] = self._timezone
+                event["end"]["timeZone"] = self._timezone
             if "description" in kwargs:
                 event["description"] = kwargs["description"]
 
@@ -286,28 +327,31 @@ class GoogleCalendarManager:
                 eventId=event_id,
                 body=event,
             ).execute()
-            self.logger.info(f"Google Calendar event updated: {event_id}")
+            self.logger.info("Calendar operation: content suppressed")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to update Google Calendar event: {e}")
+            self.logger.error("Calendar operation: content suppressed")
             return False
 
     def delete_event(self, event_id: str) -> bool:
         """Delete an event from the JARVIS calendar."""
         if not self._authenticated or not self._jarvis_calendar_id or not event_id:
             return False
+        if not self.creds or not self.creds.has_scopes(self.SCOPES):
+            return False
 
-        self._ensure_valid()
+        if not self._ensure_valid():
+            return False
 
         try:
             self.service.events().delete(
                 calendarId=self._jarvis_calendar_id,
                 eventId=event_id,
             ).execute()
-            self.logger.info(f"Google Calendar event deleted: {event_id}")
+            self.logger.info("Calendar operation: content suppressed")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to delete Google Calendar event: {e}")
+            self.logger.error("Calendar operation: content suppressed")
             return False
 
     # ------------------------------------------------------------------
@@ -325,7 +369,8 @@ class GoogleCalendarManager:
         if not self._authenticated or not self._jarvis_calendar_id:
             return {"new": [], "updated": [], "deleted": []}
 
-        self._ensure_valid()
+        if not self._ensure_valid():
+            return {"new": [], "updated": [], "deleted": []}
 
         result = {"new": [], "updated": [], "deleted": []}
 
@@ -386,78 +431,97 @@ class GoogleCalendarManager:
                 self._sync_token = None
                 self._save_sync_token()
                 return self.sync_from_google()
-            self.logger.error(f"Google Calendar sync failed: {e}")
+            self.logger.error("Calendar operation: content suppressed")
 
         return result
 
-    def get_primary_events_today(self) -> List[Dict]:
-        """Get today's events from the primary calendar for daily rundown."""
-        if not self._authenticated or not self._include_primary:
-            return []
-
-        self._ensure_valid()
-
+    def read_events(self, period="today", now=None) -> CalendarReadOutcome:
+        """Read complete local calendar ranges without treating failures as empty days."""
+        if period not in ("today", "tomorrow", "week"):
+            return CalendarReadOutcome("invalid_period")
+        if not get_privacy_gate().allow(Capability.REMOTE_TOOL):
+            return CalendarReadOutcome("privacy_blocked")
+        if not self._authenticated:
+            return CalendarReadOutcome("auth_blocked")
+        if not self._include_primary and not self._jarvis_calendar_id:
+            return CalendarReadOutcome("disabled")
         try:
-            now = datetime.now()
-            start_of_day = now.replace(hour=0, minute=0, second=0)
-            end_of_day = now.replace(hour=23, minute=59, second=59)
-
-            tz = self._tz_offset()
-            events_result = self.service.events().list(
-                calendarId="primary",
-                timeMin=start_of_day.strftime("%Y-%m-%dT%H:%M:%S") + tz,
-                timeMax=end_of_day.strftime("%Y-%m-%dT%H:%M:%S") + tz,
-                singleEvents=True,
-                orderBy="startTime",
-                maxResults=20,
-            ).execute()
-
+            if not self._ensure_valid():
+                return CalendarReadOutcome("auth_blocked")
+            tz = ZoneInfo(getattr(self, "_primary_timezone", self._timezone))
+            current = now or datetime.now(tz)
+            current = current.replace(tzinfo=tz) if current.tzinfo is None else current.astimezone(tz)
+            start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+            if period == "tomorrow":
+                start += timedelta(days=1)
+            elif period == "week":
+                start -= timedelta(days=start.weekday())
+            end = start + timedelta(days=7 if period == "week" else 1)
             results = []
-            for event in events_result.get("items", []):
-                parsed = self._parse_google_event(event)
-                if parsed:
-                    results.append(parsed)
-            return results
+            calendar_ids = (["primary"] if self._include_primary else [])
+            if self._jarvis_calendar_id and self._jarvis_calendar_id not in calendar_ids:
+                calendar_ids.append(self._jarvis_calendar_id)
+            seen_ids = set()
+            for calendar_id in calendar_ids:
+                token = None
+                while True:
+                    params = dict(calendarId=calendar_id, timeMin=start.isoformat(),
+                              timeMax=end.isoformat(), singleEvents=True,
+                              orderBy="startTime", maxResults=2500)
+                    if token:
+                        params["pageToken"] = token
+                    response = self.service.events().list(**params).execute()
+                    for event in response.get("items", []):
+                        if event.get("status") == "cancelled":
+                            continue
+                        event_id = event.get("id")
+                        if event_id and event_id in seen_ids:
+                            continue
+                        parsed = self._parse_google_event(event, timezone=getattr(self, "_primary_timezone", self._timezone))
+                        if parsed:
+                            if event_id:
+                                seen_ids.add(event_id)
+                            results.append(parsed)
+                    token = response.get("nextPageToken")
+                    if not token:
+                        break
+            results.sort(key=lambda event: event["start_time"])
+            return CalendarReadOutcome("success", results)
+        except Exception as exc:
+            self.logger.warning("Calendar read failed (%s)", type(exc).__name__)
+            return CalendarReadOutcome("unavailable")
 
-        except Exception as e:
-            self.logger.error(f"Failed to get primary calendar events: {e}")
+    def find_dedicated_events(self, title):
+        """Exact title selection; multiple identical names require clarification."""
+        if not self._jarvis_calendar_id or not self._ensure_valid():
             return []
-
-    def get_primary_events_week(self) -> List[Dict]:
-        """Get this week's events (Mon–Sun) from the primary calendar for weekly rundown."""
-        if not self._authenticated or not self._include_primary:
-            return []
-
-        self._ensure_valid()
-
         try:
-            now = datetime.now()
-            # Monday of current week
-            monday = now - timedelta(days=now.weekday())
-            monday = monday.replace(hour=0, minute=0, second=0)
-            sunday = monday + timedelta(days=6)
-            sunday = sunday.replace(hour=23, minute=59, second=59)
-
-            tz = self._tz_offset()
-            events_result = self.service.events().list(
-                calendarId="primary",
-                timeMin=monday.strftime("%Y-%m-%dT%H:%M:%S") + tz,
-                timeMax=sunday.strftime("%Y-%m-%dT%H:%M:%S") + tz,
-                singleEvents=True,
-                orderBy="startTime",
-                maxResults=50,
-            ).execute()
-
-            results = []
-            for event in events_result.get("items", []):
-                parsed = self._parse_google_event(event)
-                if parsed:
-                    results.append(parsed)
-            return results
-
-        except Exception as e:
-            self.logger.error(f"Failed to get primary calendar events for week: {e}")
+            items, token = [], None
+            while True:
+                args = dict(calendarId=self._jarvis_calendar_id, singleEvents=True,
+                            maxResults=2500, timeMin=datetime.now(ZoneInfo(self._timezone)).isoformat())
+                if token:
+                    args["pageToken"] = token
+                response = self.service.events().list(**args).execute()
+                for event in response.get("items", []):
+                    parsed = self._parse_google_event(event)
+                    if parsed and event.get("status") != "cancelled" and parsed["title"].casefold() == title.strip().casefold():
+                        items.append(parsed)
+                token = response.get("nextPageToken")
+                if not token:
+                    return items
+        except Exception as exc:
+            self.logger.warning("Calendar selection failed (%s)", type(exc).__name__)
             return []
+
+    def get_primary_events_today(self):
+        return self.read_events("today").events
+
+    def get_primary_events_tomorrow(self):
+        return self.read_events("tomorrow").events
+
+    def get_primary_events_week(self):
+        return self.read_events("week").events
 
     def get_upcoming_context(self, hours: int = 4) -> List[Dict]:
         """Get upcoming events for awareness injection.
@@ -465,7 +529,8 @@ class GoogleCalendarManager:
         Returns lightweight event data for the next N hours.
         Cached for 5 minutes to avoid API spam.
         """
-        if not self._authenticated or not self._include_primary:
+        if (not self._authenticated or not self._include_primary
+                or not get_privacy_gate().allow(Capability.REMOTE_TOOL)):
             return []
 
         # Simple TTL cache
@@ -477,10 +542,11 @@ class GoogleCalendarManager:
         if cached is not None and (now - cached_ts) < 300:  # 5-minute TTL
             return cached
 
-        self._ensure_valid()
+        if not self._ensure_valid():
+            return []
 
         try:
-            now_dt = datetime.now()
+            now_dt = datetime.now(ZoneInfo(self._timezone))
             end_dt = now_dt + timedelta(hours=hours)
 
             tz = self._tz_offset()
@@ -497,14 +563,14 @@ class GoogleCalendarManager:
                 try:
                     events_result = self.service.events().list(
                         calendarId=cal_id,
-                        timeMin=now_dt.strftime("%Y-%m-%dT%H:%M:%S") + tz,
-                        timeMax=end_dt.strftime("%Y-%m-%dT%H:%M:%S") + tz,
+                        timeMin=now_dt.isoformat(),
+                        timeMax=end_dt.isoformat(),
                         singleEvents=True,
                         orderBy="startTime",
                         maxResults=10,
                     ).execute()
                 except Exception as e:
-                    self.logger.warning(f"Calendar query failed for {cal_id}: {e}")
+                    self.logger.warning("Calendar operation: content suppressed")
                     continue
 
                 for event in events_result.get("items", []):
@@ -519,7 +585,7 @@ class GoogleCalendarManager:
                         start_raw = event.get("start", {})
                         is_all_day = "date" in start_raw and "dateTime" not in start_raw
 
-                        delta = parsed["start_time"] - now_dt
+                        delta = parsed["start_time"] - now_dt.replace(tzinfo=None)
                         minutes_until = max(0, int(delta.total_seconds() / 60))
                         # Extract attendees if available
                         attendees = [
@@ -543,14 +609,12 @@ class GoogleCalendarManager:
             return results
 
         except Exception as e:
-            self.logger.error(f"Failed to get upcoming calendar context: {e}")
+            self.logger.error("Calendar operation: content suppressed")
             return []
 
-    def _parse_google_event(self, event: Dict) -> Optional[Dict]:
+    def _parse_google_event(self, event: Dict, timezone=None) -> Optional[Dict]:
         """Parse a Google Calendar event into a JARVIS-friendly dict."""
-        summary = event.get("summary", "")
-        if not summary:
-            return None
+        summary = event.get("summary") or "Termin ohne Titel"
 
         # Extract priority from title prefix
         priority = 3
@@ -573,8 +637,15 @@ class GoogleCalendarManager:
 
         try:
             # Handle ISO format with timezone offset
-            start_str_clean = re.sub(r"[+-]\d{2}:\d{2}$", "", start_str)
-            start_time = datetime.fromisoformat(start_str_clean)
+            tz = ZoneInfo(timezone or self._timezone)
+            start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            if start_time.tzinfo is not None:
+                start_time = start_time.astimezone(tz).replace(tzinfo=None)
+            end_raw = event.get("end", {})
+            end_str = end_raw.get("dateTime") or end_raw.get("date")
+            end_time = datetime.fromisoformat(end_str.replace("Z", "+00:00")) if end_str else start_time
+            if end_time.tzinfo is not None:
+                end_time = end_time.astimezone(tz).replace(tzinfo=None)
         except ValueError:
             return None
 
@@ -595,6 +666,8 @@ class GoogleCalendarManager:
         return {
             "title": clean_title,
             "start_time": start_time,
+            "end_time": end_time,
+            "all_day": "dateTime" not in start,
             "priority": priority,
             "description": event.get("description", ""),
             "google_event_id": event.get("id"),
@@ -633,7 +706,7 @@ class GoogleCalendarManager:
             with open(self._sync_token_path, "w") as f:
                 json.dump({"sync_token": self._sync_token}, f)
         except Exception as e:
-            self.logger.error(f"Failed to save sync token: {e}")
+            self.logger.error("Calendar operation: content suppressed")
 
     # ------------------------------------------------------------------
     # Background Sync Thread
@@ -703,7 +776,7 @@ class GoogleCalendarManager:
                         self._on_cancel_event(event["google_event_id"])
 
             except Exception as e:
-                self.logger.error(f"Google Calendar poll error: {e}")
+                self.logger.error("Calendar operation: content suppressed")
 
             # Sleep in small increments for responsive shutdown
             for _ in range(self._sync_interval):
@@ -720,7 +793,8 @@ class GoogleCalendarManager:
         if not self._authenticated:
             return False
 
-        self._ensure_valid()
+        if not self._ensure_valid():
+            return False
         try:
             self.service.calendarList().list(maxResults=1).execute()
             return True

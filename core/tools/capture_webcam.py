@@ -105,10 +105,10 @@ def _process_frame(frame_bytes: bytes) -> dict | str:
             "image_data": image_data,
         }
     except ImportError:
-        return "Error: PIL not available — cannot process webcam frame."
+        return "Fehler: PIL ist nicht verfügbar; das Kamerabild kann nicht verarbeitet werden."
     except Exception as e:
-        logger.error("Frame processing failed: %s", e)
-        return f"Error: Frame processing failed — {e}"
+        logger.error("Frame processing failed: %s", type(e).__name__)
+        return f"Fehler: Das Kamerabild konnte nicht verarbeitet werden."
 
 
 def _capture_desktop() -> bytes | str | None:
@@ -145,12 +145,12 @@ def _capture_desktop() -> bytes | str | None:
                 finally:
                     _loop.close()
         except TimeoutError:
-            return "Error: Webcam frame timeout — camera may not be responding."
+            return "Fehler: Die Kamera hat die Zeitgrenze überschritten."
         except FileNotFoundError as e:
-            return f"Error: {e}"
+            return f"Fehler: Die Anfrage konnte nicht ausgeführt werden."
         except Exception as e:
-            logger.error("Desktop webcam capture failed: %s", e)
-            return f"Error: Webcam capture failed — {e}"
+            logger.error("Desktop webcam capture failed: %s", type(e).__name__)
+            return f"Fehler: Das Kamerabild konnte nicht erfasst werden."
 
     # Proxy path (web service) — fetch from voice service frame server
     return _capture_desktop_proxy()
@@ -170,7 +170,7 @@ def _capture_desktop_proxy() -> bytes | str | None:
     except urllib.error.URLError:
         return None  # Voice service not reachable — try mobile fallback
     except Exception as e:
-        logger.error("Desktop webcam proxy failed: %s", e)
+        logger.error("Desktop webcam proxy failed: %s", type(e).__name__)
         return None
 
 
@@ -178,7 +178,7 @@ def _capture_mobile() -> bytes | str:
     """Capture a frame from the mobile browser via WebSocket relay."""
     relay = _mobile_relay
     if not relay or not relay.is_connected:
-        return "Error: No camera available. Connect a webcam or open the camera panel on your phone."
+        return "Fehler: Keine Kamera verfügbar. Schließen Sie eine Kamera an oder öffnen Sie das Kamerafenster auf Ihrem Telefon."
 
     try:
         # relay.request_frame() is async — bridge to sync
@@ -187,16 +187,16 @@ def _capture_mobile() -> bytes | str:
             future = asyncio.run_coroutine_threadsafe(relay.request_frame(), loop)
             return future.result(timeout=35)
         else:
-            return "Error: Mobile camera relay loop not available."
+            return "Fehler: Die Verbindung zur Telefonkamera ist nicht verfügbar."
     except TimeoutError:
         logger.warning("Mobile camera sync bridge timed out (25s)")
-        return ("Error: Mobile camera timed out. "
-                "Make sure the camera panel is open on your phone.")
+        return ("Fehler: Die Telefonkamera hat die Zeitgrenze überschritten. "
+                "Prüfen Sie, ob das Kamerafenster auf Ihrem Telefon geöffnet ist.")
     except RuntimeError as e:
-        return f"Error: {e}"
+        return f"Fehler: Die Anfrage konnte nicht ausgeführt werden."
     except Exception as e:
-        logger.error("Mobile camera capture failed: %s", e)
-        return f"Error: Mobile camera capture failed — {e}"
+        logger.error("Mobile camera capture failed: %s", type(e).__name__)
+        return f"Fehler: Das Telefonkamerabild konnte nicht erfasst werden."
 
 
 def handler(args: dict) -> dict | str:
@@ -215,7 +215,7 @@ def handler(args: dict) -> dict | str:
     elif source == "desktop":
         result = _capture_desktop()
         if result is None:
-            result = "Error: No desktop webcam available."
+            result = "Fehler: Keine Desktopkamera verfügbar."
     else:
         # Auto: try desktop first, fall back to mobile
         result = _capture_desktop()

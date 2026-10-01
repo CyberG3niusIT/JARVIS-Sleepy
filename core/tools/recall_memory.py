@@ -47,11 +47,11 @@ SYSTEM_PROMPT_RULE = (
 def handler(args: dict) -> str:
     """Search memory for facts matching the query."""
     if _memory_manager is None:
-        return "Error: memory system not initialized"
+        return "Fehler: Das Gedächtnissystem ist nicht initialisiert"
 
     query = args.get("query", "").strip()
     if not query:
-        return "Error: query parameter is required"
+        return "Fehler: Der Parameter 'query' ist erforderlich"
 
     user_id = _current_user_fn() if _current_user_fn else "primary_user"
 
@@ -84,7 +84,7 @@ def handler(args: dict) -> str:
     )
 
     if not combined:
-        return "No memories found matching that query."
+        return "Keine passenden Erinnerungen gefunden."
 
     # Return facts as stored — the LLM naturally handles pronouns in synthesis.
     # Facts are third-person sentences: "the user loves the band Tool"

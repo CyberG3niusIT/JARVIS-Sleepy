@@ -1,0 +1,158 @@
+﻿===== JARVIS OPUS GITHUB HANDOFF =====
+Created: 2026-09-29 18:21:30 +02:00
+
+===== BACKEND =====
+ORIGINAL_BRANCH=backup/jarvis-runtime-voice-2026-09-24
+ORIGINAL_HEAD=a977e1e77ff7f2531dbdfe1a9251b4341541586a
+STAGED_STATUS_ITEMS=123
+M  .env.example
+A  .github/CODEOWNERS
+A  .github/dependabot.yml
+M  .github/pull_request_template.md
+A  .github/workflows/ci-python.yml
+A  AGENTS.md
+A  CLAUDE.md
+A  JARVIS-Runtime.ps1
+M  JARVIS.Runtime.psm1
+M  PROJECT_OVERVIEW.md
+M  README.md
+M  config.yaml
+A  core/audio_turn_routing.py
+M  core/claude_consultation.py
+M  core/context_window.py
+M  core/continuous_listener.py
+M  core/conversation.py
+M  core/conversation_router.py
+A  core/direct_audio.py
+A  core/expert_policy.py
+M  core/governance.py
+M  core/gpu_swap.py
+M  core/health_check.py
+A  core/live_telemetry.py
+M  core/llm_router.py
+M  core/llm_server_client.py
+A  core/mail_integration.py
+M  core/memory_manager.py
+M  core/metrics_tracker.py
+A  core/model_handover.py
+A  core/npu_face_backend.py
+M  core/observation_collector.py
+M  core/pipeline.py
+M  core/presence_detector.py
+M  core/privacy_gate.py
+A  core/runtime_state.py
+A  core/speculative_turn.py
+M  core/stt_qwen3.py
+M  core/tool_registry.py
+A  core/tools/delegate_to_expert.py
+A  core/tools/mail_status.py
+M  core/tts.py
+A  core/turn_assembler.py
+A  core/vision_gate.py
+A  core/wake_word_utils.py
+M  core/watchdog.py
+M  docs/ARCHITECTURE.md
+M  docs/DEVELOPMENT.md
+M  docs/DEVELOPMENT_VISION.md
+M  docs/EDGE_CASE_TESTING.md
+A  docs/RUNTIME_SUPERVISOR.md
+M  docs/SETUP_GUIDE.md
+M  docs/SYSTEM_SPECIFIC_NOTES.md
+M  jarvis_console.py
+M  jarvis_continuous.py
+M  jarvis_web.py
+M  killswitch.sh
+A  pyproject.toml
+A  requirements-anthropic.txt
+A  requirements-ci.txt
+M  requirements.txt
+M  restart.sh
+M  scripts/check_chatterbox_runtime.py
+M  scripts/check_runtime_dependencies.py
+M  scripts/jarvis-circuit-reset
+M  scripts/jarvis-confirm
+M  scripts/preflight_check.py
+A  scripts/runtime_status.py
+M  scripts/test_suite_v3/cleanup.py
+M  scripts/test_suite_v3/client.py
+M  scripts/ws_test.py
+A  scripts/wsl-pytest.ps1
+M  start.sh
+M  start_chatterbox.sh
+M  stop.sh
+M  systemd/README.md
+A  systemd/llama-server-expert.service
+A  systemd/llama-server-primary.service
+M  tests/components/test_temporal_weather.py
+M  tests/integration/test_conversations.py
+M  tests/integration/test_vision.py
+M  tests/powershell/Test-JarvisRuntime.ps1
+A  tests/powershell/Test-JarvisRuntimeSupervisor.ps1
+A  tests/unit/test_active_voice_event_telemetry.py
+A  tests/unit/test_audio_turn_routing.py
+A  tests/unit/test_context_window_read_only.py
+A  tests/unit/test_direct_audio_routing.py
+A  tests/unit/test_expert_delegation.py
+A  tests/unit/test_expert_handover_integration.py
+A  tests/unit/test_jarvis_web_app.py
+A  tests/unit/test_jarvis_web_desktop_mode.py
+A  tests/unit/test_live_telemetry.py
+A  tests/unit/test_llm_cloud_provider.py
+A  tests/unit/test_llm_router_hardening.py
+A  tests/unit/test_mail_integration.py
+A  tests/unit/test_memory_read_only.py
+A  tests/unit/test_model_handover.py
+A  tests/unit/test_presence_npu_backend.py
+A  tests/unit/test_privacy_direct_audio.py
+M  tests/unit/test_runtime_dependencies.py
+M  tests/unit/test_runtime_lifecycle_shell.py
+A  tests/unit/test_runtime_status.py
+M  tests/unit/test_school_mobility_skill_loading.py
+A  tests/unit/test_speculative_audio_side_effects.py
+A  tests/unit/test_stop_fastpath_integration.py
+M  tests/unit/test_transcript_content_logging.py
+A  tests/unit/test_turn_assembler.py
+A  tests/unit/test_vision_gate.py
+M  tests/unit/test_voice_barge_in.py
+A  tests/unit/test_voice_routing_hardening.py
+A  tests/unit/test_watchdog_listener_idle.py
+A  tools/openvino_npu_worker.py
+M  web/dashboard.css
+M  web/dashboard.html
+M  web/dashboard.js
+M  web/dashboard_governance.html
+M  web/dashboard_health.html
+A  web/dashboard_mail.css
+A  web/dashboard_mail.html
+A  web/dashboard_mail.js
+M  web/dashboard_pipeline.html
+M  web/index.html
+M  web/memory.html
+BACKEND_BRANCH=handoff/opus-backend-20260929-1821
+BACKEND_HEAD=ba8585411ee7eceab1e0c3aa05b543d9b4a01827
+
+===== UI =====
+LOCAL_HEAD_BEFORE=aeb7ec821f9e4fd3905009acc05e7c153c4dfb91
+STATUS_ITEMS=0
+UI_BRANCH=
+UI_HEAD=aeb7ec821f9e4fd3905009acc05e7c153c4dfb91
+
+===== MOBILE =====
+LOCAL_HEAD_BEFORE=a5b87137926c81e205e7036e1cd89150f43cb03f
+STATUS_ITEMS=3
+MOBILE_BRANCH=
+MOBILE_HEAD=a5b87137926c81e205e7036e1cd89150f43cb03f
+
+===== REMOTE VERIFICATION =====
+BACKEND_REMOTE=ba8585411ee7eceab1e0c3aa05b543d9b4a01827	refs/heads/handoff/opus-backend-20260929-1821
+UI_REMOTE=
+MOBILE_REMOTE=
+
+===== FINAL WORKTREE STATUS =====
+--- Main ---
+--- UI ---
+--- Mobile ---
+ M .gitignore
+ M README.md
+?? .gitattributes
+End: 2026-09-29 18:22:26 +02:00

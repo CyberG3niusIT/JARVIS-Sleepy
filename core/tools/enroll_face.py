@@ -65,8 +65,8 @@ def handler(args: dict) -> str:
     """Start phase 1 of face enrollment — sets up state for multi-turn flow."""
     if _presence_detector is None:
         return (
-            "Face enrollment is not available — presence detection is not initialized. "
-            "Enable vision.presence in config.yaml first."
+            "Die Gesichtserfassung ist nicht verfügbar; die Anwesenheitserkennung ist nicht initialisiert. "
+            "Dafür muss vision.presence in config.yaml aktiviert sein."
         )
 
     person_name = args.get("person_name", "").strip()
@@ -74,7 +74,7 @@ def handler(args: dict) -> str:
     # Get current user's person_id from people_manager
     pm = _presence_detector._people_manager
     if not pm:
-        return "Error: People manager not available."
+        return "Fehler: Die Personenverwaltung ist nicht verfügbar."
 
     # Look up or create the person record
     if person_name:
@@ -104,9 +104,9 @@ def handler(args: dict) -> str:
     from core.honorific import get_honorific
     h = get_honorific()
     return (
-        f"Let's enroll you in the vision recognition system {h}. "
-        "We'll start with glasses on first, so go ahead and put them on. "
-        "Say 'I'm ready' when you're set."
+        f"Wir erfassen Ihr Gesicht für die Wiedererkennung, {h}. "
+        "Wir beginnen mit Brille. Bitte setzen Sie Ihre Brille auf. "
+        "Sagen Sie 'ich bin bereit', sobald Sie bereit sind."
     )
 
 
@@ -145,7 +145,7 @@ def handle_enrollment_ready(presence_detector) -> tuple[str, bool]:
     state = presence_detector._enrollment_state
     if not state or time.time() > state["expires"]:
         presence_detector._enrollment_state = None
-        return "Enrollment timed out. Please start again with 'remember my face'.", True
+        return "Die Gesichtserfassung ist abgelaufen. Starten Sie erneut mit 'merke dir mein Gesicht'.", True
 
     phase = state["phase"]
     shutter_path = str(Path(__file__).parent.parent.parent / "assets" / "camera_shutter.wav")
@@ -162,9 +162,9 @@ def handle_enrollment_ready(presence_detector) -> tuple[str, bool]:
     # Capture 3 poses for this phase.
     # Speak each instruction synchronously, wait for pose, capture, play shutter.
     poses = [
-        ("Look straight at the camera.", 1.5),
-        ("Now turn slightly to your left.", 2.0),
-        ("And slightly to your right.", 2.0),
+        ("Schauen Sie gerade in die Kamera.", 1.5),
+        ("Drehen Sie sich jetzt leicht nach links.", 2.0),
+        ("Und leicht nach rechts.", 2.0),
     ]
 
     for instruction, wait_time in poses:
@@ -194,9 +194,9 @@ def handle_enrollment_ready(presence_detector) -> tuple[str, bool]:
         state["phase"] = "glasses_off"
         captured = len(state["frames"])
         return (
-            f"Great shots. Those will work well. "
-            f"Now I'll need you to take your glasses off for the last few captures. "
-            f"Please do so, and say 'I'm ready' when you're set."
+            f"Die Aufnahmen sind erfasst. "
+            f"Nehmen Sie für die letzten Aufnahmen bitte die Brille ab. "
+            f"Sagen Sie dann 'ich bin bereit'."
         ), False
 
     elif phase == "glasses_off":
@@ -207,23 +207,23 @@ def handle_enrollment_ready(presence_detector) -> tuple[str, bool]:
         presence_detector._enrollment_state = None
 
         if not frames:
-            return "No frames captured. Please try again.", True
+            return "Es wurden keine Bilder erfasst. Bitte versuchen Sie es erneut.", True
 
         success, message = presence_detector.enroll_face_multi(
             person_id, frames, person_name=person_name
         )
         if success:
             return (
-                f"All done. {message} "
-                "To activate presence detection, set vision.presence.enabled to true "
-                "in the config and restart."
+                f"Die Gesichtserfassung ist abgeschlossen. "
+                "Zum Aktivieren der Anwesenheitserkennung setzen Sie vision.presence.enabled auf true "
+                "in der Konfiguration und starten Sie neu."
             ), True
         else:
-            return message, True
+            return "Die Gesichtserfassung ist fehlgeschlagen. Bitte versuchen Sie es erneut.", True
 
     # Shouldn't reach here
     presence_detector._enrollment_state = None
-    return "Enrollment error. Please try again.", True
+    return "Die Gesichtserfassung ist fehlgeschlagen. Bitte versuchen Sie es erneut.", True
 
 
 def _capture_frame() -> bytes | str:
@@ -232,10 +232,10 @@ def _capture_frame() -> bytes | str:
         from core.webcam_manager import get_webcam_manager
         wm = get_webcam_manager()
     except RuntimeError:
-        return "Error: Webcam not initialized. Please try again."
+        return "Fehler: Die Kamera ist nicht initialisiert. Bitte versuchen Sie es erneut."
 
     if not wm.device_available:
-        return "Error: No webcam available. Please connect a camera."
+        return "Fehler: Es ist keine Kamera verfügbar. Bitte schließen Sie eine Kamera an."
 
     try:
         loop = wm._loop
@@ -249,7 +249,7 @@ def _capture_frame() -> bytes | str:
             finally:
                 _loop.close()
     except TimeoutError:
-        return "Error: Camera timed out. Please make sure the webcam is working."
+        return "Fehler: Die Kamera hat die Zeitgrenze überschritten. Bitte prüfen Sie die Kamera."
     except Exception as e:
-        logger.error("Frame capture for enrollment failed: %s", e)
-        return f"Error: Could not capture frame — {e}"
+        logger.error("Frame capture for enrollment failed: %s", type(e).__name__)
+        return f"Fehler: Das Kamerabild konnte nicht erfasst werden."

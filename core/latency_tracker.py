@@ -5,12 +5,10 @@ compact, human-readable "JARVIS LATENCY" summary line per turn (never
 transcripts/verbose data in the normal log) plus a structured
 event_logger emission for anyone building p50/p95 rollups later.
 
-Scope (see docs/ARCHITECTURE.md for the full discussion): this instruments
-the portion of the turn that's within core/pipeline.py's control — from
-"command handed to the router" through "response fully spoken." It does
-NOT cover VAD/STT (those run in core/continuous_listener.py /
-core/stt_qwen3.py, on a different thread with no turn-id handed in yet) —
-flagged as a known gap, not silently assumed covered.
+VAD/STT checkpoints captured by the listener are backfilled into the turn.
+TTS PCM generation and software output start are separate checkpoints.
+The output checkpoint observes the playback call or PCM write; it does
+not measure the first audible sample at the physical loudspeaker.
 """
 
 import threading
@@ -25,13 +23,26 @@ _STAGE_ORDER = [
     "speech_end",
     "stt_start",
     "stt_end",
+    "wake_start",
+    "wake_end",
     "command_received",
     "router_done",
     "llm_start",
     "llm_first_token",
+    "tool_requested",
+    "tool_start",
+    "tool_result",
+    "continuation_start",
+    "continuation_first_token",
+    "llm_complete",
     "first_speakable_chunk",
+    "tts_requested",
     "tts_first_pcm",
+    "tts_output_start",
+    "tts_complete",
     "response_done",
+    "listener_resumed",
+    "command_state_cleared",
 ]
 
 # Human-readable label + the (from_stage, to_stage) span it summarizes.
@@ -40,22 +51,25 @@ _STAGE_ORDER = [
 # need a checkpoint inside conversation_router.py itself; not done this
 # session — see docs/ARCHITECTURE.md).
 #
-# speech_end/stt_start/stt_end are OPTIONAL stages (session #7): they
+# speech_end/stt_start/stt_end are OPTIONAL stages: they
 # only appear if the caller backfills them via mark(stage, at=...) with
 # a timestamp captured earlier on continuous_listener.py's/STTWorker's
 # own threads — command_received still marks "now" as before when no
 # backfill happened, so existing callers (and existing tests) are
-# unaffected. See docs/ARCHITECTURE.md for why the actual wiring
-# (passing those timestamps through the audio_queue/TRANSCRIPTION_READY
-# payload) was researched but not implemented this session — this class
-# is ready for it, the pipeline-side plumbing is not done yet.
+# unaffected. The listener passes these timestamps through transcription
+# metadata; callers without microphone input leave the stages absent.
 _SUMMARY_SPANS = [
     ("STT", "stt_start", "stt_end"),
     ("Speech-End -> Command", "speech_end", "command_received"),
     ("Routing+Memory", "command_received", "router_done"),
     ("LLM TTFT", "llm_start", "llm_first_token"),
+    ("Tool", "tool_start", "tool_result"),
+    ("Continuation TTFT", "continuation_start", "continuation_first_token"),
+    ("TTS", "tts_requested", "tts_complete"),
     ("Erster sprechbarer Chunk", "llm_start", "first_speakable_chunk"),
     ("TTS erstes PCM", "first_speakable_chunk", "tts_first_pcm"),
+    ("TTS Software-Ausgabestart", "tts_requested", "tts_output_start"),
+    ("Speech-End -> Software-Ausgabestart", "speech_end", "tts_output_start"),
     ("Gesamt", "command_received", "response_done"),
     ("Gesamt (ab Speech-End)", "speech_end", "response_done"),
 ]
@@ -138,7 +152,7 @@ class LatencyTracker:
         }
         return {"turn_id": self.turn_id, "offsets_ms": offsets, "spans_ms": spans}
 
-    def emit(self, logger, config=None):
+    def emit(self, logger, config=None, status="success"):
         """Log the compact summary line and (if event_logger is
         available) a structured event for later rollups."""
         logger.info(self.summary_line())
@@ -153,7 +167,7 @@ class LatencyTracker:
                     severity="info",
                     source="pipeline",
                     stage="turn",
-                    status="success",
+                    status=status,
                     metadata=self.as_metadata(),
                 )
         except Exception:

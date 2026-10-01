@@ -79,78 +79,20 @@ class WebNavigationSkill(BaseSkill):
 
         # Response pools — butler cadence, single voice line per action
         self._response_pools = {
-            "search": [
-                "Let me look into that, {honorific}.",
-                "Searching now, {honorific}.",
-                "One moment while I pull that up, {honorific}.",
-                "Looking into it, {honorific}.",
-                "Let me see what I can find, {honorific}.",
-            ],
-            "youtube": [
-                "Pulling up YouTube now, {honorific}.",
-                "Let's see what YouTube has on that, {honorific}.",
-                "Checking YouTube for you, {honorific}.",
-            ],
-            "amazon": [
-                "Checking Amazon for you, {honorific}.",
-                "Let me see what's available, {honorific}.",
-                "Pulling up Amazon now, {honorific}.",
-            ],
-            "wikipedia": [
-                "Let me consult Wikipedia on that, {honorific}.",
-                "Checking Wikipedia, {honorific}.",
-                "Pulling up Wikipedia now, {honorific}.",
-            ],
-            "reddit": [
-                "Let me check Reddit for you, {honorific}.",
-                "Pulling up Reddit now, {honorific}.",
-                "Searching Reddit, {honorific}.",
-            ],
-            "github": [
-                "Searching GitHub now, {honorific}.",
-                "Let me check GitHub for that, {honorific}.",
-                "Pulling up GitHub, {honorific}.",
-            ],
-            "open_url": [
-                "Opening that now, {honorific}.",
-                "Right away, {honorific}.",
-                "On it, {honorific}.",
-            ],
-            "repeat": [
-                "Right where we left off, {honorific}.",
-                "Bringing that back up.",
-                "Opening that again, {honorific}.",
-            ],
-            "error": [
-                "I seem to be having trouble with the browser, {honorific}. My apologies.",
-                "The browser isn't cooperating at the moment, {honorific}.",
-                "I'm having difficulty opening that, {honorific}.",
-            ],
-            "easter_egg": [
-                "Right away, {honorific}. Since I wasn't doing anything else.",
-                "On it, {honorific}. I live for these moments.",
-                "At once, {honorific}. My schedule just cleared up.",
-                "Consider it done, {honorific}. This is the highlight of my day.",
-            ],
-            "resize_full": [
-                "Going full screen, {honorific}.",
-                "Full screen, right away.",
-                "Expanding to full screen now.",
-            ],
-            "resize_half": [
-                "Half screen it is, {honorific}.",
-                "Resizing to half screen now.",
-                "Moving to half screen, {honorific}.",
-            ],
-            "resize_no_window": [
-                "I don't see a browser window to resize, {honorific}.",
-                "There doesn't appear to be a window to adjust, {honorific}.",
-            ],
-            "minimize": [
-                "Minimized, {honorific}.",
-                "Put that away for you, {honorific}.",
-                "Window hidden, {honorific}.",
-            ],
+            "search": ["Ich suche danach, {honorific}.", "Einen Moment, ich sehe nach, {honorific}."],
+            "youtube": ["Ich suche auf YouTube, {honorific}."],
+            "amazon": ["Ich sehe auf Amazon nach, {honorific}."],
+            "wikipedia": ["Ich sehe auf Wikipedia nach, {honorific}."],
+            "reddit": ["Ich suche auf Reddit, {honorific}."],
+            "github": ["Ich suche auf GitHub, {honorific}."],
+            "open_url": ["Ich öffne die Seite, {honorific}."],
+            "repeat": ["Ich öffne das erneut, {honorific}."],
+            "error": ["Der Browser ist gerade nicht verfügbar, {honorific}.", "Ich konnte die Seite nicht öffnen, {honorific}."],
+            "easter_egg": ["Sofort, {honorific}. Mein Kalender hat gerade Platz gemacht."],
+            "resize_full": ["Ich aktiviere das Vollbild, {honorific}."],
+            "resize_half": ["Ich verkleinere das Fenster auf die halbe Bildschirmgröße, {honorific}."],
+            "resize_no_window": ["Ich sehe kein Browserfenster zum Anpassen, {honorific}."],
+            "minimize": ["Minimiert, {honorific}.", "Das Fenster ist ausgeblendet, {honorific}."],
         }
         # Track recent responses to avoid repetition
         self._recent: dict[str, deque] = {}
@@ -692,7 +634,7 @@ class WebNavigationSkill(BaseSkill):
         mode = self._prepare_command()
         query = self._extract_query()
         if not query:
-            return self.respond(f"What would you like me to search for, {self.honorific}?")
+            return self.respond(f"Wonach soll ich suchen, {self.honorific}?")
 
         url = self.search_engines[self.default_search_engine].format(quote_plus(query))
         self._log_query(query, self.default_search_engine, url)
@@ -710,7 +652,7 @@ class WebNavigationSkill(BaseSkill):
         mode = self._prepare_command()
         query = self._extract_query(strip_site="youtube")
         if not query:
-            return self.respond(f"What shall I look up on YouTube, {self.honorific}?")
+            return self.respond(f"Wonach soll ich auf YouTube suchen, {self.honorific}?")
 
         url = self.site_searches["youtube"].format(quote_plus(query))
         self._log_query(f"youtube: {query}", "youtube", url)
@@ -728,7 +670,7 @@ class WebNavigationSkill(BaseSkill):
         mode = self._prepare_command()
         query = self._extract_query(strip_site="amazon")
         if not query:
-            return self.respond(f"What are we looking for on Amazon, {self.honorific}?")
+            return self.respond(f"Wonach soll ich auf Amazon suchen, {self.honorific}?")
 
         url = self.site_searches["amazon"].format(quote_plus(query))
         self._log_query(f"amazon: {query}", "amazon", url)
@@ -746,7 +688,7 @@ class WebNavigationSkill(BaseSkill):
         mode = self._prepare_command()
         query = self._extract_query(strip_site="wikipedia")
         if not query:
-            return self.respond(f"What shall I look up on Wikipedia, {self.honorific}?")
+            return self.respond(f"Wonach soll ich auf Wikipedia suchen, {self.honorific}?")
 
         url = self.site_searches["wikipedia"].format(quote_plus(query))
         self._log_query(f"wikipedia: {query}", "wikipedia", url)
@@ -764,7 +706,7 @@ class WebNavigationSkill(BaseSkill):
         mode = self._prepare_command()
         query = self._extract_query(strip_site="reddit")
         if not query:
-            return self.respond(f"What shall I look up on Reddit, {self.honorific}?")
+            return self.respond(f"Wonach soll ich auf Reddit suchen, {self.honorific}?")
 
         url = self.site_searches["reddit"].format(quote_plus(query))
         self._log_query(f"reddit: {query}", "reddit", url)
@@ -782,7 +724,7 @@ class WebNavigationSkill(BaseSkill):
         mode = self._prepare_command()
         query = self._extract_query(strip_site="github")
         if not query:
-            return self.respond(f"What shall I look up on GitHub, {self.honorific}?")
+            return self.respond(f"Wonach soll ich auf GitHub suchen, {self.honorific}?")
 
         url = self.site_searches["github"].format(quote_plus(query))
         self._log_query(f"github: {query}", "github", url)
@@ -805,7 +747,7 @@ class WebNavigationSkill(BaseSkill):
         url = url.strip()
 
         if not url:
-            return self.respond(f"What site would you like me to open, {self.honorific}?")
+            return self.respond(f"Welche Seite soll ich öffnen, {self.honorific}?")
 
         # Add https:// if it looks like a domain
         if not url.startswith(("http://", "https://")):
@@ -842,7 +784,7 @@ class WebNavigationSkill(BaseSkill):
                     return self.respond(self._pick_response("repeat"))
                 return self.respond(self._pick_response("error"))
             else:
-                return self.respond(f"I don't have a previous search to repeat, {self.honorific}.")
+                return self.respond(f"Es gibt keine vorige Suche zum Wiederholen, {self.honorific}.")
 
         except Exception as e:
             self.logger.error(f"Error repeating search: {e}")
@@ -1024,7 +966,7 @@ class WebNavigationSkill(BaseSkill):
         n = self._extract_number(text)
 
         if n is None:
-            return self.respond(f"Which result number would you like, {self.honorific}?")
+            return self.respond(f"Welches Ergebnis möchtest du öffnen, {self.honorific}?")
 
         with self._scrape_lock:
             results = self._current_page_results()
@@ -1037,8 +979,8 @@ class WebNavigationSkill(BaseSkill):
 
         if n < 1 or n > len(results):
             return self.respond(
-                f"I only have {len(results)} results on this page, {self.honorific}. "
-                f"Pick a number between one and {len(results)}."
+                f"Auf dieser Seite gibt es nur {len(results)} Ergebnisse, {self.honorific}. "
+                f"Wähle eine Zahl zwischen eins und {len(results)}."
             )
 
         result = results[n - 1]
@@ -1057,7 +999,7 @@ class WebNavigationSkill(BaseSkill):
 
         if self._open_browser(url):
             self.conversation.request_follow_up = self.follow_up_duration
-            return self.respond(f"{action} the {ordinal} one for you, {self.honorific}.")
+            return self.respond(f"Ich öffne Ergebnis {n}, {self.honorific}.")
         return self.respond(self._pick_response("error"))
 
     def resize_window(self) -> str:
@@ -1152,7 +1094,7 @@ class WebNavigationSkill(BaseSkill):
 
         except FileNotFoundError:
             self.logger.error("wmctrl not installed — run: sudo apt install wmctrl")
-            return self.respond(f"I need wmctrl installed to resize windows, {self.honorific}.")
+            return self.respond(f"Zum Anpassen der Fenster wird wmctrl benötigt, {self.honorific}.")
         except Exception as e:
             self.logger.error(f"Window resize failed: {e}")
             return self.respond(self._pick_response("resize_no_window"))
@@ -1165,7 +1107,7 @@ class WebNavigationSkill(BaseSkill):
             page = self._current_page
 
         if not query or not site_type:
-            return self.respond(f"I don't have a recent search to page through, {self.honorific}.")
+            return self.respond(f"Es gibt keine aktuelle Suche zum Weiterblättern, {self.honorific}.")
 
         # Scroll-based sites: local pagination over cached results
         if site_type in self._scroll_sites:
@@ -1173,12 +1115,12 @@ class WebNavigationSkill(BaseSkill):
                 total_pages = self._total_local_pages()
                 if total_pages == 0:
                     return self.respond(
-                        f"I'm still loading the results, {self.honorific}. Give me just a moment."
+                        f"Die Ergebnisse werden noch geladen, {self.honorific}. Einen Moment bitte."
                     )
                 if page >= total_pages:
                     return self.respond(
-                        f"That's all {len(self._last_search_results)} results "
-                        f"I have, {self.honorific}. No more pages."
+                        f"Das sind alle {len(self._last_search_results)} Ergebnisse, "
+                        f"{self.honorific}. Es gibt keine weiteren Seiten."
                     )
                 self._current_page = page + 1
                 new_page = self._current_page
@@ -1187,14 +1129,14 @@ class WebNavigationSkill(BaseSkill):
             self.conversation.request_follow_up = self.follow_up_duration
             count = len(page_results)
             return self.respond(
-                f"Page {new_page}, {count} results, {self.honorific}."
+                f"Seite {new_page}, {count} Ergebnisse, {self.honorific}."
             )
 
         # URL-based pagination for other sites
         paginator = self._pagination.get(site_type)
         if not paginator:
             return self.respond(
-                f"I'm not sure how to paginate {site_type} results, {self.honorific}."
+                f"Für {site_type} kann ich gerade nicht weiterblättern, {self.honorific}."
             )
 
         new_page = page + 1
@@ -1203,7 +1145,7 @@ class WebNavigationSkill(BaseSkill):
         if self._open_browser(url):
             self._start_scrape(url, site_type, query, page=new_page)
             self.conversation.request_follow_up = self.follow_up_duration
-            return self.respond(f"Page {new_page}, {self.honorific}.")
+            return self.respond(f"Seite {new_page}, {self.honorific}.")
         return self.respond(self._pick_response("error"))
 
     def previous_page(self) -> str:
@@ -1214,10 +1156,10 @@ class WebNavigationSkill(BaseSkill):
             page = self._current_page
 
         if not query or not site_type:
-            return self.respond(f"I don't have a recent search to go back on, {self.honorific}.")
+            return self.respond(f"Es gibt keine aktuelle Suche zum Zurückblättern, {self.honorific}.")
 
         if page <= 1:
-            return self.respond(f"We're already on the first page, {self.honorific}.")
+            return self.respond(f"Wir sind bereits auf der ersten Seite, {self.honorific}.")
 
         # Scroll-based sites: local pagination
         if site_type in self._scroll_sites:
@@ -1228,16 +1170,16 @@ class WebNavigationSkill(BaseSkill):
 
             self.conversation.request_follow_up = self.follow_up_duration
             if new_page == 1:
-                return self.respond(f"Back to the first page, {self.honorific}.")
+                return self.respond(f"Zurück zur ersten Seite, {self.honorific}.")
             return self.respond(
-                f"Page {new_page}, {len(page_results)} results, {self.honorific}."
+                f"Seite {new_page}, {len(page_results)} Ergebnisse, {self.honorific}."
             )
 
         # URL-based pagination for other sites
         paginator = self._pagination.get(site_type)
         if not paginator:
             return self.respond(
-                f"I'm not sure how to paginate {site_type} results, {self.honorific}."
+                f"Für {site_type} kann ich gerade nicht weiterblättern, {self.honorific}."
             )
 
         new_page = page - 1
@@ -1247,8 +1189,8 @@ class WebNavigationSkill(BaseSkill):
             self._start_scrape(url, site_type, query, page=new_page)
             self.conversation.request_follow_up = self.follow_up_duration
             if new_page == 1:
-                return self.respond(f"Back to the first page, {self.honorific}.")
-            return self.respond(f"Page {new_page}, {self.honorific}.")
+                return self.respond(f"Zurück zur ersten Seite, {self.honorific}.")
+            return self.respond(f"Seite {new_page}, {self.honorific}.")
         return self.respond(self._pick_response("error"))
 
     def minimize_window(self) -> str:
@@ -1294,7 +1236,7 @@ class WebNavigationSkill(BaseSkill):
 
         except FileNotFoundError:
             self.logger.error("wmctrl not installed")
-            return self.respond(f"I need wmctrl installed to manage windows, {self.honorific}.")
+            return self.respond(f"Zur Fensterverwaltung wird wmctrl benötigt, {self.honorific}.")
         except Exception as e:
             self.logger.error(f"Window minimize failed: {e}")
             return self.respond(self._pick_response("resize_no_window"))

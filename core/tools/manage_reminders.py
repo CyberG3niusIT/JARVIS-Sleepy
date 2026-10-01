@@ -1,6 +1,7 @@
 """Tool definition: manage_reminders — reminder CRUD operations."""
 
 from datetime import datetime
+from core.privacy_gate import Capability, get_privacy_gate
 
 TOOL_NAME = "manage_reminders"
 SKILL_NAME = "reminders"
@@ -114,9 +115,14 @@ _current_user_fn = None  # Callable[[], str] — returns current user_id
 def handler(args: dict) -> str:
     """Dispatch reminder actions to sub-handlers."""
     if not _reminder_manager:
-        return "Error: reminder system not initialized."
+        return "Das Erinnerungssystem ist nicht initialisiert."
+    user = _current_user_fn() if _current_user_fn else None
+    if not isinstance(user, str) or not user.strip() or user.casefold() in {"__guest__", "guest", "unknown", "anonymous", "none", "__unknown__"}:
+        return "Bitte wählen Sie zuerst Ihr Nutzerprofil aus."
 
     action = args.get("action", "")
+    if action != "list" and not get_privacy_gate().allow(Capability.MEMORY_WRITE):
+        return "Erinnerungsänderungen sind im aktuellen Datenschutzmodus gesperrt."
     if action == "add":
         return _reminders_add(_reminder_manager, args)
     elif action == "list":
@@ -130,7 +136,7 @@ def handler(args: dict) -> str:
     elif action == "snooze":
         return _reminders_snooze(_reminder_manager, args)
     else:
-        return f"Error: unknown reminder action '{action}'."
+        return f"Unbekannte Erinnerungsaktion: '{action}'."
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +149,9 @@ def _reminders_add(mgr, args: dict) -> str:
     time_text = args.get("time_text", "").strip()
 
     if not title:
-        return "Error: title is required to set a reminder."
+        return "Bitte gib einen Titel für die Erinnerung an."
     if not time_text:
-        return "Error: time_text is required (e.g. 'tomorrow at 6 PM')."
+        return "Bitte gib einen Zeitpunkt an, zum Beispiel morgen um 18 Uhr."
 
     priority_str = args.get("priority", "normal").lower()
     priority_map = {"urgent": 1, "high": 2, "normal": 3}
@@ -155,10 +161,10 @@ def _reminders_add(mgr, args: dict) -> str:
     from core.reminder_manager import ReminderManager
     reminder_time = ReminderManager.parse_natural_time(time_text)
     if not reminder_time:
-        return (f"Error: couldn't parse time '{time_text}'. "
-                "Try formats like 'tomorrow at 6 PM' or 'in 30 minutes'.")
+        return (f"Ich konnte den Zeitpunkt '{time_text}' nicht erkennen. "
+                "Versuche zum Beispiel morgen um 18 Uhr oder in 30 Minuten.")
 
-    created_by = _current_user_fn() if _current_user_fn else 'christopher'
+    created_by = _current_user_fn()
     rid = mgr.add_reminder(
         title=title,
         reminder_time=reminder_time,
@@ -168,19 +174,19 @@ def _reminders_add(mgr, args: dict) -> str:
     )
 
     time_desc = _format_reminder_time(reminder_time)
-    priority_note = " (marked urgent)" if priority <= 2 else ""
-    return f"Reminder #{rid} set: '{title}' {time_desc}{priority_note}."
+    priority_note = " (dringend)" if priority <= 2 else ""
+    return f"Erinnerung #{rid} eingerichtet: '{title}' {time_desc}{priority_note}."
 
 
 def _reminders_list(mgr) -> str:
     """List upcoming and fired reminders."""
-    created_by = _current_user_fn() if _current_user_fn else 'christopher'
+    created_by = _current_user_fn()
     pending = mgr.list_reminders("pending", limit=50, created_by=created_by)
     fired = mgr.list_reminders("fired", limit=5, created_by=created_by)
     all_reminders = fired + pending
 
     if not all_reminders:
-        return "No upcoming reminders."
+        return "Es stehen keine Erinnerungen an."
 
     lines = []
     for r in all_reminders:
@@ -188,64 +194,70 @@ def _reminders_list(mgr) -> str:
             rt = datetime.strptime(r["reminder_time"], "%Y-%m-%d %H:%M:%S")
             time_desc = _format_reminder_time(rt)
         except (ValueError, KeyError):
-            time_desc = r.get("reminder_time", "unknown time")
-        status_note = " [awaiting acknowledgment]" if r["status"] == "fired" else ""
+            time_desc = r.get("reminder_time", "unbekannter Zeitpunkt")
+        status_note = " [wartet auf Bestätigung]" if r["status"] == "fired" else ""
         lines.append(f"- {r['title']}{status_note}, {time_desc}")
 
     count = len(all_reminders)
-    header = f"{count} reminder{'s' if count != 1 else ''}:"
+    header = f"{count} Erinnerungen:"
     return header + "\n" + "\n".join(lines)
 
 
 def _reminders_cancel_all(mgr) -> str:
     """Cancel all user-created pending/fired reminders (not Google Calendar synced)."""
-    created_by = _current_user_fn() if _current_user_fn else 'christopher'
+    created_by = _current_user_fn()
     pending = mgr.list_reminders("pending", limit=500, created_by=created_by)
     pending.extend(mgr.list_reminders("fired", limit=500, created_by=created_by))
     # Only cancel reminders the user created, not Google Calendar synced ones
     user_reminders = [r for r in pending if r.get("origin_endpoint") != "google_calendar"]
     if not user_reminders:
-        return "No user-created reminders to cancel."
+        return "Es gibt keine selbst angelegten Erinnerungen zum Abbrechen."
     for r in user_reminders:
         mgr.cancel_reminder(r["id"])
-    return f"Cancelled {len(user_reminders)} reminder{'s' if len(user_reminders) != 1 else ''}."
+    return f"{len(user_reminders)} Erinnerungen abgebrochen."
 
 
 def _reminders_cancel(mgr, args: dict) -> str:
     """Cancel a reminder by title fragment."""
     fragment = args.get("cancel_fragment", "").strip()
     if not fragment:
-        return "Error: cancel_fragment is required (e.g. 'dentist')."
+        return "Bitte gib an, welche Erinnerung abgebrochen werden soll, zum Beispiel Zahnarzt."
 
-    created_by = _current_user_fn() if _current_user_fn else 'christopher'
+    created_by = _current_user_fn()
     cancelled = mgr.cancel_by_title(fragment, created_by=created_by)
     if cancelled:
-        return f"Cancelled: '{cancelled['title']}'."
-    return f"No reminder found matching '{fragment}'."
+        return f"Abgebrochen: '{cancelled['title']}'."
+    return f"Keine passende Erinnerung für '{fragment}' gefunden."
 
 
 def _reminders_acknowledge(mgr) -> str:
     """Acknowledge the last-fired reminder."""
-    if not mgr.is_awaiting_ack():
-        return "No reminders currently awaiting acknowledgment."
+    user = _current_user_fn() if _current_user_fn else None
+    if not user:
+        return "Bitte wählen Sie zuerst Ihr Nutzerprofil aus."
+    if not mgr.is_awaiting_ack(created_by=user):
+        return "Keine Erinnerung wartet auf Bestätigung."
 
-    reminder = mgr.acknowledge_last()
+    reminder = mgr.acknowledge_last(created_by=user)
     if reminder:
-        return f"Acknowledged: '{reminder['title']}' marked as done."
-    return "Error acknowledging reminder."
+        return f"Bestätigt: '{reminder['title']}' als erledigt markiert."
+    return "Die Erinnerung konnte nicht bestätigt werden."
 
 
 def _reminders_snooze(mgr, args: dict) -> str:
     """Snooze the last-fired reminder."""
-    if not mgr.is_awaiting_ack():
-        return "No reminder to snooze at the moment."
+    user = _current_user_fn() if _current_user_fn else None
+    if not user:
+        return "Bitte wählen Sie zuerst Ihr Nutzerprofil aus."
+    if not mgr.is_awaiting_ack(created_by=user):
+        return "Zurzeit gibt es keine Erinnerung zum Verschieben."
 
     minutes = args.get("snooze_minutes")
-    reminder = mgr.snooze_last(minutes)
+    reminder = mgr.snooze_last(minutes, created_by=user)
     if reminder:
         snooze_min = minutes or mgr.default_snooze
-        return f"Snoozed '{reminder['title']}' for {snooze_min} minutes."
-    return "Error snoozing reminder."
+        return f"'{reminder['title']}' um {snooze_min} Minuten verschoben."
+    return "Die Erinnerung konnte nicht verschoben werden."
 
 
 def _format_reminder_time(dt) -> str:
@@ -255,20 +267,20 @@ def _format_reminder_time(dt) -> str:
 
     total_seconds = diff.total_seconds()
     if total_seconds < 0:
-        return f"at {dt.strftime('%-I:%M %p')} (past)"
+        return f"um {dt.strftime('%H:%M')} Uhr (bereits vergangen)"
     elif total_seconds < 90:
-        return "in about a minute"
+        return "in etwa einer Minute"
     elif total_seconds < 3600:
         minutes = int(total_seconds / 60)
-        return f"in {minutes} minute{'s' if minutes != 1 else ''}"
+        return f"in {minutes} Minuten"
     elif total_seconds < 7200:
-        return "in about an hour"
+        return "in etwa einer Stunde"
 
     if dt.date() == now.date():
-        return f"today at {dt.strftime('%-I:%M %p')}"
+        return f"heute um {dt.strftime('%H:%M')} Uhr"
     elif (dt.date() - now.date()).days == 1:
-        return f"tomorrow at {dt.strftime('%-I:%M %p')}"
+        return f"morgen um {dt.strftime('%H:%M')} Uhr"
     elif (dt.date() - now.date()).days < 7:
-        return f"{dt.strftime('%A')} at {dt.strftime('%-I:%M %p')}"
+        return f"am {dt.strftime('%d.%m.')} um {dt.strftime('%H:%M')} Uhr"
     else:
-        return f"on {dt.strftime('%B %-d')} at {dt.strftime('%-I:%M %p')}"
+        return f"am {dt.strftime('%d.%m.%Y')} um {dt.strftime('%H:%M')} Uhr"

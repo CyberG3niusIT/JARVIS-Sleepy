@@ -1,0 +1,3189 @@
+﻿===== DIFF AGAINST BACKEND 3ef09b2 =====
+
+
+===== core/context_window.py =====
+diff --git a/core/context_window.py b/core/context_window.py
+index 50ea92b..885893a 100644
+--- a/core/context_window.py
++++ b/core/context_window.py
+@@ -140,11 +140,12 @@ class ContextWindow:
+     for each LLM call, replacing the flat FIFO history.
+     """
+ 
+-    def __init__(self, config, embedding_model, llm=None):
++    def __init__(self, config, embedding_model, llm=None, read_only=False):
+         self.config = config
+         self.logger = get_logger("context_window", config)
+         self.embedding_model = embedding_model
+         self.llm = llm  # for Phase 3 summarization
++        self.read_only = bool(read_only)
+         self._privacy_gate = get_privacy_gate(config)
+ 
+         # Configuration
+@@ -185,7 +186,8 @@ class ContextWindow:
+         self._current_user_id: str = "primary_user"  # set via set_user()
+ 
+         if self.enabled:
+-            self._init_db()
++            if not self.read_only:
++                self._init_db()
+             self.logger.info(
+                 f"Context window initialized (threshold={self.topic_shift_threshold}, "
+                 f"budget={self.token_budget} tokens, verbatim={self.verbatim_recent}, "
+@@ -203,6 +205,8 @@ class ContextWindow:
+ 
+     def on_message(self, message: Dict):
+         """Hook called from conversation.add_message() on every new message."""
++        if self.read_only:
++            return
+         if not self._privacy_gate.allow(Capability.AGENT_CONTEXT_INGEST):
+             # PRIV-003-adjacent: no topic-segment/embedding ingestion of
+             # this message while privacy is active. Nothing else to
+@@ -404,7 +408,7 @@ class ContextWindow:
+                 f"Loaded {loaded} prior segment(s) from SQLite "
+                 f"({sum(len(s.messages) for s in self.segments)} messages)"
+             )
+-        elif fallback_messages:
++        elif fallback_messages and not self.read_only:
+             self.logger.info(
+                 "No segments in SQLite ÔÇö falling back to JSONL replay"
+             )
+@@ -423,6 +427,8 @@ class ContextWindow:
+ 
+     def flush(self):
+         """Persist the current open segment on shutdown (no summarization)."""
++        if self.read_only:
++            return
+         if self._current_segment and self._current_segment.messages:
+             self._current_segment.is_open = False
+             self._current_segment.label = self._label_topic(self._current_segment)
+@@ -515,7 +521,7 @@ class ContextWindow:
+         otherwise let a stale write through (same reasoning as
+         memory_manager's _run_batch_extraction; see core/privacy_gate.py).
+         """
+-        if not self._privacy_gate.allow(Capability.SESSION_SUMMARY):
++        if self.read_only or not self._privacy_gate.allow(Capability.SESSION_SUMMARY):
+             return
+         if captured_epoch is not None and not self._privacy_gate.is_current_epoch(captured_epoch):
+             return
+@@ -559,6 +565,8 @@ class ContextWindow:
+ 
+     def _update_segment_summary(self, segment_id: str, summary: str):
+         """Update the summary column for a persisted segment."""
++        if self.read_only:
++            return
+         try:
+             with self._db_lock:
+                 conn = sqlite3.connect(str(self._db_path))
+@@ -582,7 +590,8 @@ class ContextWindow:
+         """
+         try:
+             with self._db_lock:
+-                conn = sqlite3.connect(str(self._db_path))
++                conn = (sqlite3.connect(f"{self._db_path.resolve().as_uri()}?mode=ro", uri=True)
++                        if self.read_only else sqlite3.connect(str(self._db_path)))
+                 conn.row_factory = sqlite3.Row
+                 try:
+                     rows = conn.execute(
+@@ -626,6 +635,8 @@ class ContextWindow:
+ 
+     def _cleanup_old_segments(self):
+         """Remove segments older than retention_days from SQLite."""
++        if self.read_only:
++            return
+         cutoff = time.time() - (self._retention_days * 86400)
+         try:
+             with self._db_lock:
+@@ -914,6 +925,6 @@ class ContextWindow:
+         return formatted
+ 
+ 
+-def get_context_window(config, embedding_model, llm=None) -> ContextWindow:
++def get_context_window(config, embedding_model, llm=None, read_only=False) -> ContextWindow:
+     """Factory function to create a ContextWindow instance."""
+-    return ContextWindow(config, embedding_model, llm)
++    return ContextWindow(config, embedding_model, llm, read_only=read_only)
+
+
+===== core/memory_manager.py =====
+diff --git a/core/memory_manager.py b/core/memory_manager.py
+index 2716127..d9f0c0c 100644
+--- a/core/memory_manager.py
++++ b/core/memory_manager.py
+@@ -41,15 +41,19 @@ from core.privacy_gate import get_privacy_gate, Capability
+ _instance: Optional["MemoryManager"] = None
+ 
+ 
+-def get_memory_manager(config=None, conversation=None, embedding_model=None) -> Optional["MemoryManager"]:
++def get_memory_manager(config=None, conversation=None, embedding_model=None,
++                       read_only=False) -> Optional["MemoryManager"]:
+     """Get or create the singleton MemoryManager.
+ 
+     Call with all args on first invocation (from jarvis_continuous.py).
+     Call with no args from skills to retrieve the existing instance.
++
++    ``read_only=True`` (jarvis_web.py --desktop-mode) creates a manager that only reads:
++    every write path is rejected and logged (see MemoryManager._reject_write).
+     """
+     global _instance
+     if _instance is None and config is not None:
+-        _instance = MemoryManager(config, conversation, embedding_model)
++        _instance = MemoryManager(config, conversation, embedding_model, read_only=read_only)
+     return _instance
+ 
+ 
+@@ -211,19 +215,26 @@ class MemoryManager:
+         window = prefix[-cls._NEGATION_WINDOW:]
+         return bool(cls._NEGATION_WORDS & set(window))
+ 
+-    def __init__(self, config, conversation, embedding_model=None):
++    def __init__(self, config, conversation, embedding_model=None, read_only=False):
+         self.config = config
+         self.conversation = conversation
+         self.embedding_model = embedding_model  # nomic-embed-text-v1.5, shared from skill_manager
+ 
+         self.logger = get_logger(__name__, config)
+ 
++        # Read-only mode: a second process (jarvis_web.py --desktop-mode) may read the stores that
++        # the voice daemon owns, but it must never write them. There is no cross-process
++        # single-writer contract for the FAISS index yet, so a stale copy would overwrite the owner's.
++        self.read_only = bool(read_only)
++        self.rejected_writes: dict[str, int] = {}
++
+         # Paths
+         self.db_path = Path(config.get("conversational_memory.db_path",
+             "/home/alex/jarvis-data/data/memory.db"))
+         self.faiss_index_path = Path(config.get("conversational_memory.faiss_index_path",
+             "/home/alex/jarvis-data/data/memory_faiss"))
+-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
++        if not self.read_only:
++            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+ 
+         # Batch extraction config (Phase 4)
+         self.batch_interval = config.get("conversational_memory.batch_extraction_interval", 25)
+@@ -277,7 +288,10 @@ class MemoryManager:
+ 
+         self._init_db()
+         self._init_faiss()
+-        self.cleanup_old_interactions()
++        if not self.read_only:
++            self.cleanup_old_interactions()
++        else:
++            self.logger.warning("MemoryManager READ-ONLY: Schreibzugriffe auf Fakten, Interaktionen und FAISS-Index werden abgelehnt.")
+         self.logger.info(
+             f"MemoryManager initialized (Phase 7: facts + FAISS + recall + batch + proactive + forget/transparency + per-turn "
+             f"[{self.faiss_index.ntotal if self.faiss_index else 0} vectors, "
+@@ -290,8 +304,25 @@ class MemoryManager:
+     # Database
+     # ------------------------------------------------------------------
+ 
++    READ_ONLY_MESSAGE = "Das Ged├ñchtnis ist in diesem Modus schreibgesch├╝tzt; es wurde nichts ge├ñndert."
++
++    def _reject_write(self, operation: str) -> bool:
++        """True (and a logged rejection) when this manager is read-only.
++
++        Every write path calls this first. A rejected write is never silent: it is logged and
++        counted in ``rejected_writes`` so callers and tests can see what was refused.
++        """
++        if not self.read_only:
++            return False
++        self.rejected_writes[operation] = self.rejected_writes.get(operation, 0) + 1
++        self.logger.warning("Memory read-only (Desktop-Modus): Schreibzugriff '%s' abgelehnt.", operation)
++        return True
++
+     def _init_db(self):
+         """Create the facts table and indexes if they don't exist."""
++        if self.read_only:
++            # No schema creation or migration from a read-only process: the owner does that.
++            return
+         with self._db_lock:
+             conn = sqlite3.connect(str(self.db_path))
+             try:
+@@ -451,7 +482,8 @@ class MemoryManager:
+             return
+ 
+         embed_dim = self._get_embedding_dim()
+-        self.faiss_index_path.mkdir(parents=True, exist_ok=True)
++        if not self.read_only:
++            self.faiss_index_path.mkdir(parents=True, exist_ok=True)
+         index_file = self.faiss_index_path / "default.index"
+         meta_file = self.faiss_index_path / "default_meta.jsonl"
+ 
+@@ -461,6 +493,15 @@ class MemoryManager:
+ 
+             # Detect embedding model dimension change (e.g. MiniLM 384 ÔåÆ nomic 768)
+             if self.faiss_index.d != embed_dim:
++                if self.read_only:
++                    # Never rebuild or overwrite the owner's index from a read-only process.
++                    self.logger.warning(
++                        f"FAISS dimension mismatch: index={self.faiss_index.d}, model={embed_dim}. "
++                        "Read-only: Index bleibt unangetastet und wird nicht f├╝r die Suche genutzt."
++                    )
++                    self.faiss_index = None
++                    self.faiss_metadata = []
++                    return
+                 self.logger.warning(
+                     f"ÔÜá´©Å FAISS dimension mismatch: index={self.faiss_index.d}, "
+                     f"model={embed_dim}. Discarding old index ÔÇö backfill will rebuild."
+@@ -492,15 +533,17 @@ class MemoryManager:
+                         vectors = faiss.rev_swig_ptr(old_index.get_xb(), n_vectors * embed_dim)
+                         vectors = np.array(vectors, dtype=np.float32).reshape(n_vectors, embed_dim)
+                         self.faiss_index.add(vectors[:n_meta])
+-                # Persist the corrected state
+-                self._save_faiss_index()
++                # Persist the corrected state (a read-only process only corrects its in-memory copy)
++                if not self.read_only:
++                    self._save_faiss_index()
+ 
+             self.logger.info(
+                 f"Loaded FAISS index: {self.faiss_index.ntotal} vectors, "
+                 f"{len(self.faiss_metadata)} metadata entries"
+             )
+-            # Clean up stale temp files from interrupted saves
+-            for tmp_name in ("default.index.tmp", "default_meta.jsonl.tmp"):
++            # Clean up stale temp files from interrupted saves. Never in read-only mode: a temp file
++            # may belong to a save the owning process is performing right now.
++            for tmp_name in () if self.read_only else ("default.index.tmp", "default_meta.jsonl.tmp"):
+                 tmp_file = self.faiss_index_path / tmp_name
+                 if tmp_file.exists():
+                     tmp_file.unlink()
+@@ -531,6 +574,8 @@ class MemoryManager:
+         place.  os.replace() is atomic on Linux, so a crash mid-save leaves
+         the previous good copy intact instead of a half-written file.
+         """
++        if self._reject_write("faiss_save"):
++            return
+         if self.faiss_index is None:
+             return
+         try:
+@@ -564,6 +609,8 @@ class MemoryManager:
+ 
+     def index_message(self, message: dict):
+         """Embed and add a single message to FAISS index. ~1-2ms."""
++        if self._reject_write("index_message"):
++            return
+         if not self._privacy_gate.allow(Capability.EMBEDDING_GENERATE):
+             return
+         if self.faiss_index is None or not self.embedding_model:
+@@ -592,6 +639,8 @@ class MemoryManager:
+ 
+     def backfill_history(self):
+         """One-time: embed all existing chat_history.jsonl messages into FAISS."""
++        if self._reject_write("backfill_history"):
++            return 0
+         if self.faiss_index is None or not self.embedding_model:
+             self.logger.error("Cannot backfill: FAISS or embedding model not available")
+             return 0
+@@ -991,6 +1040,8 @@ class MemoryManager:
+ 
+     def handle_forget(self, query: str, user_id: str = "primary_user") -> str:
+         """Find matching facts and prepare deletion preview with confirmation."""
++        if self._reject_write("handle_forget"):
++            return self.READ_ONLY_MESSAGE
+         from core.honorific import get_honorific
+ 
+         topic = self._extract_forget_topic(query)
+@@ -1047,6 +1098,8 @@ class MemoryManager:
+ 
+     def confirm_forget(self) -> str:
+         """Execute pending forget after user confirmation."""
++        if self._reject_write("confirm_forget"):
++            return self.READ_ONLY_MESSAGE
+         from core.honorific import get_honorific
+         h = get_honorific()
+ 
+@@ -1338,6 +1391,8 @@ class MemoryManager:
+         Designed to be <5ms per message. Only processes user messages.
+         Returns list of stored fact dicts.
+         """
++        if self._reject_write("extract_facts_realtime"):
++            return []
+         if message.get("role") != "user":
+             return []
+ 
+@@ -1446,6 +1501,8 @@ class MemoryManager:
+ 
+     def on_message(self, message: dict):
+         """Called on every message. Handles FAISS indexing + fact extraction + batch trigger + per-turn extraction."""
++        if self._reject_write("on_message"):
++            return
+         # PRIV-003/PRIV-001: while privacy is active, this message's
+         # content must never be indexed, extracted, or queued for
+         # background extraction. No candidate/short-term/long-term write
+@@ -1722,6 +1779,8 @@ class MemoryManager:
+         rows, or both reinforce from the same stale snapshot and lose one
+         of two observations (TOCTOU race).
+         """
++        if self._reject_write("store_fact"):
++            return None
+         if not self._privacy_gate.allow(Capability.MEMORY_WRITE):
+             # PRIV-003: no candidate/confirmed write of any kind while
+             # privacy is active ÔÇö including from a background extraction
+@@ -2006,6 +2065,8 @@ class MemoryManager:
+ 
+     def update_fact(self, fact_id: str, **kwargs) -> bool:
+         """Update specific fields on a fact."""
++        if self._reject_write("update_fact"):
++            return False
+         if not kwargs:
+             return False
+ 
+@@ -2032,6 +2093,8 @@ class MemoryManager:
+ 
+     def delete_fact(self, fact_id: str, soft: bool = True) -> bool:
+         """Delete a fact. Soft delete by default (sets deleted=1)."""
++        if self._reject_write("delete_fact"):
++            return False
+         with self._db_lock:
+             conn = sqlite3.connect(str(self.db_path))
+             try:
+@@ -2227,6 +2290,8 @@ class MemoryManager:
+ 
+         Types: 'research', 'tool_call', 'conversation', 'document', 'skill'
+         """
++        if self._reject_write("persist_interaction"):
++            return None
+         self.logger.debug("persist_interaction: type=%s query_len=%d answer_len=%d user=%s",
+                           interaction_type, len(query) if query else 0,
+                           len(answer) if answer else 0, user_id)
+@@ -2285,6 +2350,8 @@ class MemoryManager:
+             duration_seconds: Window duration in seconds (for metadata)
+             user_id: User who owned the session
+         """
++        if self._reject_write("promote_session_artifacts"):
++            return
+         if not artifacts:
+             return
+ 
+@@ -2437,6 +2504,8 @@ class MemoryManager:
+ 
+     def cleanup_old_interactions(self, retention_days: int = 30):
+         """Remove interactions older than retention period."""
++        if self._reject_write("cleanup_old_interactions"):
++            return
+         cutoff = time.time() - (retention_days * 86400)
+         with self._db_lock:
+             conn = self._get_conn()
+@@ -2483,6 +2552,8 @@ class MemoryManager:
+         directly for audit ÔÇö decay must be "nachvollziehbar/testbar",
+         per the task, not a silent hard delete.
+         """
++        if self._reject_write("run_decay_pass"):
++            return {"archived_count": 0, "archived_fact_ids": []}
+         if now is None:
+             now = time.time()
+         cutoff = now - (self.decay_days * 86400)
+@@ -2556,6 +2627,8 @@ class MemoryManager:
+         and were explicitly out of scope ("kein autonomer permanenter
+         LLM-Selbstreflexionsloop") ÔÇö not attempted speculatively.
+         """
++        if self._reject_write("run_consolidation"):
++            return {"skipped": True, "reason": "read_only"}
+         if self._consolidation_runs >= self.max_consolidation_runs:
+             self.logger.warning(
+                 "Autonomy budget: max_consolidation_runs (%d) reached "
+@@ -2588,6 +2661,8 @@ class MemoryManager:
+         row is still permanently excluded from _find_similar_fact()'s
+         matching pool regardless of its evidence_count.
+         """
++        if self._reject_write("merge_duplicate_excluded_candidates"):
++            return {"merged_count": 0}
+         with self._db_lock:
+             conn = self._get_conn()
+             try:
+
+
+===== jarvis_web.py =====
+diff --git a/jarvis_web.py b/jarvis_web.py
+index bdb70c8..86131b3 100644
+--- a/jarvis_web.py
++++ b/jarvis_web.py
+@@ -161,6 +161,72 @@ async def auth_middleware(request, handler):
+     return await handler(request)
+ 
+ 
++# --desktop-mode: read-only second process for the native desktop app, loopback only.
++DESKTOP_MODE_HOST = '127.0.0.1'
++DESKTOP_MODE_PORT = 8091
++DESKTOP_MODE_REJECTION = 'Desktop-Modus: schreibgesch├╝tzt. Diese Aktion ist nicht verf├╝gbar.'
++_DESKTOP_WS_ALLOWED_TYPES = frozenset({'client_info'})
++
++# Exactly the read endpoints the native WinUI app calls (UI/WindowsApp/WinUI3/Adapters/BackendHub.cs ->
++# JarvisApiClient): path -> allowed query keys. Everything else is refused in desktop mode, including
++# /ws, /ws/dashboard, static files, /api/webcam/stream (camera video) and /api/browse (file listing).
++# The 'token' query key is always tolerated because the auth middleware accepts it.
++_DESKTOP_READ_ALLOWLIST = {
++    '/api/stats': frozenset(),
++    '/api/desktop/snapshot': frozenset(),
++    '/api/agents/status': frozenset(),
++    '/api/automations/status': frozenset(),
++    '/api/memory/summary': frozenset(),
++    '/api/events/recent': frozenset({'hours', 'limit'}),
++    '/api/events/aggregate': frozenset({'hours'}),
++    '/api/sessions': frozenset({'limit'}),
++    '/api/webcam/status': frozenset(),
++}
++
++
++def _desktop_read_allowed(path: str, query_keys) -> bool:
++    allowed_keys = _DESKTOP_READ_ALLOWLIST.get(path)
++    return allowed_keys is not None and set(query_keys) <= (allowed_keys | {'token'})
++
++
++@web.middleware
++async def desktop_readonly_middleware(request, handler):
++    """Desktop mode: only allowlisted GET/HEAD requests reach a handler.
++
++    Every mutating request (memory PATCH/DELETE, uploads, image generation, governance and
++    observation POSTs, session rename) and every read route outside _DESKTOP_READ_ALLOWLIST is
++    refused with 403 and logged (path only, the query may carry a token).
++    """
++    if request.method not in ('GET', 'HEAD'):
++        logger.warning("Desktop-Modus: %s %s abgelehnt (schreibgesch├╝tzt).", request.method, request.path)
++        return web.json_response({'error': DESKTOP_MODE_REJECTION, 'desktopMode': True}, status=403)
++    if not _desktop_read_allowed(request.path, request.query.keys()):
++        logger.warning("Desktop-Modus: %s %s abgelehnt (nicht in der Desktop-Allowlist).",
++                       request.method, request.path)
++        return web.json_response({'error': DESKTOP_MODE_REJECTION, 'desktopMode': True}, status=403)
++    return await handler(request)
++
++
++def _desktop_mode_argument_problem(args):
++    """Reason why the given CLI arguments contradict --desktop-mode, else None."""
++    if args.voice:
++        return "--desktop-mode erlaubt kein --voice."
++    if args.host not in (None, DESKTOP_MODE_HOST):
++        return f"--desktop-mode bindet ausschlie├ƒlich {DESKTOP_MODE_HOST}."
++    if args.port not in (None, DESKTOP_MODE_PORT):
++        return f"--desktop-mode nutzt ausschlie├ƒlich Port {DESKTOP_MODE_PORT}."
++    return None
++
++
++def _desktop_mode_auth_token(config) -> str:
++    """Desktop mode never exposes HTTPS, so the TLS-dependent token requirement does not apply.
++
++    A configured token is still honored; an unresolved ${...} placeholder is not a secret.
++    """
++    token = config.get('web.auth_token', '')
++    return '' if not token or token == '${JARVIS_WEB_AUTH_TOKEN}' else token
++
++
+ def _make_artifact_id() -> str:
+     """Generate a short unique artifact ID."""
+     import uuid
+@@ -245,8 +311,14 @@ class WebTTSProxy:
+ # Component initialization (mirrors jarvis_console.py)
+ # ---------------------------------------------------------------------------
+ 
+-def init_components(config, tts_proxy):
+-    """Initialize all JARVIS core components. Returns dict of components."""
++def init_components(config, tts_proxy, desktop_mode=False):
++    """Initialize all JARVIS core components. Returns dict of components.
++
++    ``desktop_mode`` (jarvis_web.py --desktop-mode) is a read-only second process next to the
++    voice daemon: workers the daemon already owns (weather, news, calendar, health snapshots,
++    observation collector) are not created or started, and the memory manager is read-only.
++    The default (desktop_mode=False) is unchanged.
++    """
+     components = {}
+ 
+     # Core
+@@ -277,7 +349,7 @@ def init_components(config, tts_proxy):
+         rm.set_window_callback(lambda d: None)
+         rm.set_listener_callbacks(pause=lambda: None, resume=lambda: None)
+ 
+-        if config.get("google_calendar.enabled", False):
++        if config.get("google_calendar.enabled", False) and not desktop_mode:
+             try:
+                 from core.google_calendar import get_calendar_manager
+                 cm = get_calendar_manager(config)
+@@ -302,7 +374,7 @@ def init_components(config, tts_proxy):
+ 
+     # News
+     components['news_manager'] = None
+-    if config.get("news.enabled", False):
++    if config.get("news.enabled", False) and not desktop_mode:
+         nm = get_news_manager(
+             config, tts_proxy, conversation, components['llm'],
+             embedding_model=components['skill_manager']._embedding_model,
+@@ -315,7 +387,7 @@ def init_components(config, tts_proxy):
+     # Weather
+     components['weather_db'] = None
+     components['weather_poller'] = None
+-    if config.get("weather.enabled", True):
++    if config.get("weather.enabled", True) and not desktop_mode:
+         wdb = get_weather_db(config)
+         components['weather_db'] = wdb
+         wp = get_weather_poller(config)
+@@ -334,6 +406,9 @@ def init_components(config, tts_proxy):
+             config=config,
+             conversation=conversation,
+             embedding_model=components['skill_manager']._embedding_model,
++            # The voice daemon owns the memory stores; without a cross-process single-writer
++            # contract this process only reads them in desktop mode.
++            read_only=desktop_mode,
+         )
+         conversation.set_memory_manager(mm)
+         set_memory_manager(mm)
+@@ -346,6 +421,7 @@ def init_components(config, tts_proxy):
+             config=config,
+             embedding_model=components['skill_manager']._embedding_model,
+             llm=components['llm'],
++            read_only=desktop_mode,
+         )
+         conversation.set_context_window(cw)
+         cw.load_prior_segments(fallback_messages=conversation.session_history)
+@@ -385,13 +461,13 @@ def init_components(config, tts_proxy):
+     components['event_logger'] = get_event_logger(config)
+ 
+     # Periodic health snapshots (every 10 min by default)
+-    if components['event_logger']:
++    if components['event_logger'] and not desktop_mode:
+         health_scheduler = HealthSnapshotScheduler(config, components['event_logger'])
+         health_scheduler.start()
+         components['health_scheduler'] = health_scheduler
+ 
+     # Observation collector (self-evolution Phase 1)
+-    if components['event_logger']:
++    if components['event_logger'] and not desktop_mode:
+         from core.observation_collector import get_observation_collector
+         obs_collector = get_observation_collector(config)
+         obs_collector.start()
+@@ -469,6 +545,11 @@ def init_components(config, tts_proxy):
+         awareness=components['awareness'],
+     )
+ 
++    if desktop_mode:
++        # Evidence for the operator: which threads exist after init (no duplicate daemon workers).
++        logger.info("Desktop mode: read-only, no daemon-owned workers. Threads after init: %s",
++                    sorted(t.name for t in threading.enumerate()))
++
+     return components
+ 
+ 
+@@ -2504,6 +2585,14 @@ async def websocket_handler(request):
+                 msg_type = data.get('type', '')
+                 logger.debug("WS message: type=%s", msg_type)
+ 
++                if app.get('desktop_mode') and msg_type not in _DESKTOP_WS_ALLOWED_TYPES:
++                    # Chat, slash commands, voice toggles and user switches would write conversation,
++                    # memory or weather state that another process owns: refuse loudly, never silently.
++                    logger.warning("Desktop-Modus: WebSocket-Nachricht '%s' abgelehnt (schreibgesch├╝tzt).",
++                                   str(msg_type)[:40])
++                    await ws.send_json({'type': 'error', 'content': DESKTOP_MODE_REJECTION})
++                    continue
++
+                 if msg_type == 'message':
+                     content = data.get('content', '').strip()
+                     if not content:
+@@ -3395,10 +3484,10 @@ async def agents_status_handler(request):
+ 
+     observed_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
+ 
+-    def unavailable():
++    def unavailable(state='unavailable', status=503):
+         return web.json_response({
+             'available': False,
+-            'state': 'unavailable',
++            'state': state,
+             'active': False,
+             'paused': False,
+             'awaitingConfirmation': False,
+@@ -3410,7 +3499,12 @@ async def agents_status_handler(request):
+             'pendingSteps': 0,
+             'skippedSteps': 0,
+             'observedAt': observed_at,
+-        }, status=503, headers={'Cache-Control': 'no-store'})
++        }, status=status, headers={'Cache-Control': 'no-store'})
++
++    if request.app.get('desktop_mode'):
++        # The planner of this read-only process is never used; the real one belongs to the voice
++        # daemon and has no cross-process status. Say so instead of reporting a local 'idle'.
++        return unavailable('backend_owned', 200)
+ 
+     if planner is None:
+         return unavailable()
+@@ -3569,6 +3663,21 @@ async def automations_status_handler(request):
+             },
+         ],
+     }
++    if request.app.get('desktop_mode'):
++        # This read-only process deliberately starts none of these workers, so its local state says
++        # nothing about the system: not started here != disabled. Ownership comes from the code:
++        # jarvis_continuous.py starts the reminder poller and the health snapshots (no cross-process
++        # status exists -> BACKEND OWNED); only the standard web mode starts the observation
++        # collector, so it is simply not running in desktop mode (UNAVAILABLE, never 'disabled').
++        owners = {
++            'reminder_poller': ('backend_owned', 'voice-daemon'),
++            'health_snapshot': ('backend_owned', 'voice-daemon'),
++            'observation_collector': ('unavailable', 'web-standard-mode'),
++        }
++        for scheduler in payload['schedulers']:
++            state, owner = owners.get(scheduler['id'], ('unavailable', None))
++            scheduler['state'] = state
++            scheduler['owner'] = owner
+     return web.json_response(payload, headers={'Cache-Control': 'no-store'})
+ 
+ 
+@@ -3586,7 +3695,7 @@ async def desktop_live_handler(request):
+     return web.json_response(data, headers={'Cache-Control': 'no-store'})
+ 
+ 
+-def _desktop_snapshot(config, components: dict) -> dict:
++def _desktop_snapshot(config, components: dict, desktop_mode: bool = False) -> dict:
+     """Return only allowlisted, non-secret configuration and live capability inventory."""
+     def config_value(key, default=None):
+         value = config.get(key, default)
+@@ -3680,9 +3789,11 @@ def _desktop_snapshot(config, components: dict) -> dict:
+             # creators' reminders into a misleading user-specific count.
+             'pendingReminders': None,
+             'pendingRemindersScoped': False,
+-            'calendar': components.get('calendar_manager') is not None,
+-            'news': components.get('news_manager') is not None,
+-            'weather': components.get('weather_poller') is not None,
++            # Desktop mode starts none of these workers on purpose: "not loaded here" is unknown
++            # for the system (None), not False.
++            'calendar': None if desktop_mode else components.get('calendar_manager') is not None,
++            'news': None if desktop_mode else components.get('news_manager') is not None,
++            'weather': None if desktop_mode else components.get('weather_poller') is not None,
+             'memory': components.get('memory_manager') is not None,
+             'contextWindow': components.get('context_window') is not None,
+             'metrics': components.get('metrics') is not None,
+@@ -3702,7 +3813,8 @@ async def desktop_snapshot_handler(request):
+     components = request.app.get('components')
+     if not components:
+         return web.json_response({'error': 'Not initialized'}, status=503)
+-    return web.json_response(_desktop_snapshot(request.app['config'], components))
++    return web.json_response(_desktop_snapshot(
++        request.app['config'], components, bool(request.app.get('desktop_mode'))))
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -5326,12 +5438,13 @@ async def gpu_status_handler(request):
+     return web.json_response(payload)
+ 
+ 
+-def create_app(config) -> web.Application:
++def create_app(config, desktop_mode=False) -> web.Application:
+     """Create and configure the aiohttp application."""
+     app = web.Application(
+-        middlewares=[auth_middleware],
++        middlewares=[auth_middleware, desktop_readonly_middleware] if desktop_mode else [auth_middleware],
+         client_max_size=20 * 1024 * 1024,  # 20MB ÔÇö iPhone photos base64-encoded for img2img
+     )
++    app['desktop_mode'] = bool(desktop_mode)
+ 
+     web_dir = Path(__file__).parent / 'web'
+ 
+@@ -5420,7 +5533,8 @@ async def on_startup(app):
+     app['tts_proxy'] = tts_proxy
+ 
+     logger.info("Initializing JARVIS components...")
+-    components = await asyncio.to_thread(init_components, config, tts_proxy)
++    components = await asyncio.to_thread(
++        init_components, config, tts_proxy, bool(app.get('desktop_mode')))
+     app['components'] = components
+     app['cmd_lock'] = asyncio.Lock()
+     app['dashboard_clients'] = set()
+@@ -5562,7 +5676,12 @@ def main():
+     parser.add_argument("--port", type=int, default=None, help="Port to listen on")
+     parser.add_argument("--host", default=None, help="Host to bind to")
+     parser.add_argument("--voice", action="store_true", help="Start with voice enabled")
++    parser.add_argument("--desktop-mode", action="store_true",
++                        help="Read-only mode for the native desktop app: 127.0.0.1:8091 only, no TLS, "
++                             "no daemon-owned workers, read-only memory, GET-only HTTP")
+     args = parser.parse_args()
++    if args.desktop_mode and (problem := _desktop_mode_argument_problem(args)):
++        parser.error(problem)
+ 
+     # Setup logging ÔÇö route to web.log file + console
+     log_file = Path(__file__).parent / "logs" / "web.log"
+@@ -5580,11 +5699,17 @@ def main():
+     config = load_config()
+     Logger.configure_module_levels(config)
+ 
+-    host = args.host or config.get("web.host", "127.0.0.1")
+-    port = args.port or config.get("web.port", 8091)
+-
+-    auth_token = _configured_web_auth_token(config)
+-    app = create_app(config)
++    desktop_mode = bool(args.desktop_mode)
++    if desktop_mode:
++        # Fixed: loopback only, never the configured host/port/TLS.
++        host, port = DESKTOP_MODE_HOST, DESKTOP_MODE_PORT
++        auth_token = _desktop_mode_auth_token(config)
++        logger.info("Desktop mode: read-only, %s:%s only, no TLS", host, port)
++    else:
++        host = args.host or config.get("web.host", "127.0.0.1")
++        port = args.port or config.get("web.port", 8091)
++        auth_token = _configured_web_auth_token(config)
++    app = create_app(config, desktop_mode=desktop_mode)
+     app['config'] = config
+     app['auth_token'] = auth_token
+ 
+@@ -5597,7 +5722,7 @@ def main():
+     app.on_shutdown.append(on_shutdown)
+ 
+     tls_config = config.get("web.tls", {}) or {}
+-    tls_enabled = tls_config.get("enabled", False)
++    tls_enabled = tls_config.get("enabled", False) and not desktop_mode
+ 
+     async def run_server():
+         runner = web.AppRunner(app)
+
+
+===== README.md =====
+diff --git a/README.md b/README.md
+index f45eb9c..e09e4eb 100644
+--- a/README.md
++++ b/README.md
+@@ -1,256 +1,292 @@
+-<div align="center">
++# JARVIS Sleepy
+ 
+-# J.A.R.V.I.S
++> Zentrale technische Dokumentation: [JARVIS Sleepy Dokumentation](../Dokumentation/README.md). Die folgenden Hardware-, Modell- und Runtime-Angaben stammen aus einem fr├╝heren Snapshot; aktuellen Entwicklungsstand bitte gegen Code, Konfiguration und [Git-Status](../Dokumentation/00_PROJECT_STATUS.md) pr├╝fen.
+ 
+-### LOCAL AI SYSTEM
++Lokaler Sprachassistent f├╝r Windows 11 mit Ubuntu 24.04 unter WSL2, AMD ROCm, lokalem LLM, deutscher Spracherkennung und Windows-Steuerung.
+ 
+-`SLEEPY`
++Dieses Repository enth├ñlt den aktuellen Sleepy-Stand meiner JARVIS-Anpassung. Die Basis stammt aus `InterGenJLU/jarvis`, wurde aber f├╝r meinen Windows- und WSL2-Stack deutlich umgebaut.
+ 
+-<br>
++Es gibt hier bewusst keine eingebetteten Demo-Videos, Audioaufnahmen oder externen Medienlinks. Die README beschreibt nur den tats├ñchlich verwendeten Stand.
+ 
+-**SYSTEM SNAPSHOT // 27.09.2026**
++## Aktueller Stand
+ 
+-`PRE-UI EXPERT REBUILD ┬À LOVABLE`
++Der erste funktionierende Sicherungspunkt ist als Tag vorhanden:
+ 
+-<br>
++```text
++sleepy-jarvis-working-v1
++```
+ 
+-**Aktueller Stand vor UI-Expert-Umbau mit Lovable**
++Der zugeh├Ârige Stand umfasst unter anderem:
+ 
+-</div>
++- Windows 11 als Hostsystem
++- Ubuntu 24.04 unter WSL2
++- systemd in WSL2
++- funktionierendes WSLInterop f├╝r Windows-Programme
++- AMD RX 7900 XTX mit ROCm
++- lokales Qwen3.5 LLM ├╝ber llama.cpp
++- deutsches Qwen3-ASR ├╝ber sherpa-onnx
++- Whisper als m├Âglicher Fallback
++- deutsche Piper-TTS
++- deutsches semantisches Matching
++- deutsche Persona- und Antwortanpassungen
++- Windows-App-Start aus JARVIS heraus
++- lokale Daten-, Modell- und Cachepfade au├ƒerhalb des Git-Repositories
+ 
+----
++## Hardware des aktuellen Builds
+ 
+-<table>
+-<tr>
+-<td><strong>BRANCH</strong></td>
+-<td><code>Sleepy-Aktuell-|-27.09</code></td>
+-</tr>
+-<tr>
+-<td><strong>ROLE</strong></td>
+-<td>Technischer Referenz-Snapshot</td>
+-</tr>
+-<tr>
+-<td><strong>BASELINE</strong></td>
+-<td>J.A.R.V.I.S Sleepy vor dem Desktop-UI-Neuaufbau</td>
+-</tr>
+-<tr>
+-<td><strong>ARCHITECTURE</strong></td>
+-<td>Local First</td>
+-</tr>
+-<tr>
+-<td><strong>SOURCE OF TRUTH</strong></td>
+-<td>Runtime ÔåÆ Repository ÔåÆ Tests ÔåÆ aktuelle Dokumentation</td>
+-</tr>
+-<tr>
+-<td><strong>UI STATUS</strong></td>
+-<td>Neuaufbau mit Lovable folgt nach vollst├ñndigem Snapshot</td>
+-</tr>
+-</table>
++```text
++CPU:  Intel Core Ultra 5 245K
++GPU:  AMD Radeon RX 7900 XTX 24 GB
++RAM:  32 GB DDR5
++OS:   Windows 11 Pro for Workstations
++WSL:  Ubuntu 24.04
++```
+ 
+----
++Der Code kann grunds├ñtzlich auch auf anderer Hardware laufen. Dieser Branch wird aber prim├ñr auf genau diesem System entwickelt und getestet.
+ 
+-## 01 // SNAPSHOT
++## Architektur
+ 
+-Dieser Branch enth├ñlt den in Git ├╝bernommenen technischen Snapshot des J.A.R.V.I.S-Sleepy-Workspace zum **27.09.2026**.
++Der aktuelle Voice-Pfad sieht vereinfacht so aus:
+ 
+-Runtime und Backend aus dem lokalen `Main`-Arbeitsstand wurden dabei in den Repository-Root ├╝bernommen. Der Snapshot enth├ñlt zus├ñtzlich den Desktop Control Hub unter `UI/`, die native Android-App unter `Mobile-App/` sowie die technische Dokumentation unter `Dokumentation/`. Lokale Git-Worktree-Verwaltung, Zugangsdaten, Runtime-Daten und Build-Ausgaben geh├Âren nicht zum Repository-Inhalt.
++```text
++Mikrofon
++   |
++   v
++VAD / Continuous Listener
++   |
++   v
++Qwen3-ASR 0.6B INT8
++sherpa-onnx
++Hotwords: Jarvis, Hey Jarvis
++   |
++   v
++Wakeword-Pr├╝fung
++   |
++   v
++Intent / Skill / Tool Routing
++   |
++   +--> lokales Qwen3.5 LLM ├╝ber llama.cpp
++   |
++   +--> Windows-Steuerung ├╝ber WSLInterop
++   |
++   v
++Piper TTS
++   |
++   v
++WSLg / PulseAudio
++```
+ 
+-`main` bleibt davon unabh├ñngig.
++## Sprachmodell
+ 
+-Dieser Branch ist der technische Referenzpunkt vor dem n├ñchsten UI-Expert-Umbau mit Lovable. Die vorhandenen UI-Dateien dokumentieren den Implementierungsstand, sind aber keine visuelle Source of Truth.
++Das lokale LLM l├ñuft ├╝ber `llama.cpp` als persistenter Server.
+ 
+----
++Aktuell verwendet:
+ 
+-## 02 // SYSTEM IDENTITY
++```text
++Qwen3.5-35B-A3B-abliterated-Q3_K_M.gguf
++```
++
++Der llama.cpp-Server l├ñuft lokal auf:
++
++```text
++127.0.0.1:8080
++```
+ 
+-> **J.A.R.V.I.S ist kein Chat-Frontend.**  
+-> J.A.R.V.I.S ist ein zusammenh├ñngendes lokales Assistenzsystem mit Runtime, Modellen, Memory, Tools, Voice, Vision, Governance und eigener Desktop-Oberfl├ñche.
++Die Modellgewichte selbst liegen nicht im Git-Repository.
+ 
+-Die Oberfl├ñche darf das System sichtbar machen. Sie darf seinen Zustand nicht erfinden.
++## Spracherkennung
+ 
+----
++F├╝r den deutschen Voice-Betrieb wird derzeit Qwen3-ASR ├╝ber sherpa-onnx verwendet.
+ 
+-## 03 // CORE ARCHITECTURE
++Aktuelles Modell:
+ 
+ ```text
+-                              J.A.R.V.I.S
+-                                  Ôöé
+-                         LOCAL FIRST RUNTIME
+-                                  Ôöé
+-             ÔöîÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔö┤ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÉ
+-             Ôöé                                         Ôöé
+-          PRIMARY                                   EXPERT
+-       Gemma 4 12B                           Qwen3.5-35B-A3B
+-             Ôöé                                         Ôöé
+-      Conversation                               Escalation
+-      Direct Audio                               Deep Analysis
+-      Vision                                     Verification
+-             Ôöé                                         Ôöé
+-             ÔööÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔö¼ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÿ
+-                                  Ôöé
+-                              ORCHESTRATION
+-                                  Ôöé
+-        ÔöîÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔö¼ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔö╝ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔö¼ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÉ
+-        Ôöé               Ôöé         Ôöé         Ôöé               Ôöé
+-      VOICE           MEMORY    TOOLS     VISION         SERVICES
+-        Ôöé               Ôöé         Ôöé         Ôöé               Ôöé
+-   Qwen3-ASR       Local Memory  Skills   Presence       Runtime
+-   Chatterbox      Retrieval     MCP      Camera          Recovery
++sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25
+ ```
+ 
+-### Model Roles
++Die Hotwords sind derzeit:
+ 
+-| Layer | Role |
+-|---|---|
+-| **Gemma 4 12B** | Primary |
+-| **Qwen3.5-35B-A3B** | Expert |
+-| **Qwen3-ASR** | Speech-to-Text |
+-| **Chatterbox** | Text-to-Speech |
+-| **Cloud** | Optionaler, explizit konfigurierter Fallback |
++```text
++Jarvis,Hey Jarvis
++```
+ 
+-Cloud ist kein Ersatz f├╝r die lokale Kernarchitektur.
++Das war f├╝r diesen Build deutlich zuverl├ñssiger als Whisper Base bei der Erkennung des Eigennamens "Jarvis".
+ 
+----
++Qwen3-ASR l├ñuft in der aktuellen sherpa-onnx-Integration auf der CPU. Der Recognizer wird beim Start einmal geladen und anschlie├ƒend wiederverwendet.
+ 
+-## 04 // OPERATING PRINCIPLES
++## TTS
+ 
+-### LOCAL FIRST
++Die aktuelle deutsche Sprachausgabe verwendet Piper.
+ 
+-Kernfunktionen sollen lokal funktionieren. Externe Provider sind optionale Erweiterungen und keine Voraussetzung f├╝r den normalen Betrieb.
++Modellpfad im aktuellen System:
+ 
+-### BACKEND IS SOURCE OF TRUTH
++```text
++/home/alex/jarvis-data/models/piper/jarvis-de-high/
++```
+ 
+-Clients und Frontends d├╝rfen keine Zust├ñnde, Telemetrie, F├ñhigkeiten oder Agentenaktivit├ñten erfinden.
++Die Stimme ist vorerst eine funktionierende Zwischenl├Âsung und noch nicht als endg├╝ltige JARVIS-Stimme festgelegt.
+ 
+-Ein Zustand ist nur dann sichtbar, wenn das Backend ihn tats├ñchlich liefert.
++## Windows-Integration
+ 
+-### DETERMINISTIC BEFORE GENERATIVE
++Windows-Programme werden aus WSL2 ├╝ber WSLInterop gestartet.
+ 
+-Eindeutige Aufgaben werden bevorzugt ├╝ber Skills, Tools oder deterministische Runtime-Pfade gel├Âst.
++Aktuell funktionieren unter anderem:
+ 
+-LLM- und Agentenlogik kommt dort zum Einsatz, wo Flexibilit├ñt, Planung oder Mehrschrittlogik tats├ñchlich erforderlich ist.
++```text
++Explorer
++Chrome
++Microsoft Edge
++VS Code
++Windows Terminal
++PowerShell
++cmd
++Editor
++Rechner
++Windows Einstellungen
++```
+ 
+-### PRIVACY BY ARCHITECTURE
++Die urspr├╝ngliche Desktop-Steuerung des Upstream-Projekts ist stark auf GNOME ausgelegt. Vollst├ñndige Windows-Fenstersteuerung wie Minimieren, Maximieren, Schlie├ƒen, Fokuswechsel und Lautst├ñrkesteuerung ist noch nicht vollst├ñndig portiert.
+ 
+-Privacy ist eine technische Systemgrenze.
++## Start
+ 
+-Mic, STT, Vision, Memory, Cloud, Tools und Logging m├╝ssen durch reale Datenfl├╝sse, Gates und Zust├ñndigkeiten abgesichert sein.
++Virtuelle Umgebung aktivieren:
+ 
+-### OBSERVABLE AND RECOVERABLE
++```bash
++cd /home/alex/jarvis
++source /home/alex/jarvis-venv/bin/activate
++```
+ 
+-Runtime, Services und Modelle m├╝ssen ihren tats├ñchlichen Zustand nachvollziehbar melden.
++Textkonsole:
+ 
+-`READY`, `DEGRADED`, `ERROR`, `OFFLINE`, `STOPPED`, `NOT IMPLEMENTED` und `UNAVAILABLE` d├╝rfen nicht durch UI-Annahmen ersetzt werden.
++```bash
++python jarvis_console.py
++```
+ 
+----
++Voice-Modus:
+ 
+-## 05 // DESKTOP REBUILD
++```bash
++python jarvis_console.py --speech
++```
+ 
+-Der n├ñchste Entwicklungsschritt ist der UI-Expert-Umbau des J.A.R.V.I.S Desktop Control Centers mit Lovable.
++Hybrid-Modus:
+ 
+-Die vorhandenen Desktop-, Web- und Mobile-Clients liegen im Snapshot unter `UI/`, `web/` und `Mobile-App/`. Er dokumentiert den technischen Implementierungsstand, ist aber **keine visuelle Source of Truth**.
++```bash
++python jarvis_console.py --hybrid
++```
+ 
+-Technische Source of Truth bleiben Backend-Schnittstellen, echte Runtime-Zust├ñnde, Privacy-Gates und nachweisbare F├ñhigkeiten.
++## Lokaler llama.cpp-Server
+ 
+-### Geplante Hauptbereiche
++Der lokale LLM-Server wird als systemd-User-Service betrieben.
+ 
+-```text
+-HOME
+-CHAT
+-MEMORY
+-MODELS & RUNTIME
+-VOICE & AUDIO
+-TOOLS & INTEGRATIONS
+-AUTOMATIONS
+-VISION & PRESENCE
+-MOBILITY
+-OBSERVABILITY
+-SETTINGS
++Status pr├╝fen:
++
++```bash
++systemctl --user status llama-server.service
+ ```
+ 
+----
++Starten:
+ 
+-## 06 // MEMORY & THINKING
++```bash
++systemctl --user start llama-server.service
++```
+ 
+-Die neue Oberfl├ñche erh├ñlt eine zentrale **Memory & Thinking**-Visualisierung.
++Stoppen:
+ 
+-Das visuelle Motiv ist ein r├ñumliches Gehirn mit aktiven Synapsen und neuronalen Signalwegen.
++```bash
++systemctl --user stop llama-server.service
++```
+ 
+-Es visualisiert ausschlie├ƒlich technisch beobachtbare Systemvorg├ñnge, zum Beispiel:
++Logs:
+ 
+-```text
+-MEMORY RETRIEVAL
+-CONTEXT ASSEMBLY
+-ROUTING
+-TOOL SELECTION
+-MODEL ACTIVITY
+-RESPONSE GENERATION
++```bash
++journalctl --user -u llama-server.service -f
+ ```
+ 
+-Nicht dargestellt werden:
++## Verzeichnisstruktur
+ 
+-- erfundene Chain-of-Thought-Inhalte
+-- simulierte Gedanken
+-- Fake-Agentenaktivit├ñt
+-- nicht vorhandene Telemetrie
+-- frei erfundene Modellzust├ñnde
++Wichtige Pfade des aktuellen Builds:
+ 
+-Die Visualisierung erkl├ñrt Systemaktivit├ñt. Sie behauptet keine internen Gedankeninhalte.
++```text
++/home/alex/jarvis
++    Git-Repository und Quellcode
+ 
+----
++/home/alex/jarvis-venv
++    Python-Umgebung f├╝r JARVIS
+ 
+-## 07 // SNAPSHOT STATE
++/home/alex/qwen3-asr-venv
++    separate Testumgebung f├╝r sherpa-onnx / Qwen3-ASR
+ 
+-| Bereich | Status |
+-|---|---|
+-| README / Snapshot Identity | **PREPARED** |
+-| Technischer Stand aus den Projektquellen | **IMPORTED** |
+-| Technische Dokumentation | **IMPORTED, aktualisiert am 27.09.2026** |
+-| Zentrales `INHALTSVERZEICHNIS.md` | **PRESENT / LINKED** |
+-| Lovable Handoff | **FOLGT** |
+-| UI-Expert-Umbau mit Lovable | **NOCH NICHT BEGONNEN** |
++/home/alex/jarvis-data
++    Modelle, Datenbanken, Cache, Logs und Laufzeitdaten
+ 
+-Diese Tabelle beschreibt den ├╝bernommenen Datei- und Planungsstand. Sie ist keine Runtime-Telemetrie und best├ñtigt keinen Live-Betrieb.
++/home/alex/llama.cpp
++    lokal gebautes llama.cpp
++```
++
++## Daten und Secrets
++
++Modelle, Audiodateien, Datenbanken, Logs, lokale Backups und `.env` werden nicht in Git eingecheckt.
+ 
+----
++API-Keys und Auth-Tokens geh├Âren ausschlie├ƒlich in `.env` oder andere lokale Secret-Stores.
+ 
+-## 08 // REPOSITORY INDEX
++Beispiel:
+ 
+-Der zentrale Repository-Index liegt in [INHALTSVERZEICHNIS.md](INHALTSVERZEICHNIS.md).
++```text
++JARVIS_WEB_AUTH_TOKEN=...
++OPENROUTER_API_KEY=...
++PORCUPINE_ACCESS_KEY=...
++```
+ 
+-Die technische Dokumentation und ihre interne Navigation liegen in [Dokumentation/README.md](Dokumentation/README.md). Das Quellen- und Dateiinventar steht in [Dokumentation/INVENTORY.md](Dokumentation/INVENTORY.md).
++Die Datei `.env` ist ├╝ber `.gitignore` ausgeschlossen.
+ 
+----
++## Noch nicht vollst├ñndig portiert
+ 
+-## 09 // SNAPSHOT RULE
++Der aktuelle Stand funktioniert bereits als lokaler deutscher Voice-Assistent, ist aber noch kein abgeschlossener Windows-Port.
+ 
+-Dieser Branch h├ñlt den vollst├ñndigen lokalen Projektstand zum **27.09.2026** als technischen Referenzpunkt fest.
++Noch offen oder nur teilweise umgesetzt sind insbesondere:
+ 
+-Die vorhandenen Desktop-, Web- und Mobile-Clients sind als Implementierungsstand enthalten. F├╝r den kommenden UI-Expert-Umbau mit Lovable sind sie keine visuelle Source of Truth.
++- vollst├ñndige Windows-Fenstersteuerung
++- weitere GNOME-spezifische Funktionen ersetzen
++- einzelne englische Skill-Ausgaben vollst├ñndig eindeutschen
++- Reminder-Parser f├╝r nat├╝rliches Deutsch erweitern
++- finale deutsche JARVIS-Stimme
++- weitere Tests f├╝r Wakeword und Umgebungsger├ñusche
++- allgemeine Installation auf einem frischen Windows-System vereinfachen
+ 
+-Der Zweck dieses Branches ist reproduzierbare Vergleichbarkeit:
++## Git-Struktur
++
++Dieses Repository ist der eigene Entwicklungsstand:
++
++```text
++origin
++https://github.com/CyberG3niusIT/JARVIS-Sleepy.git
++```
++
++Das urspr├╝ngliche Projekt bleibt als Upstream eingebunden:
+ 
+ ```text
+-CURRENT J.A.R.V.I.S SYSTEM
+-            Ôöé
+-            Ôû╝
+-SLEEPY WORKSPACE SNAPSHOT
+-            Ôöé
+-            Ôû╝
+-LOVABLE UI EXPERT REBUILD
+-            Ôöé
+-            Ôû╝
+-POST-REBUILD VERIFICATION
++upstream
++https://github.com/InterGenJLU/jarvis.git
+ ```
+ 
+----
++Dadurch k├Ânnen sp├ñtere ├änderungen des Originalprojekts verglichen oder gezielt ├╝bernommen werden, ohne den Sleepy-Branch zu ├╝berschreiben.
+ 
+-<div align="center">
++## Wiederherstellungspunkt
+ 
+-### J.A.R.V.I.S
++Der erste stabile Voice-Stand ist markiert mit:
++
++```bash
++git checkout sleepy-jarvis-working-v1
++```
++
++Oder als neuer Branch:
++
++```bash
++git switch -c restore-sleepy-v1 sleepy-jarvis-working-v1
++```
+ 
+-`LOCAL FIRST ┬À BACKEND IS SOURCE OF TRUTH`
++## Herkunft und Lizenz
+ 
+-**SLEEPY**
++Dieses Projekt basiert auf `InterGenJLU/jarvis` und enth├ñlt eigene Anpassungen f├╝r Windows 11, WSL2, deutsche Sprachverarbeitung, Qwen3-ASR, Piper-TTS und die aktuelle Sleepy-Systemarchitektur.
+ 
+-</div>
++Die Lizenz des urspr├╝nglichen Projekts bleibt erhalten. Siehe `LICENSE`.
+
+
+===== scripts/runtime_status.py =====
+diff --git a/scripts/runtime_status.py b/scripts/runtime_status.py
+deleted file mode 100644
+index 56cf835..0000000
+--- a/scripts/runtime_status.py
++++ /dev/null
+@@ -1,482 +0,0 @@
+-#!/usr/bin/env python3
+-"""Read-only JARVIS runtime probe: the WSL half of the native runtime supervisor.
+-
+-Prints one JSON document that matches the UI's ``RuntimeControlSnapshot``:
+-
+-    {"state", "degradedReasons": [str], "updatedAt", "components": [...],
+-     "capabilities": {"start", "stop", "restart"}, "detail"?}
+-
+-The runtime state is derived here, in exactly one place (``derive_state``), from
+-facts only: systemd unit state, the services' own health endpoints, the voice
+-daemon's heartbeat and the lifecycle record written by start.sh/stop.sh/restart.sh.
+-Nothing is guessed and nothing is started or stopped by this script.
+-
+-Runtime = the JARVIS backend (voice daemon). Its required dependencies are the
+-local LLM, the STT model and the canonical Chatterbox voice. ``stop.sh``
+-deliberately leaves the LLM and Chatterbox running, so STOPPED means "the voice
+-daemon is stopped"; the component list still reports the other services.
+-
+-The only write path is ``core/runtime_state.py`` (a tiny lifecycle record used by
+-the lifecycle scripts); this probe never writes anything.
+-"""
+-
+-from __future__ import annotations
+-
+-import argparse
+-import json
+-import os
+-import shutil
+-import subprocess
+-import sys
+-import time
+-from pathlib import Path
+-from typing import Any
+-
+-ROOT = Path(__file__).resolve().parents[1]
+-sys.path.insert(0, str(ROOT))
+-
+-from core import runtime_state  # noqa: E402
+-from scripts import check_chatterbox_runtime as chatterbox  # noqa: E402
+-from scripts import check_runtime_dependencies as dependencies  # noqa: E402
+-
+-READY, DEGRADED, ERROR = "READY", "DEGRADED", "ERROR"
+-STARTING, STOPPED, OFFLINE, NOT_IMPLEMENTED = "STARTING", "STOPPED", "OFFLINE", "NOT_IMPLEMENTED"
+-
+-BINFMT_WSLINTEROP = "/proc/sys/fs/binfmt_misc/WSLInterop"
+-VOICE_UNIT = "jarvis.service"
+-PRIMARY_UNIT = "llama-server-primary.service"
+-EXPERT_UNIT = "llama-server-expert.service"
+-LIFECYCLE_SCRIPTS = ("start.sh", "stop.sh", "restart.sh")
+-MAX_TEXT = 500
+-MAX_ITEMS = 64
+-HEARTBEAT_MIN_TOLERANCE = 30.0
+-HEARTBEAT_INTERVAL_FACTOR = 3.0
+-
+-
+-def _text(value: str) -> str:
+-    return value if len(value) <= MAX_TEXT else value[: MAX_TEXT - 1] + "ÔÇª"
+-
+-
+-class Finding:
+-    """One component reading. ``required`` never leaves this module."""
+-
+-    def __init__(self, id: str, name: str, state: str, detail: str = "", *, required: bool = False):
+-        self.id, self.name, self.state, self.detail, self.required = id, name, state, detail, required
+-
+-    def public(self) -> dict[str, str]:
+-        item = {"id": self.id, "name": self.name, "state": self.state}
+-        if self.detail:
+-            item["detail"] = _text(self.detail)
+-        return item
+-
+-
+-# -- facts ---------------------------------------------------------------------
+-
+-def unit_props(unit: str) -> dict[str, str]:
+-    """systemd user-unit properties. Raises RuntimeError if the user manager is unreachable."""
+-    try:
+-        result = subprocess.run(
+-            ["systemctl", "--user", "show", unit,
+-             "--property=LoadState,ActiveState,SubState,MainPID,InvocationID"],
+-            capture_output=True, text=True, timeout=5, check=False,
+-        )
+-    except (OSError, subprocess.SubprocessError) as exc:
+-        raise RuntimeError(f"systemd user manager nicht erreichbar ({type(exc).__name__})") from exc
+-    if result.returncode != 0:
+-        raise RuntimeError("systemd user manager nicht erreichbar")
+-    props: dict[str, str] = {}
+-    for line in result.stdout.splitlines():
+-        key, _, value = line.partition("=")
+-        props[key] = value
+-    return props
+-
+-
+-def pid_is_lifecycle_script(pid: int) -> bool:
+-    proc_root = Path(os.environ.get("JARVIS_PROC_ROOT", "/proc"))
+-    try:
+-        argv = (proc_root / str(pid) / "cmdline").read_bytes().decode("utf-8", "replace").split("\0")
+-    except OSError:
+-        return False
+-    # "bash /path/start.sh": the interpreter is first, a lifecycle script is the program it runs.
+-    return len(argv) >= 2 and os.path.basename(argv[0]) in ("bash", "sh") and os.path.basename(argv[1]) in LIFECYCLE_SCRIPTS
+-
+-
+-def _num(value: Any, cast: Any, default: Any = 0) -> Any:
+-    try:
+-        return cast(value)
+-    except (TypeError, ValueError):
+-        return default
+-
+-
+-def _unit_state(props: dict[str, str]) -> str:
+-    """Maps a systemd unit onto a component state (never READY: health decides that)."""
+-    if props.get("LoadState") != "loaded":
+-        return STOPPED
+-    active, sub = props.get("ActiveState", ""), props.get("SubState", "")
+-    if active == "failed" or sub == "auto-restart":
+-        return ERROR
+-    if active == "activating":
+-        return STARTING
+-    return "active" if active == "active" else STOPPED
+-
+-
+-# -- component probes ------------------------------------------------------------
+-
+-def probe_voice(props: dict[str, str]) -> Finding:
+-    name = "JARVIS Voice-Daemon"
+-    unit = _unit_state(props)
+-    if props.get("LoadState") != "loaded":
+-        return Finding("voice-daemon", name, STOPPED, "jarvis.service ist nicht installiert.", required=True)
+-    if unit == ERROR:
+-        return Finding("voice-daemon", name, ERROR, "jarvis.service ist fehlgeschlagen oder startet nach einem Fehler neu.", required=True)
+-    if unit in (STARTING, STOPPED):
+-        return Finding("voice-daemon", name, unit, "", required=True)
+-    heartbeat = runtime_state.read_heartbeat()
+-    if heartbeat is None:
+-        return Finding("voice-daemon", name, DEGRADED, "Kein Heartbeat des Voice-Daemons; Liveness nicht best├ñtigt.", required=True)
+-    main_pid = props.get("MainPID", "")
+-    invocation = props.get("InvocationID", "")
+-    if str(heartbeat.get("pid")) != main_pid or (heartbeat.get("invocationId") and heartbeat.get("invocationId") != invocation):
+-        return Finding("voice-daemon", name, DEGRADED, "Heartbeat stammt nicht vom laufenden Voice-Daemon; Liveness nicht best├ñtigt.", required=True)
+-    tolerance = max(HEARTBEAT_MIN_TOLERANCE, HEARTBEAT_INTERVAL_FACTOR * _num(heartbeat.get("intervalSeconds"), float))
+-    age = time.time() - _num(heartbeat.get("updatedEpoch"), float)
+-    if age > tolerance:
+-        return Finding("voice-daemon", name, DEGRADED, f"Heartbeat ist {int(age)} s alt (Toleranz {int(tolerance)} s).", required=True)
+-    if not heartbeat.get("listenerRunning"):
+-        return Finding("voice-daemon", name, DEGRADED, "Voice-Daemon lebt, der Listener l├ñuft aber nicht.", required=True)
+-    return Finding("voice-daemon", name, READY, "", required=True)
+-
+-
+-def primary_unit(config: Any) -> str:
+-    """User unit of the Primary LLM: env override, llm.primary.unit, handover unit, else the legacy unit."""
+-    # Same resolution as start.sh (--llm-unit): config first, legacy unit only as fallback.
+-    return dependencies.primary_unit(config)
+-
+-
+-def expert_unit(config: Any) -> str | None:
+-    """User unit of the Expert LLM; None if no expert is configured at all."""
+-    unit = dependencies.expert_unit(config)
+-    if unit:
+-        return unit
+-    if config.get("llm.expert.endpoint", None):
+-        return EXPERT_UNIT
+-    return None
+-
+-
+-def probe_llm_primary(config: Any, props: dict[str, str], handover: dict[str, Any] | None = None) -> Finding:
+-    name = "Haupt-LLM Primary (llama-server)"
+-    if handover:
+-        # Controlled transition: the primary is down on purpose and comes back on its own.
+-        return Finding("llm-primary", name, STARTING,
+-                       f"Expert-Handover l├ñuft ({handover.get('state', '?')}); Primary wird wiederhergestellt.", required=True)
+-    unit = _unit_state(props)
+-    if unit in (STOPPED, ERROR, STARTING):
+-        detail = {STOPPED: "Primary-LLM-Unit ist nicht aktiv.", ERROR: "Primary-LLM-Unit ist fehlgeschlagen.", STARTING: "Primary-LLM-Unit startet."}[unit]
+-        return Finding("llm-primary", name, unit, detail, required=True)
+-    ok, why = dependencies._check_llm(dependencies.primary_endpoint(config))
+-    if ok:
+-        return Finding("llm-primary", name, READY, "", required=True)
+-    return Finding("llm-primary", name, ERROR, f"Unit aktiv, aber /health nicht bereit ({why}).", required=True)
+-
+-
+-def probe_llm_expert(config: Any, props: dict[str, str] | None, handover: dict[str, Any] | None = None) -> Finding | None:
+-    """Expert LLM: STOPPED is the normal resting state (like FLUX); it only runs during a handover."""
+-    if props is None:
+-        return None
+-    name = "Expert-LLM (Qwen)"
+-    unit = _unit_state(props)
+-    if unit == ERROR:
+-        return Finding("llm-expert", name, ERROR, "Expert-LLM-Unit ist fehlgeschlagen.")
+-    if unit == STARTING:
+-        return Finding("llm-expert", name, STARTING, "Expert-LLM l├ñdt das Modell.")
+-    if unit == STOPPED:
+-        return Finding("llm-expert", name, STOPPED, "L├ñuft nur bei Bedarf (Expert-Handover).")
+-    endpoint = config.get("llm.expert.endpoint", None)
+-    ok, _ = dependencies._check_llm(endpoint) if endpoint else (False, "")
+-    if ok:
+-        return Finding("llm-expert", name, READY, "Expert-Handover aktiv." if handover else "")
+-    return Finding("llm-expert", name, STARTING, "Expert-LLM-Unit aktiv, /health noch nicht bereit.")
+-
+-
+-NPU_STATUS_MAX_AGE_S = runtime_state.NPU_SENSOR_MAX_AGE_S
+-
+-
+-def probe_npu_sensor(config: Any) -> Finding:
+-    """NPU presence sensor from real telemetry only (shared schema: runtime_state.npu_sensor_record).
+-
+-    Keys: state, reason, active ("npu" | "cpu" | None), enabled, wake_signal, live_camera_npu.
+-    Without fresh telemetry the state is NOT_IMPLEMENTED (a stale record is reported as stale, never
+-    as a live state); nothing is guessed. NPU wake-signal and live-camera NPU are always named as
+-    not implemented.
+-    """
+-    name = "NPU-Sensor (Presence)"
+-    not_real = "NPU-Wake-Signal und Live-Kamera-NPU sind nicht implementiert."
+-    info = runtime_state.read_component_status(runtime_state.NPU_SENSOR)
+-    if info is None:
+-        return Finding("npu-sensor", name, NOT_IMPLEMENTED, "Keine Telemetrie vom Voice-Daemon. " + not_real)
+-    age = time.time() - _num(info.get("updatedEpoch"), float)
+-    if not 0 <= age <= NPU_STATUS_MAX_AGE_S:
+-        return Finding("npu-sensor", name, NOT_IMPLEMENTED,
+-                       f"Telemetrie veraltet ({int(age)} s alt); Zustand unbekannt. " + not_real)
+-    if info.get("enabled") is False:
+-        return Finding("npu-sensor", name, STOPPED, "Presence-Erkennung ist deaktiviert.")
+-    active = info.get("active")
+-    reason = str(info.get("fallback_reason") or info.get("reason") or "unbekannt")
+-    if info.get("state") == "STOPPED" and active is None:
+-        return Finding("npu-sensor", name, STOPPED, f"Presence-Sensor nicht gestartet ({reason}).")
+-    if active == "npu":
+-        if info.get("state") == "DEGRADED":
+-            return Finding("npu-sensor", name, DEGRADED, f"Face-Backend auf der NPU, Sensor eingeschr├ñnkt (Grund: {reason}). " + not_real)
+-        return Finding("npu-sensor", name, READY, "Face-Backend l├ñuft auf der NPU. " + not_real)
+-    if active == "cpu":
+-        return Finding("npu-sensor", name, DEGRADED, f"CPU-Fallback statt NPU (Grund: {reason}). " + not_real)
+-    return Finding("npu-sensor", name, OFFLINE, f"Kein aktives Face-Backend (Grund: {reason}).")
+-
+-
+-def probe_stt(config: Any) -> Finding:
+-    ok = dependencies._stt_model_present(config)
+-    return Finding("stt-model", "STT-Modell", READY if ok else ERROR, "" if ok else "Konfiguriertes STT-Modell fehlt.", required=True)
+-
+-
+-_CHATTERBOX_DETAIL = {
+-    "health_unreachable": "Chatterbox /health nicht erreichbar.",
+-    "health_not_ok": "Chatterbox /health meldet nicht ok.",
+-    "config_unreachable": "Chatterbox /config nicht erreichbar oder ung├╝ltig.",
+-    "config_mismatch": "Chatterbox weicht von der kanonischen Voice-Konfiguration ab.",
+-    "anchor_missing": "Voice-Anker fehlt.",
+-    "anchor_sha": "Voice-Anker-Integrit├ñtspr├╝fung schl├ñgt fehl.",
+-    "env_missing": "Chatterbox-Runtime-Konfiguration fehlt.",
+-    "env_invalid": "Chatterbox-Runtime-Konfiguration ung├╝ltig.",
+-}
+-
+-
+-def probe_chatterbox() -> Finding:
+-    name = "Chatterbox TTS"
+-    # Same explicit opt-in as check_chatterbox_runtime.py / start.sh.
+-    required = os.environ.get("JARVIS_ALLOW_DEGRADED_TTS") != "1"
+-    ok, codes = chatterbox.diagnose()
+-    if ok:
+-        return Finding("chatterbox", name, READY, "", required=required)
+-    unreachable = "health_unreachable" in codes
+-    detail = " ".join(_CHATTERBOX_DETAIL.get(code, code) for code in codes)
+-    if not required:
+-        return Finding("chatterbox", name, DEGRADED, detail + " (Piper-Degraded-Modus ausdr├╝cklich erlaubt.)", required=False)
+-    return Finding("chatterbox", name, OFFLINE if unreachable and len(codes) == 1 else ERROR, detail, required=True)
+-
+-
+-def probe_llm_small(config: Any) -> Finding | None:
+-    if not config.get("llm.small.enabled", False):
+-        return None
+-    ok, _ = dependencies._check_llm(config.get("llm.small.endpoint", ""))
+-    return Finding("llm-small", "Small-LLM", READY if ok else OFFLINE, "" if ok else "Optionales Small-LLM ist nicht erreichbar.")
+-
+-
+-def probe_vvs(config: Any) -> Finding | None:
+-    if not config.get("mobility.enabled", False):
+-        return None
+-    name = "VVS School/Mobility"
+-    base_url = config.get("mobility.base_url", "")
+-    if not base_url or "${" in base_url:
+-        return Finding("vvs", name, NOT_IMPLEMENTED, "VVS-URL ist nicht konfiguriert.")
+-    result = dependencies._check_vvs(base_url)
+-    return {
+-        "ready": Finding("vvs", name, READY),
+-        "not_ready": Finding("vvs", name, DEGRADED, "VVS /health oder /ready ist nicht bereit."),
+-    }.get(result, Finding("vvs", name, OFFLINE, "VVS /health oder /ready ist nicht erreichbar."))
+-
+-
+-def probe_flux(config: Any) -> Finding | None:
+-    if not config.get("image_generation.enabled", False):
+-        return None
+-    port = config.get("image_generation.server_port", 8190)
+-    try:
+-        # services/flux_server.py reports {"status": "ready" | "loading"}, not "ok".
+-        status, payload = dependencies._get_json(f"http://127.0.0.1:{int(port)}/health")
+-        state = READY if status == 200 and payload.get("status") == "ready" else STARTING
+-        detail = "" if state == READY else "FLUX l├ñdt das Modell."
+-    except Exception:
+-        # FLUX is swapped in on demand (core/gpu_swap.py); not running is the normal resting state.
+-        state, detail = STOPPED, "L├ñuft nur bei Bedarf (GPU-Swap)."
+-    return Finding("flux", "FLUX Bildgenerierung", state, detail)
+-
+-
+-def _daemon_environ(pid: str) -> dict[str, str] | None:
+-    if not pid.isdigit() or int(pid) <= 0:  # systemd reports "0" when there is no main process
+-        return None
+-    proc_root = Path(os.environ.get("JARVIS_PROC_ROOT", "/proc"))
+-    try:
+-        raw = (proc_root / pid / "environ").read_bytes()
+-    except (OSError, ValueError):
+-        return None
+-    env: dict[str, str] = {}
+-    for entry in raw.split(b"\0"):
+-        key, sep, value = entry.partition(b"=")
+-        if sep:
+-            env[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+-    return env
+-
+-
+-def probe_audio(config: Any, voice_props: dict[str, str]) -> Finding | None:
+-    """Passive check of the Windows audio bridge (core/tts.py::_play_wav_windows).
+-
+-    JARVIS plays through `powershell.exe` started from WSL, which needs the WSLInterop binfmt handler and
+-    powershell.exe/wslpath on the daemon's PATH. Nothing is executed or played here. Only relevant while the daemon runs with audio.output_backend=windows.
+-    """
+-    if str(config.get("audio.output_backend", "auto")) != "windows" or voice_props.get("ActiveState") != "active":
+-        return None
+-    name = "Windows-Audio-Br├╝cke"
+-
+-    # Independent causes are all reported, so fixing one does not just reveal the next.
+-    problems: list[str] = []
+-    try:
+-        entry = Path(BINFMT_WSLINTEROP).read_text(encoding="utf-8", errors="replace")
+-        lines = entry.splitlines()
+-        if not lines or lines[0].strip() != "enabled" or "magic 4d5a" not in entry.lower():
+-            problems.append("WSLInterop-Handler (binfmt_misc) ist deaktiviert oder ung├╝ltig.")
+-    except FileNotFoundError:
+-        problems.append("WSLInterop-Handler (binfmt_misc) ist nicht registriert; Windows-Programme wie powershell.exe sind aus WSL nicht ausf├╝hrbar.")
+-    except OSError:
+-        problems.append("WSLInterop-Handler (binfmt_misc) ist nicht lesbar.")
+-
+-    env = _daemon_environ(voice_props.get("MainPID", ""))
+-    if env is None:
+-        problems.append("Umgebung des Voice-Daemons ist nicht lesbar; Audio-Br├╝cke nicht best├ñtigt.")
+-    else:
+-        # WSL_INTEROP is deliberately not required to point at a live socket: the daemon's copy belongs to the
+-        # short-lived wsl.exe session that ran start.sh and is gone minutes later, yet with the handler registered
+-        # /init falls back and powershell.exe still runs (verified 2026-09-25 from a transient systemd service
+-        # with the stale manager environment and with the variable empty).
+-        for program in ("powershell.exe", "wslpath"):
+-            if not shutil.which(program, path=env.get("PATH", "")):
+-                problems.append(f"{program} ist im PATH des Voice-Daemons nicht auffindbar.")
+-    if problems:
+-        return Finding("audio-bridge", name, DEGRADED, " ".join(problems), required=True)
+-    return Finding("audio-bridge", name, READY, "", required=True)
+-
+-
+-def probe_web(config: Any) -> Finding:
+-    port = config.get("web.port", 8091)
+-    # No lifecycle owner and no identity endpoint exist yet, so a listener on this port
+-    # cannot be attributed to jarvis_web (8088 used to be VVS). Do not claim a state.
+-    return Finding("web", "JARVIS Web-API", NOT_IMPLEMENTED,
+-                   f"Wird noch nicht vom Supervisor gestartet oder gepr├╝ft (vorgesehener Port {port}).")
+-
+-
+-# -- derivation (the single place that decides the runtime state) -----------------
+-
+-def derive_state(voice: Finding, findings: list[Finding], lifecycle: dict[str, Any] | None,
+-                 lifecycle_alive: bool, handover: dict[str, Any] | None = None) -> tuple[str, list[str], str]:
+-    """Returns (state, degradedReasons, detail) from facts only.
+-
+-    ``handover`` is a live Primary<->Expert model handover (core/model_handover.py): a controlled
+-    transition (STARTING), never DEGRADED. Its lifecycle records (action "handover") are not
+-    start/stop scripts and never trigger the orphan logic.
+-    """
+-    lifecycle = lifecycle or {}
+-    if lifecycle.get("action") == "handover":
+-        lifecycle = {}
+-    running = lifecycle.get("phase") == "running"
+-    action = lifecycle.get("action", "")
+-
+-    if running and lifecycle_alive:
+-        if action == "stop":
+-            return DEGRADED, ["Ein kontrollierter Stop l├ñuft."], "Stop l├ñuft."
+-        return STARTING, [], f"Kontrollierter {action or 'start'} l├ñuft."
+-    orphan = ""
+-    if running:
+-        orphan = f"Der letzte Lifecycle-Vorgang ({action}) wurde abgebrochen."
+-        if voice.state != READY:
+-            return ERROR, [], orphan
+-        # The backend is verifiably healthy despite the killed script: report facts, keep the note.
+-
+-    if voice.state == ERROR:
+-        return ERROR, [], voice.detail
+-    if voice.state == STARTING:
+-        return STARTING, [], "jarvis.service startet."
+-    if voice.state == STOPPED:
+-        if lifecycle.get("phase") == "finished" and lifecycle.get("result") == ERROR:
+-            return ERROR, [], str(lifecycle.get("message") or "Der letzte Start ist fehlgeschlagen.")
+-        return STOPPED, [], "JARVIS-Backend ist gestoppt."
+-
+-    if handover:
+-        return STARTING, [], f"Kontrollierter Expert-Handover l├ñuft ({handover.get('state', '?')})."
+-
+-    reasons = [orphan] if orphan else []
+-    for finding in findings:
+-        # Optional findings (small LLM, NPU sensor, ...) that are merely OFFLINE never degrade the runtime.
+-        if finding.state == READY or (finding.state in (STOPPED, STARTING, NOT_IMPLEMENTED, OFFLINE) and not finding.required):
+-            continue
+-        reasons.append(_text(f"{finding.name}: {finding.detail or finding.state}"))
+-    return (DEGRADED if reasons else READY), reasons[:MAX_ITEMS], ""
+-
+-
+-def capabilities(state: str) -> dict[str, bool]:
+-    return {
+-        "start": state in (STOPPED, ERROR, OFFLINE),
+-        "stop": state in (READY, DEGRADED, ERROR),
+-        "restart": state in (READY, DEGRADED, ERROR),
+-    }
+-
+-
+-def snapshot(state: str, reasons: list[str], components: list[dict[str, str]], detail: str = "") -> dict[str, Any]:
+-    document: dict[str, Any] = {
+-        "state": state,
+-        "degradedReasons": [_text(reason) for reason in reasons[:MAX_ITEMS]],
+-        "updatedAt": runtime_state.iso_now(),
+-        "components": components[:MAX_ITEMS],
+-        "capabilities": capabilities(state),
+-    }
+-    if detail:
+-        document["detail"] = _text(detail)
+-    return document
+-
+-
+-def _probe_failed(exc: Exception) -> dict[str, Any]:
+-    # The probe itself is broken: offer no lifecycle request (same rule as the Windows side).
+-    document = snapshot(ERROR, [], [], f"Runtime-Probe nicht m├Âglich ({type(exc).__name__}).")
+-    document["capabilities"] = {"start": False, "stop": False, "restart": False}
+-    return document
+-
+-
+-def collect() -> dict[str, Any]:
+-    try:
+-        config = dependencies.Config()
+-        voice_props = unit_props(VOICE_UNIT)
+-        llm_props = unit_props(primary_unit(config))
+-        expert_name = expert_unit(config)
+-        expert_props = unit_props(expert_name) if expert_name else None
+-        handover = runtime_state.handover_in_progress()
+-
+-        voice = probe_voice(voice_props)
+-        primary = probe_llm_primary(config, llm_props, handover)
+-        findings = [voice, primary, probe_stt(config), probe_chatterbox()]
+-        findings += [f for f in (probe_llm_expert(config, expert_props, handover), probe_llm_small(config),
+-                                 probe_audio(config, voice_props), probe_vvs(config), probe_flux(config),
+-                                 probe_npu_sensor(config)) if f is not None]
+-        findings.append(probe_web(config))
+-
+-        lifecycle = runtime_state.read_lifecycle()
+-        alive = bool(lifecycle and lifecycle.get("phase") == "running" and pid_is_lifecycle_script(_num(lifecycle.get("pid"), int)))
+-        state, reasons, detail = derive_state(voice, findings, lifecycle, alive, handover)
+-        components = [f.public() for f in findings]
+-        # Compat alias: UI/tests know the Primary LLM as "llm-main". Derived from the primary, never counted twice.
+-        components.insert(components.index(primary.public()) + 1, dict(primary.public(), id="llm-main"))
+-        document = snapshot(state, reasons, components, detail)
+-    except Exception as exc:
+-        return _probe_failed(exc)
+-    if alive:
+-        # One lifecycle at a time: no new request while a controlled one is running (also during stop).
+-        document["capabilities"] = {"start": False, "stop": False, "restart": False}
+-    return document
+-
+-
+-def main(argv: list[str] | None = None) -> int:
+-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+-    parser.add_argument("--json", action="store_true", required=True, help="Runtime-Snapshot als JSON ausgeben.")
+-    parser.parse_args(argv)
+-    print(json.dumps(collect(), ensure_ascii=True))
+-    return 0
+-
+-
+-if __name__ == "__main__":
+-    raise SystemExit(main())
+
+
+===== tests/unit/test_runtime_status.py =====
+diff --git a/tests/unit/test_runtime_status.py b/tests/unit/test_runtime_status.py
+deleted file mode 100644
+index 013ab37..0000000
+--- a/tests/unit/test_runtime_status.py
++++ /dev/null
+@@ -1,823 +0,0 @@
+-"""Runtime supervisor probe: state derivation, heartbeat trust and the UI contract.
+-
+-Deterministic tests against stubbed systemd/HTTP facts (no real services). The
+-state rules under test are the ones in scripts/runtime_status.py::derive_state.
+-"""
+-
+-import json
+-import os
+-import re
+-import time
+-from types import SimpleNamespace
+-
+-import pytest
+-
+-from core import runtime_state
+-from scripts import check_chatterbox_runtime as chatterbox
+-from scripts import runtime_status as rs
+-
+-UI_STATES = {"STARTING", "READY", "DEGRADED", "ERROR", "STOPPED", "OFFLINE", "NOT_IMPLEMENTED"}
+-ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$")
+-
+-
+-def assert_ui_contract(snapshot):
+-    """Mirrors UI/src/lib/jarvis/runtime-control.ts::parseRuntimeSnapshot."""
+-    assert snapshot["state"] in UI_STATES
+-    reasons = snapshot["degradedReasons"]
+-    assert isinstance(reasons, list) and len(reasons) <= 64
+-    assert all(isinstance(r, str) and len(r) <= 500 for r in reasons)
+-    assert ISO.match(snapshot["updatedAt"])
+-    ids = set()
+-    assert len(snapshot["components"]) <= 64
+-    for component in snapshot["components"]:
+-        assert component["id"] not in ids
+-        ids.add(component["id"])
+-        assert component["state"] in UI_STATES
+-        assert len(component["name"]) <= 500 and len(component.get("detail", "")) <= 500
+-        assert set(component) <= {"id", "name", "state", "detail"}
+-    assert set(snapshot["capabilities"]) == {"start", "stop", "restart"}
+-    assert all(isinstance(v, bool) for v in snapshot["capabilities"].values())
+-    assert len(snapshot.get("detail", "")) <= 500
+-    json.dumps(snapshot, ensure_ascii=True)
+-
+-
+-class ConfigStub:
+-    def __init__(self, **values):
+-        self.values = {
+-            "llm.local.endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+-            "llm.small.enabled": False,
+-            "mobility.enabled": False,
+-            "image_generation.enabled": False,
+-            "web.port": 8091,
+-        }
+-        self.values.update(values)
+-
+-    def get(self, key, default=None):
+-        return self.values.get(key, default)
+-
+-
+-UNIT_ACTIVE = {"LoadState": "loaded", "ActiveState": "active", "SubState": "running", "MainPID": "", "InvocationID": ""}
+-UNIT_INACTIVE = {"LoadState": "loaded", "ActiveState": "inactive", "SubState": "dead", "MainPID": "0", "InvocationID": ""}
+-UNIT_FAILED = {"LoadState": "loaded", "ActiveState": "failed", "SubState": "failed", "MainPID": "0", "InvocationID": ""}
+-
+-
+-@pytest.fixture
+-def world(monkeypatch, tmp_path):
+-    """A fully healthy world; tests break exactly one fact at a time."""
+-    monkeypatch.setenv("JARVIS_RUNTIME_STATE_DIR", str(tmp_path))
+-    monkeypatch.delenv("INVOCATION_ID", raising=False)
+-    monkeypatch.delenv("JARVIS_ALLOW_DEGRADED_TTS", raising=False)
+-    facts = {
+-        "config": ConfigStub(),
+-        "voice": dict(UNIT_ACTIVE, MainPID=str(os.getpid())),
+-        "llm_unit": dict(UNIT_ACTIVE, MainPID="410"),
+-        "llm_health": (True, ""),
+-        "stt": True,
+-        "chatterbox": (True, []),
+-    }
+-    monkeypatch.setattr(rs.dependencies, "Config", lambda: facts["config"])
+-    monkeypatch.setattr(rs, "unit_props", lambda unit: facts["voice"] if unit == rs.VOICE_UNIT else facts["llm_unit"])
+-    monkeypatch.setattr(rs.dependencies, "_check_llm", lambda endpoint: facts["llm_health"])
+-    monkeypatch.setattr(rs.dependencies, "_stt_model_present", lambda config: facts["stt"])
+-    monkeypatch.setattr(rs.chatterbox, "diagnose", lambda *a, **k: facts["chatterbox"])
+-    runtime_state.write_heartbeat(interval_seconds=10, pipeline_state="IDLE", listener_running=True, directory=tmp_path)
+-    facts["dir"] = tmp_path
+-    return facts
+-
+-
+-def component(snapshot, id):
+-    return next(c for c in snapshot["components"] if c["id"] == id)
+-
+-
+-# --- READY / DEGRADED ---------------------------------------------------------------------
+-
+-def test_ready_only_when_all_required_components_are_verified(world):
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "READY"
+-    assert snapshot["degradedReasons"] == []
+-    assert snapshot["capabilities"] == {"start": False, "stop": True, "restart": True}
+-    assert component(snapshot, "voice-daemon")["state"] == "READY"
+-    assert component(snapshot, "web")["state"] == "NOT_IMPLEMENTED"
+-
+-
+-def test_flux_resting_state_and_web_do_not_degrade_ready(world, monkeypatch):
+-    world["config"] = ConfigStub(**{"image_generation.enabled": True})
+-    monkeypatch.setattr(rs.dependencies, "_get_json", lambda url, timeout=2.0: (_ for _ in ()).throw(OSError("closed")))
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "READY"
+-    assert component(snapshot, "flux")["state"] == "STOPPED"
+-
+-
+-def test_flux_ready_status_is_recognised(world, monkeypatch):
+-    world["config"] = ConfigStub(**{"image_generation.enabled": True})
+-    monkeypatch.setattr(rs.dependencies, "_get_json", lambda url, timeout=2.0: (200, {"status": "ready"}))
+-    assert component(rs.collect(), "flux")["state"] == "READY"
+-    monkeypatch.setattr(rs.dependencies, "_get_json", lambda url, timeout=2.0: (200, {"status": "loading"}))
+-    snapshot = rs.collect()
+-    assert component(snapshot, "flux")["state"] == "STARTING"
+-    assert snapshot["state"] == "READY"  # a loading on-demand service is not a runtime fault
+-
+-
+-def test_optional_small_llm_down_is_reported_but_does_not_degrade(world, monkeypatch):
+-    world["config"] = ConfigStub(**{"llm.small.enabled": True, "llm.small.endpoint": "http://127.0.0.1:8081/x"})
+-    monkeypatch.setattr(rs.dependencies, "_check_llm",
+-                        lambda endpoint: (True, "") if "8080" in endpoint else (False, "URLError"))
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "READY"
+-    assert snapshot["degradedReasons"] == []
+-    assert component(snapshot, "llm-small")["state"] == "OFFLINE"
+-
+-
+-def test_vvs_not_ready_is_degraded_and_unconfigured_vvs_is_reported(world, monkeypatch):
+-    world["config"] = ConfigStub(**{"mobility.enabled": True, "mobility.base_url": "http://127.0.0.1:8088"})
+-    monkeypatch.setattr(rs.dependencies, "_check_vvs", lambda url: "not_ready")
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert component(snapshot, "vvs")["state"] == "DEGRADED"
+-    world["config"] = ConfigStub(**{"mobility.enabled": True, "mobility.base_url": "${WIMAEDV_VVS_BASE_URL}"})
+-    snapshot = rs.collect()
+-    assert component(snapshot, "vvs")["state"] == "NOT_IMPLEMENTED"
+-    assert snapshot["state"] == "READY"  # an unconfigured optional dependency is not a runtime fault
+-
+-
+-@pytest.mark.parametrize("fact,value,needle", [
+-    ("llm_health", (False, "URLError"), "Haupt-LLM"),
+-    ("stt", False, "STT-Modell"),
+-    ("chatterbox", (False, ["config_mismatch"]), "Chatterbox"),
+-])
+-def test_required_component_failure_is_degraded_never_ready(world, fact, value, needle):
+-    world[fact] = value
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "DEGRADED"
+-    assert any(needle in reason for reason in snapshot["degradedReasons"])
+-
+-
+-def test_required_llm_unit_stopped_is_degraded_with_stopped_component(world):
+-    world["llm_unit"] = UNIT_INACTIVE
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert component(snapshot, "llm-main")["state"] == "STOPPED"
+-
+-
+-def test_chatterbox_unreachable_is_offline_and_contract_break_is_error(world):
+-    world["chatterbox"] = (False, ["health_unreachable"])
+-    assert component(rs.collect(), "chatterbox")["state"] == "OFFLINE"
+-    world["chatterbox"] = (False, ["anchor_sha"])
+-    detail = component(rs.collect(), "chatterbox")
+-    assert detail["state"] == "ERROR"
+-    assert "/" not in detail["detail"]  # no paths or hashes leak into the snapshot
+-
+-
+-def test_explicit_degraded_tts_makes_chatterbox_optional(world, monkeypatch):
+-    monkeypatch.setenv("JARVIS_ALLOW_DEGRADED_TTS", "1")
+-    world["chatterbox"] = (False, ["health_unreachable"])
+-    snapshot = rs.collect()
+-    assert component(snapshot, "chatterbox")["state"] == "DEGRADED"
+-    assert snapshot["state"] == "DEGRADED"  # still surfaced to the user
+-
+-
+-# --- windows audio bridge (passive check, never plays or executes anything) ------------------
+-
+-INTEROP_ENTRY = "enabled\ninterpreter /init\nflags: PF\noffset 0\nmagic 4d5a\nmask \n"
+-
+-
+-@pytest.fixture
+-def audio(world, monkeypatch, tmp_path):
+-    """A healthy Windows audio bridge: handler registered, daemon env with socket, programs on PATH."""
+-    import shutil
+-    import socket
+-    import tempfile
+-
+-    short = tempfile.mkdtemp(prefix="jb")
+-    monkeypatch.setattr(rs, "BINFMT_WSLINTEROP", str(tmp_path / "WSLInterop"))
+-    (tmp_path / "WSLInterop").write_text(INTEROP_ENTRY, encoding="utf-8")
+-    sock_path = os.path.join(short, "interop.sock")
+-    server = socket.socket(socket.AF_UNIX)
+-    server.bind(sock_path)
+-    bin_dir = tmp_path / "winbin"
+-    bin_dir.mkdir()
+-    for program in ("powershell.exe", "wslpath"):
+-        (bin_dir / program).write_text("#!/bin/sh\n", encoding="utf-8")
+-        (bin_dir / program).chmod(0o755)
+-    proc_root = tmp_path / "proc"
+-    (proc_root / str(os.getpid())).mkdir(parents=True)
+-    env_file = proc_root / str(os.getpid()) / "environ"
+-    env_file.write_bytes(f"PATH={bin_dir}:/usr/bin\0WSL_INTEROP={sock_path}\0".encode())
+-    monkeypatch.setenv("JARVIS_PROC_ROOT", str(proc_root))
+-    world["config"] = ConfigStub(**{"audio.output_backend": "windows"})
+-
+-    # The check must be passive: any process start is a bug.
+-    def forbidden(*args, **kwargs):
+-        raise AssertionError("audio probe must not start processes")
+-    monkeypatch.setattr(rs.subprocess, "run", forbidden)
+-    monkeypatch.setattr(rs.subprocess, "Popen", forbidden)
+-    yield SimpleNamespace(world=world, entry=tmp_path / "WSLInterop", env_file=env_file, bin_dir=bin_dir,
+-                          sock=sock_path, proc_root=proc_root)
+-    server.close()
+-    shutil.rmtree(short, ignore_errors=True)
+-
+-
+-def test_working_audio_bridge_keeps_runtime_ready(audio):
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert component(snapshot, "audio-bridge")["state"] == "READY"
+-    assert snapshot["state"] == "READY"
+-
+-
+-def test_missing_interop_handler_makes_runtime_degraded_with_concrete_reason(audio):
+-    audio.entry.unlink()
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "DEGRADED"  # never READY when JARVIS cannot produce output
+-    assert component(snapshot, "audio-bridge")["state"] == "DEGRADED"
+-    assert any(r.startswith("Windows-Audio-Br├╝cke:") and "nicht registriert" in r for r in snapshot["degradedReasons"])
+-    assert snapshot["capabilities"] == {"start": False, "stop": True, "restart": True}
+-
+-
+-@pytest.mark.parametrize("content,needle", [
+-    ("disabled\ninterpreter /init\nmagic 4d5a\n", "deaktiviert oder ung├╝ltig"),
+-    ("enabled\ninterpreter /init\nflags: PF\n", "deaktiviert oder ung├╝ltig"),   # no MZ magic: corrupt entry
+-    ("", "deaktiviert oder ung├╝ltig"),
+-    ("\x00\x01garbage\xff", "deaktiviert oder ung├╝ltig"),
+-])
+-def test_disabled_or_corrupt_interop_entry_is_degraded(audio, content, needle):
+-    audio.entry.write_text(content, encoding="utf-8", errors="replace")
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert needle in component(snapshot, "audio-bridge")["detail"]
+-
+-
+-def test_unreadable_interop_entry_is_degraded_not_a_crash(audio):
+-    audio.entry.unlink()
+-    audio.entry.mkdir()  # reading a directory raises an OSError that is not FileNotFoundError
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "DEGRADED"
+-    assert "nicht lesbar" in component(snapshot, "audio-bridge")["detail"]
+-
+-
+-def test_powershell_missing_from_daemon_path_is_degraded(audio):
+-    (audio.bin_dir / "powershell.exe").unlink()
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert "powershell.exe" in component(snapshot, "audio-bridge")["detail"]
+-
+-
+-def test_non_executable_powershell_is_degraded(audio):
+-    (audio.bin_dir / "powershell.exe").chmod(0o644)
+-    assert component(rs.collect(), "audio-bridge")["state"] == "DEGRADED"
+-
+-
+-def test_stale_or_missing_wsl_interop_socket_alone_is_not_a_fault(audio, tmp_path):
+-    """Verified live: with the handler registered, powershell.exe runs from a service whose WSL_INTEROP
+-    socket is gone (or empty). Reporting it as DEGRADED would be a false alarm."""
+-    os.unlink(audio.sock)  # socket of the start session vanished
+-    assert component(rs.collect(), "audio-bridge")["state"] == "READY"
+-    regular = tmp_path / "not-a-socket"
+-    regular.write_text("x", encoding="utf-8")
+-    audio.env_file.write_bytes(f"PATH={audio.bin_dir}\0WSL_INTEROP={regular}\0".encode())
+-    assert component(rs.collect(), "audio-bridge")["state"] == "READY"
+-    audio.env_file.write_bytes(f"PATH={audio.bin_dir}\0WSL_INTEROP=\0".encode())
+-    assert component(rs.collect(), "audio-bridge")["state"] == "READY"
+-    audio.env_file.write_bytes(f"PATH={audio.bin_dir}\0".encode())  # variable absent
+-    assert rs.collect()["state"] == "READY"
+-
+-
+-def test_unreadable_daemon_environment_is_degraded(audio):
+-    audio.env_file.unlink()
+-    assert "nicht lesbar" in component(rs.collect(), "audio-bridge")["detail"]
+-
+-
+-def test_independent_audio_causes_are_all_reported_at_once(audio):
+-    audio.entry.unlink()
+-    (audio.bin_dir / "powershell.exe").unlink()
+-    (audio.bin_dir / "wslpath").unlink()
+-    audio.env_file.write_bytes(f"PATH={audio.bin_dir}\0".encode())  # no /usr/bin: a real wslpath would be found
+-    detail = component(rs.collect(), "audio-bridge")["detail"]
+-    for needle in ("nicht registriert", "powershell.exe", "wslpath"):
+-        assert needle in detail
+-    assert_ui_contract(rs.collect())
+-
+-
+-@pytest.mark.parametrize("main_pid", ["", "0", "-5", "abc", "../etc", "12 34"])
+-def test_invalid_main_pid_is_degraded_without_touching_the_filesystem(audio, main_pid):
+-    audio.world["voice"] = dict(UNIT_ACTIVE, MainPID=main_pid)
+-    detail = next(c for c in rs.collect()["components"] if c["id"] == "audio-bridge")["detail"]
+-    assert "nicht lesbar" in detail
+-
+-
+-def test_missing_or_empty_path_variable_is_degraded(audio):
+-    audio.env_file.write_bytes(f"WSL_INTEROP={audio.sock}\0".encode())  # no PATH at all
+-    assert "powershell.exe" in component(rs.collect(), "audio-bridge")["detail"]
+-    audio.env_file.write_bytes(f"PATH=\0WSL_INTEROP={audio.sock}\0".encode())  # empty PATH
+-    assert "powershell.exe" in component(rs.collect(), "audio-bridge")["detail"]
+-
+-
+-def test_combined_audio_details_stay_valid_json_within_the_ui_limit(audio):
+-    audio.entry.unlink()
+-    audio.env_file.write_bytes(b"")
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    text = json.dumps(snapshot)
+-    for forbidden in (str(audio.bin_dir), audio.sock, "/proc/", "/mnt/", "PATH="):
+-        assert forbidden not in text
+-
+-
+-def test_small_llm_and_audio_bridge_are_reported_together(audio, monkeypatch):
+-    audio.entry.unlink()
+-    audio.world["config"] = ConfigStub(**{"audio.output_backend": "windows", "llm.small.enabled": True,
+-                                          "llm.small.endpoint": "http://127.0.0.1:8081/x"})
+-    monkeypatch.setattr(rs.dependencies, "_check_llm",
+-                        lambda endpoint: (True, "") if "8080" in endpoint else (False, "URLError"))
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert len(snapshot["degradedReasons"]) == 1     # only the required audio bridge degrades; small LLM is optional
+-    assert "Windows-Audio" in snapshot["degradedReasons"][0]
+-    assert {c["id"] for c in snapshot["components"] if c["state"] in ("DEGRADED", "OFFLINE")} == {"audio-bridge", "llm-small"}
+-
+-
+-def test_audio_probe_only_applies_to_the_windows_backend_and_a_running_daemon(audio):
+-    audio.entry.unlink()
+-    audio.world["config"] = ConfigStub(**{"audio.output_backend": "auto"})
+-    assert all(c["id"] != "audio-bridge" for c in rs.collect()["components"])
+-    audio.world["config"] = ConfigStub(**{"audio.output_backend": "windows"})
+-    audio.world["voice"] = UNIT_INACTIVE
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "STOPPED"
+-    assert all(c["id"] != "audio-bridge" for c in snapshot["components"])
+-
+-
+-def test_audio_probe_exception_is_a_contract_valid_error(audio, monkeypatch):
+-    def broken(*args, **kwargs):
+-        raise RuntimeError("boom")
+-    monkeypatch.setattr(rs, "probe_audio", broken)
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "ERROR"
+-    assert snapshot["capabilities"] == {"start": False, "stop": False, "restart": False}
+-
+-
+-def test_audio_details_do_not_leak_paths_or_environment(audio):
+-    audio.entry.unlink()
+-    text = json.dumps(rs.collect())
+-    for forbidden in (str(audio.bin_dir), audio.sock, "/proc/", "/mnt/", "PATH="):
+-        assert forbidden not in text
+-
+-
+-# --- voice daemon liveness ------------------------------------------------------------------
+-
+-def test_missing_heartbeat_is_not_ready(world):
+-    (world["dir"] / runtime_state.HEARTBEAT_FILE).unlink()
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert "Kein Heartbeat" in snapshot["degradedReasons"][0]
+-
+-
+-def test_stale_heartbeat_is_not_ready(world, monkeypatch):
+-    real = time.time()
+-    monkeypatch.setattr(rs.time, "time", lambda: real + 31)  # tolerance is max(30, 3 * interval) = 30
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert "Heartbeat ist" in component(snapshot, "voice-daemon")["detail"]
+-
+-
+-def test_fresh_heartbeat_within_tolerance_is_ready(world, monkeypatch):
+-    real = time.time()
+-    monkeypatch.setattr(rs.time, "time", lambda: real + 20)
+-    assert rs.collect()["state"] == "READY"
+-
+-
+-def test_heartbeat_from_another_process_or_invocation_is_rejected(world, monkeypatch):
+-    world["voice"] = dict(UNIT_ACTIVE, MainPID=str(os.getpid() + 1))
+-    assert component(rs.collect(), "voice-daemon")["state"] == "DEGRADED"
+-    world["voice"] = dict(UNIT_ACTIVE, MainPID=str(os.getpid()), InvocationID="new-run")
+-    monkeypatch.setenv("INVOCATION_ID", "old-run")
+-    runtime_state.write_heartbeat(interval_seconds=10, pipeline_state="IDLE", listener_running=True, directory=world["dir"])
+-    assert component(rs.collect(), "voice-daemon")["state"] == "DEGRADED"
+-
+-
+-def test_listener_not_running_is_not_ready(world):
+-    runtime_state.write_heartbeat(interval_seconds=10, pipeline_state="IDLE", listener_running=False, directory=world["dir"])
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert "Listener" in component(snapshot, "voice-daemon")["detail"]
+-
+-
+-# --- STOPPED / STARTING / ERROR -------------------------------------------------------------
+-
+-def test_stopped_only_when_the_voice_unit_is_really_inactive(world):
+-    world["voice"] = UNIT_INACTIVE
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "STOPPED"
+-    assert snapshot["capabilities"] == {"start": True, "stop": False, "restart": False}
+-    # LLM/Chatterbox keep running by design (stop.sh) and are still reported truthfully.
+-    assert component(snapshot, "llm-main")["state"] == "READY"
+-
+-
+-def test_not_installed_unit_is_stopped(world):
+-    world["voice"] = {"LoadState": "not-found", "ActiveState": "inactive"}
+-    assert rs.collect()["state"] == "STOPPED"
+-
+-
+-def test_failed_or_crash_looping_unit_is_error(world):
+-    world["voice"] = UNIT_FAILED
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "ERROR"
+-    assert snapshot["capabilities"] == {"start": True, "stop": True, "restart": True}
+-    world["voice"] = dict(UNIT_ACTIVE, ActiveState="activating", SubState="auto-restart")
+-    assert rs.collect()["state"] == "ERROR"
+-
+-
+-def test_activating_unit_is_starting(world):
+-    world["voice"] = dict(UNIT_ACTIVE, ActiveState="activating", SubState="start")
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "STARTING"
+-    assert snapshot["capabilities"] == {"start": False, "stop": False, "restart": False}
+-
+-
+-def test_controlled_start_in_progress_is_starting_even_if_units_look_stopped(world, monkeypatch):
+-    world["voice"] = UNIT_INACTIVE
+-    runtime_state.write_lifecycle(action="start", phase="running", pid=4242, directory=world["dir"])
+-    monkeypatch.setattr(rs, "pid_is_lifecycle_script", lambda pid: pid == 4242)
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "STARTING"
+-    assert "start" in snapshot["detail"]
+-
+-
+-def test_controlled_stop_in_progress_is_reported_not_faked_as_stopped(world, monkeypatch):
+-    runtime_state.write_lifecycle(action="stop", phase="running", pid=4242, directory=world["dir"])
+-    monkeypatch.setattr(rs, "pid_is_lifecycle_script", lambda pid: True)
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"
+-    assert snapshot["degradedReasons"] == ["Ein kontrollierter Stop l├ñuft."]
+-
+-
+-def test_aborted_lifecycle_is_error_not_starting_forever(world, monkeypatch):
+-    world["voice"] = UNIT_INACTIVE
+-    runtime_state.write_lifecycle(action="start", phase="running", pid=4242, directory=world["dir"])
+-    monkeypatch.setattr(rs, "pid_is_lifecycle_script", lambda pid: False)
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "ERROR"
+-    assert "abgebrochen" in snapshot["detail"]
+-
+-
+-def test_aborted_lifecycle_does_not_hide_a_verifiably_healthy_backend(world, monkeypatch):
+-    runtime_state.write_lifecycle(action="start", phase="running", pid=4242, directory=world["dir"])
+-    monkeypatch.setattr(rs, "pid_is_lifecycle_script", lambda pid: False)
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "DEGRADED"  # never a silent READY: the abort is surfaced
+-    assert "abgebrochen" in snapshot["degradedReasons"][0]
+-    assert snapshot["capabilities"]["stop"] is True
+-
+-
+-def test_no_lifecycle_request_is_offered_while_a_controlled_one_runs(world, monkeypatch):
+-    runtime_state.write_lifecycle(action="stop", phase="running", pid=4242, directory=world["dir"])
+-    monkeypatch.setattr(rs, "pid_is_lifecycle_script", lambda pid: True)
+-    assert rs.collect()["capabilities"] == {"start": False, "stop": False, "restart": False}
+-
+-
+-def test_pid_check_requires_a_shell_running_a_lifecycle_script(tmp_path, monkeypatch):
+-    monkeypatch.setenv("JARVIS_PROC_ROOT", str(tmp_path))
+-    cases = {
+-        "1": b"bash\0/x/start.sh\0", "2": b"/bin/bash\0/x/restart.sh\0", "3": b"vim\0start.sh\0",
+-        "4": b"sleep\0999\0start.sh\0", "5": b"bash\0/x/other.sh\0", "6": b"start.sh\0",
+-    }
+-    for pid, cmdline in cases.items():
+-        (tmp_path / pid).mkdir()
+-        (tmp_path / pid / "cmdline").write_bytes(cmdline)
+-    assert [rs.pid_is_lifecycle_script(int(p)) for p in cases] == [True, True, False, False, False, False]
+-    assert rs.pid_is_lifecycle_script(99) is False
+-
+-
+-def test_corrupt_state_field_types_do_not_crash_the_probe(world):
+-    (world["dir"] / runtime_state.HEARTBEAT_FILE).write_text(json.dumps(
+-        {"schema": 1, "pid": os.getpid(), "invocationId": "", "updatedEpoch": "x", "intervalSeconds": [1],
+-         "listenerRunning": True}), encoding="utf-8")
+-    (world["dir"] / runtime_state.LIFECYCLE_FILE).write_text(json.dumps(
+-        {"schema": 1, "action": "start", "phase": "running", "pid": "abc"}), encoding="utf-8")
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] in {"DEGRADED", "ERROR"}
+-
+-
+-def test_failed_start_keeps_error_until_backend_is_actually_running(world):
+-    world["voice"] = UNIT_INACTIVE
+-    runtime_state.write_lifecycle(action="start", phase="finished", result="ERROR",
+-                                  message="Start fehlgeschlagen (exit 1).", pid=1, directory=world["dir"])
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "ERROR"
+-    assert snapshot["detail"] == "Start fehlgeschlagen (exit 1)."
+-    # a later clean stop record clears it
+-    runtime_state.write_lifecycle(action="stop", phase="finished", result="STOPPED", pid=1, directory=world["dir"])
+-    assert rs.collect()["state"] == "STOPPED"
+-
+-
+-def test_old_error_record_does_not_override_a_running_healthy_backend(world):
+-    runtime_state.write_lifecycle(action="start", phase="finished", result="ERROR", message="x", pid=1, directory=world["dir"])
+-    assert rs.collect()["state"] == "READY"
+-
+-
+-def test_unreachable_systemd_is_a_contract_valid_error(world, monkeypatch):
+-    def broken(unit):
+-        raise RuntimeError("systemd user manager nicht erreichbar")
+-    monkeypatch.setattr(rs, "unit_props", broken)
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "ERROR"
+-    assert snapshot["components"] == []
+-
+-
+-def test_any_probe_exception_is_a_contract_valid_error_without_lifecycle_requests(world, monkeypatch):
+-    def broken(*args, **kwargs):
+-        raise PermissionError("anchor unreadable")
+-    monkeypatch.setattr(rs.chatterbox, "diagnose", broken)  # raised after the config/systemd block
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "ERROR"
+-    assert snapshot["capabilities"] == {"start": False, "stop": False, "restart": False}
+-    assert "PermissionError" in snapshot["detail"] and "anchor" not in snapshot["detail"]
+-
+-
+-def test_unreadable_config_is_error(world, monkeypatch):
+-    def broken():
+-        raise FileNotFoundError("config")
+-    monkeypatch.setattr(rs.dependencies, "Config", broken)
+-    assert rs.collect()["state"] == "ERROR"
+-
+-
+-# --- contract hygiene -----------------------------------------------------------------------
+-
+-def test_long_details_are_truncated_to_the_ui_limit(world, monkeypatch):
+-    world["chatterbox"] = (False, ["config_mismatch"])
+-    monkeypatch.setitem(rs._CHATTERBOX_DETAIL, "config_mismatch", "x" * 900)
+-    assert_ui_contract(rs.collect())
+-
+-
+-def test_snapshot_never_exposes_required_flag_secrets_or_local_paths(world):
+-    text = json.dumps(rs.collect()).lower()
+-    assert "required" not in text
+-    for forbidden in ("token", "password", "api_key", "/home/alex", "/mnt/"):
+-        assert forbidden not in text
+-
+-
+-def test_capabilities_table():
+-    table = {s: rs.capabilities(s) for s in UI_STATES}
+-    assert table["OFFLINE"] == {"start": True, "stop": False, "restart": False}
+-    assert table["NOT_IMPLEMENTED"] == {"start": False, "stop": False, "restart": False}
+-    assert table["STARTING"] == {"start": False, "stop": False, "restart": False}
+-    assert table["READY"] == {"start": False, "stop": True, "restart": True}
+-
+-
+-# --- shared state files -----------------------------------------------------------------------
+-
+-def test_lifecycle_record_roundtrip_and_validation(tmp_path):
+-    runtime_state.write_lifecycle(action="restart", phase="finished", result="READY", message="ok", pid=7, directory=tmp_path)
+-    record = runtime_state.read_lifecycle(tmp_path)
+-    assert (record["action"], record["phase"], record["result"], record["pid"]) == ("restart", "finished", "READY", 7)
+-    assert ISO.match(record["updatedAt"])
+-    with pytest.raises(ValueError):
+-        runtime_state.write_lifecycle(action="format-disk", phase="running", pid=1, directory=tmp_path)
+-    with pytest.raises(ValueError):
+-        runtime_state.write_lifecycle(action="start", phase="finished", result="GREAT", pid=1, directory=tmp_path)
+-
+-
+-def test_corrupt_or_foreign_schema_state_files_are_ignored(tmp_path):
+-    (tmp_path / runtime_state.HEARTBEAT_FILE).write_text("{not json", encoding="utf-8")
+-    (tmp_path / runtime_state.LIFECYCLE_FILE).write_text(json.dumps({"schema": 99}), encoding="utf-8")
+-    assert runtime_state.read_heartbeat(tmp_path) is None
+-    assert runtime_state.read_lifecycle(tmp_path) is None
+-
+-
+-def test_record_cli_writes_only_the_lifecycle_file(tmp_path, monkeypatch):
+-    monkeypatch.setenv("JARVIS_RUNTIME_STATE_DIR", str(tmp_path))
+-    assert runtime_state.main(["start", "running", "--pid", "31"]) == 0
+-    assert sorted(p.name for p in tmp_path.iterdir()) == [runtime_state.LIFECYCLE_FILE]
+-    assert runtime_state.read_lifecycle(tmp_path)["pid"] == 31
+-    assert runtime_state.main(["rm -rf", "running"]) == 1
+-
+-
+-def test_record_writer_needs_only_the_standard_library(tmp_path):
+-    import subprocess
+-    import sys
+-    # -S -E: no site-packages, so yaml/dotenv/aiohttp cannot be what makes this work.
+-    code = "import runpy,sys; sys.argv=['x','start','running','--pid','5']; runpy.run_path('core/runtime_state.py', run_name='__main__')"
+-    result = subprocess.run([sys.executable, "-S", "-E", "-c", code], cwd=str(rs.ROOT), capture_output=True, text=True,
+-                            env={"JARVIS_RUNTIME_STATE_DIR": str(tmp_path)})
+-    assert result.returncode == 0, result.stderr
+-    assert runtime_state.read_lifecycle(tmp_path)["pid"] == 5
+-
+-
+-def test_probe_cli_requires_the_explicit_json_flag():
+-    with pytest.raises(SystemExit):
+-        rs.main([])
+-    with pytest.raises(SystemExit):
+-        rs.main(["--record-lifecycle", "start", "running"])  # the probe has no write path
+-
+-
+-# --- chatterbox structured diagnosis (no message parsing) ------------------------------------
+-
+-def _chatterbox_env(tmp_path, anchor_bytes=b"voice"):
+-    import hashlib
+-    anchor = tmp_path / "anchor.wav"
+-    anchor.write_bytes(anchor_bytes)
+-    env = tmp_path / "chatterbox.env"
+-    env.write_text("\n".join([
+-        "CHATTERBOX_PORT=8765", "CHATTERBOX_LANGUAGE=de", "CHATTERBOX_TEMPO=0.89", "CHATTERBOX_EXAGGERATION=0.5",
+-        "CHATTERBOX_CFG_WEIGHT=0.5", "CHATTERBOX_TEMPERATURE=0.8", "CHATTERBOX_REPETITION_PENALTY=1.2",
+-        "CHATTERBOX_MIN_P=0.05", "CHATTERBOX_TOP_P=1.0", f"CHATTERBOX_AUDIO_PROMPT_PATH={anchor}",
+-        f"CHATTERBOX_AUDIO_PROMPT_SHA256={hashlib.sha256(b'voice').hexdigest()}",
+-    ]), encoding="utf-8")
+-    return env
+-
+-
+-def test_chatterbox_diagnose_codes(monkeypatch, tmp_path):
+-    env = _chatterbox_env(tmp_path)
+-    expected = chatterbox.expected_contract(chatterbox.parse_env_file(env))
+-    monkeypatch.setattr(chatterbox, "http_json", lambda url, timeout=2.0: {"status": "ok"} if url.endswith("/health") else dict(expected))
+-    assert chatterbox.diagnose(env) == (True, [])
+-    assert chatterbox.validate_once(env) == (True, [])
+-
+-    monkeypatch.setattr(chatterbox, "http_json", lambda url, timeout=2.0: (_ for _ in ()).throw(OSError("refused")))
+-    assert chatterbox.diagnose(env) == (False, ["health_unreachable"])
+-
+-    drifted = dict(expected, tempo=1.5)
+-    monkeypatch.setattr(chatterbox, "http_json", lambda url, timeout=2.0: {"status": "ok"} if url.endswith("/health") else drifted)
+-    assert chatterbox.diagnose(env) == (False, ["config_mismatch"])
+-
+-    (tmp_path / "anchor.wav").write_bytes(b"tampered")
+-    assert "anchor_sha" in chatterbox.diagnose(env)[1]
+-    assert chatterbox.diagnose(tmp_path / "missing.env") == (False, ["env_missing"])
+-
+-
+-# --- watchdog heartbeat -----------------------------------------------------------------------
+-
+-def _watchdog(tmp_path, monkeypatch, *, listener_running=True):
+-    from core.watchdog import Watchdog
+-    monkeypatch.setenv("JARVIS_RUNTIME_STATE_DIR", str(tmp_path))
+-    wd = object.__new__(Watchdog)
+-    wd._check_interval = 10
+-    wd._coordinator = SimpleNamespace(state=SimpleNamespace(name="IDLE"), running=True)
+-    wd._listener = SimpleNamespace(running=listener_running)
+-    wd.logger = SimpleNamespace(warning=lambda *a, **k: None)
+-    return wd
+-
+-
+-def test_watchdog_writes_heartbeat_with_pid_and_listener_state(tmp_path, monkeypatch):
+-    monkeypatch.setenv("INVOCATION_ID", "inv-1")
+-    wd = _watchdog(tmp_path, monkeypatch)
+-    wd._write_heartbeat()
+-    heartbeat = runtime_state.read_heartbeat(tmp_path)
+-    assert heartbeat["pid"] == os.getpid() and heartbeat["invocationId"] == "inv-1"
+-    assert heartbeat["listenerRunning"] is True and heartbeat["pipelineState"] == "IDLE"
+-    assert abs(heartbeat["updatedEpoch"] - time.time()) < 5
+-
+-
+-def test_watchdog_heartbeat_failure_never_breaks_the_watchdog(tmp_path, monkeypatch):
+-    wd = _watchdog(tmp_path, monkeypatch)
+-    blocker = tmp_path / "file"
+-    blocker.write_text("not a dir", encoding="utf-8")
+-    monkeypatch.setenv("JARVIS_RUNTIME_STATE_DIR", str(blocker))
+-    wd._write_heartbeat()  # must swallow the OSError and only log a warning
+-
+-
+-# --- Primary/Expert LLM, handover and NPU sensor ---------------------------------------------
+-
+-def _units(world, monkeypatch, **by_unit):
+-    """unit_props stub per unit name; unknown units are inactive."""
+-    facts = {rs.VOICE_UNIT: world["voice"]}
+-    facts.update(by_unit)
+-    monkeypatch.setattr(rs, "unit_props", lambda unit: facts.get(unit, UNIT_INACTIVE))
+-
+-
+-def test_llm_primary_is_required_and_llm_main_is_a_derived_compat_alias(world):
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    primary, alias = component(snapshot, "llm-primary"), component(snapshot, "llm-main")
+-    assert primary["state"] == alias["state"] == "READY"
+-    world["llm_unit"] = UNIT_INACTIVE
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert component(snapshot, "llm-primary")["state"] == component(snapshot, "llm-main")["state"] == "STOPPED"
+-    assert snapshot["state"] == "DEGRADED"
+-    assert len([r for r in snapshot["degradedReasons"] if "Haupt-LLM" in r]) == 1  # alias never counted twice
+-
+-
+-def test_primary_unit_and_endpoint_follow_llm_primary_config(world, monkeypatch):
+-    world["config"] = ConfigStub(**{"llm.primary.endpoint": "http://127.0.0.1:8090/v1/chat/completions",
+-                                    "llm.primary.unit": "llama-server-primary.service"})
+-    seen = {}
+-    monkeypatch.setattr(rs, "unit_props", lambda unit: seen.setdefault(unit, world["voice"] if unit == rs.VOICE_UNIT else UNIT_ACTIVE))
+-    monkeypatch.setattr(rs.dependencies, "_check_llm", lambda endpoint: (seen.setdefault("endpoint", endpoint) and True, ""))
+-    assert rs.collect()["state"] == "READY"
+-    assert "llama-server-primary.service" in seen and seen["endpoint"].endswith(":8090/v1/chat/completions")
+-
+-
+-def test_expert_llm_resting_stopped_does_not_degrade_ready(world, monkeypatch):
+-    world["config"] = ConfigStub(**{"handover.enabled": True})
+-    _units(world, monkeypatch, **{"llama-server-primary.service": UNIT_ACTIVE, "llama-server-expert.service": UNIT_INACTIVE})
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "READY"
+-    assert component(snapshot, "llm-expert")["state"] == "STOPPED"
+-    assert component(snapshot, "llm-primary")["state"] == "READY"
+-
+-
+-def test_expert_component_is_absent_without_any_expert_config(world):
+-    assert all(c["id"] != "llm-expert" for c in rs.collect()["components"])
+-
+-
+-def test_handover_is_a_controlled_transition_not_degraded(world, monkeypatch):
+-    world["config"] = ConfigStub(**{"handover.enabled": True, "llm.expert.endpoint": "http://127.0.0.1:8082/v1/chat/completions"})
+-    _units(world, monkeypatch, **{"llama-server-expert.service": UNIT_ACTIVE})  # primary stopped on purpose
+-    runtime_state.write_handover({"state": "EXPERT_RUNNING", "is_swapping": True}, world["dir"])
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    assert snapshot["state"] == "STARTING" and snapshot["degradedReasons"] == []
+-    assert component(snapshot, "llm-primary")["state"] == "STARTING"
+-    assert component(snapshot, "llm-main")["state"] == "STARTING"
+-    assert component(snapshot, "llm-expert")["state"] == "READY"
+-    assert snapshot["capabilities"] == {"start": False, "stop": False, "restart": False}
+-
+-
+-def test_handover_lifecycle_record_never_triggers_the_orphan_error(world, monkeypatch):
+-    runtime_state.write_lifecycle(action="handover", phase="running", pid=999999, directory=world["dir"])
+-    snapshot = rs.collect()
+-    assert snapshot["state"] == "READY"        # a "running" handover record is no orphaned start/stop script
+-
+-
+-def test_finished_or_stale_handover_record_is_no_transition(world, monkeypatch):
+-    runtime_state.write_handover({"state": "IDLE", "is_swapping": False}, world["dir"])
+-    assert rs.collect()["state"] == "READY"
+-    runtime_state.write_handover({"state": "STOPPING_PRIMARY", "is_swapping": True}, world["dir"])
+-    assert runtime_state.handover_in_progress(world["dir"]) is not None
+-    real = time.time
+-    monkeypatch.setattr(runtime_state.time, "time", lambda: real() + runtime_state.HANDOVER_MAX_AGE_S + 60)
+-    assert runtime_state.handover_in_progress(world["dir"]) is None   # stale record: not "swapping" forever
+-
+-
+-def test_npu_sensor_unknown_without_telemetry_is_not_implemented(world):
+-    snapshot = rs.collect()
+-    npu = component(snapshot, "npu-sensor")
+-    assert npu["state"] == "NOT_IMPLEMENTED"
+-    assert "nicht implementiert" in npu["detail"]
+-    assert snapshot["state"] == "READY"
+-
+-
+-@pytest.mark.parametrize("info,state,needle", [
+-    (dict(state="READY", reason=None, active="npu"), "READY", "NPU"),
+-    (dict(state="DEGRADED", reason="cpu_fallback: npu_driver_missing", active="cpu"), "DEGRADED", "npu_driver_missing"),
+-    (dict(state="STOPPED", reason="x", active=None, enabled=False), "STOPPED", "deaktiviert"),
+-    (dict(state="DEGRADED", reason="no_camera", active=None), "OFFLINE", "no_camera"),
+-    (dict(state="STOPPED", reason="backend not initialised", active=None), "STOPPED", "nicht gestartet"),
+-])
+-def test_npu_sensor_reflects_real_backend_telemetry(world, info, state, needle):
+-    runtime_state.write_npu_sensor(runtime_state.npu_sensor_record(**info), world["dir"])   # shared schema
+-    snapshot = rs.collect()
+-    assert_ui_contract(snapshot)
+-    npu = component(snapshot, "npu-sensor")
+-    assert npu["state"] == state and needle in npu["detail"]
+-    if state in ("READY", "DEGRADED"):
+-        assert "Wake-Signal" in npu["detail"]      # wake / live-camera NPU are never claimed
+-
+-
+-def test_stale_npu_telemetry_is_not_trusted(world, monkeypatch):
+-    runtime_state.write_npu_sensor(runtime_state.npu_sensor_record(state="READY", reason=None, active="npu"), world["dir"])
+-    real = time.time
+-    monkeypatch.setattr(rs.time, "time", lambda: real() + rs.NPU_STATUS_MAX_AGE_S + 5)
+-    npu = component(rs.collect(), "npu-sensor")
+-    assert npu["state"] == "NOT_IMPLEMENTED" and "veraltet" in npu["detail"]
+-
+-
+-def test_offline_npu_sensor_does_not_degrade_the_runtime(world):
+-    runtime_state.write_npu_sensor(runtime_state.npu_sensor_record(state="DEGRADED", reason="no_backend", active=None), world["dir"])
+-    snapshot = rs.collect()
+-    assert component(snapshot, "npu-sensor")["state"] == "OFFLINE"
+-    assert snapshot["state"] == "READY" and snapshot["degradedReasons"] == []
+-
+-
+-def test_component_status_roundtrip_and_name_sanitising(tmp_path):
+-    runtime_state.write_component_status("npu-sensor", {"active": "npu"}, tmp_path)
+-    assert runtime_state.read_component_status("npu-sensor", tmp_path)["active"] == "npu"
+-    assert runtime_state.read_component_status("other", tmp_path) is None
+-    runtime_state.write_component_status("../evil", {"x": 1}, tmp_path)    # cannot escape the state dir
+-    assert not any(p.parent != tmp_path for p in tmp_path.rglob("*.json"))
+-    with pytest.raises(ValueError):
+-        runtime_state.write_component_status("///", {}, tmp_path)
+-
+-
+-def test_watchdog_suppresses_llm_alarm_during_handover(tmp_path, monkeypatch):
+-    monkeypatch.setenv("JARVIS_RUNTIME_STATE_DIR", str(tmp_path))
+-    runtime_state.write_handover({"state": "RESTORING_PRIMARY", "is_swapping": True}, tmp_path)
+-    from core import watchdog as wd
+-    dog = wd.Watchdog.__new__(wd.Watchdog)
+-    dog.logger = __import__("logging").getLogger("t")
+-    dog._last_llm_check_ts, dog._llm_health_interval = 0.0, 0.0
+-    dog._llm_status, dog._llm_unhealthy_count = None, 5
+-    announced = []
+-    dog._announce = announced.append
+-    dog._emit_event = lambda *a, **k: announced.append("event")
+-    monkeypatch.setattr(wd.requests, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not probe/alarm")))
+-    dog._check_llm_health()
+-    assert dog._llm_status == "handover" and dog._llm_unhealthy_count == 0 and announced == []
+
+
+===== LOCAL ONLY: tests/unit/test_context_window_read_only.py =====
+"""Desktop context window must never change the voice daemon's SQLite store."""
+
+import hashlib
+import sqlite3
+import time
+
+from core.context_window import get_context_window
+
+
+class _Config:
+    def __init__(self, db_path):
+        self.db_path = db_path
+
+    def get(self, key, default=None):
+        values = {
+            "context_window.enabled": True,
+            "context_window.db_path": str(self.db_path),
+            "context_window.segment_retention_days": 7,
+        }
+        return values.get(key, default)
+
+
+def _digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_read_only_context_loads_old_segments_without_pruning_or_writing(tmp_path):
+    db_path = tmp_path / "memory.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE topic_segments (
+                segment_id TEXT PRIMARY KEY, session_id TEXT, label TEXT,
+                start_time REAL, end_time REAL, messages_json TEXT,
+                embedding BLOB, token_count INTEGER, summary TEXT,
+                created_at REAL, user_id TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO topic_segments VALUES
+            ('old', 'owner', 'old topic', ?, ?, '[]', NULL, 0, '', ?, 'primary_user')
+        """, (time.time() - 10 * 86400,) * 3)
+
+    before = _digest(db_path)
+    context = get_context_window(_Config(db_path), None, read_only=True)
+    context.load_prior_segments()
+    context._cleanup_old_segments()
+    context._update_segment_summary("old", "changed")
+    context._persist_segment(context.segments[0])
+    context.on_message({"role": "user", "content": "should not be ingested"})
+    context.flush()
+
+    assert [segment.segment_id for segment in context.segments] == ["old"]
+    assert _digest(db_path) == before
+    with sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM topic_segments").fetchone()[0] == 1
+
+
+def test_read_only_context_does_not_create_a_missing_store(tmp_path):
+    db_path = tmp_path / "missing" / "memory.db"
+    context = get_context_window(_Config(db_path), None, read_only=True)
+    context.load_prior_segments(fallback_messages=[{"role": "user", "content": "old"}])
+    assert context.segments == []
+    assert not db_path.exists()
+
+
+
+===== LOCAL ONLY: tests/unit/test_jarvis_web_desktop_mode.py =====
+"""jarvis_web.py --desktop-mode: read-only, loopback-only; the default mode is unchanged."""
+
+from types import SimpleNamespace
+import asyncio
+import json
+
+from aiohttp import WSMsgType
+from aiohttp.test_utils import TestClient, TestServer
+import pytest
+
+
+def _app(tmp_path, monkeypatch, *, desktop_mode):
+    import core.tool_registry
+    import jarvis_web
+
+    monkeypatch.setattr(core.tool_registry, "get_images_dir", lambda: str(tmp_path / "tool-images"))
+    config = SimpleNamespace(
+        get=lambda key, default=None: str(tmp_path / "flux") if key == "image_generation.output_dir" else default
+    )
+    app = jarvis_web.create_app(config, desktop_mode=desktop_mode)
+    app["config"] = config
+    app["auth_token"] = ""
+    return app
+
+
+def _run(app, scenario):
+    async def go():
+        async with TestClient(TestServer(app)) as client:
+            return await scenario(client)
+
+    return asyncio.run(go())
+
+
+MUTATING = [
+    ("POST", "/api/upload"),
+    ("POST", "/api/upload-image"),
+    ("POST", "/api/generate-image"),
+    ("PUT", "/api/session/1/rename"),
+    ("PATCH", "/api/memory/facts/abc"),
+    ("DELETE", "/api/memory/facts/abc"),
+    ("DELETE", "/api/memory/interactions/1"),
+    ("POST", "/api/governance/proposals/1/review"),
+    ("POST", "/api/governance/proposals/1/confirm"),
+    ("POST", "/api/governance/circuit-breaker/reset"),
+    ("POST", "/api/governance/test-proposal"),
+    ("POST", "/api/observations/collect"),
+    ("POST", "/api/observations/consult"),
+]
+
+
+def test_desktop_mode_refuses_every_mutating_route_with_403(tmp_path, monkeypatch):
+    import jarvis_web
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        results = {}
+        for method, path in MUTATING:
+            response = await client.request(method, path, data=b"{}")
+            results[(method, path)] = (response.status, await response.json())
+        return results
+
+    for key, (status, body) in _run(app, scenario).items():
+        assert status == 403, key
+        assert body == {"error": jarvis_web.DESKTOP_MODE_REJECTION, "desktopMode": True}, key
+
+
+def test_desktop_mode_keeps_get_routes_reachable(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        stats = await client.get("/api/stats")
+        head = await client.head("/api/stats")
+        return stats.status, head.status
+
+    # 503 = "components not initialised" from the real handler: the middleware let the GET through.
+    assert _run(app, scenario) == (503, 503)
+
+
+def test_default_mode_does_not_install_the_read_only_middleware(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, desktop_mode=False)
+    assert app["desktop_mode"] is False
+
+    async def scenario(client):
+        response = await client.post("/api/generate-image", data=b"not json")
+        return response.status
+
+    assert _run(app, scenario) == 400  # the real handler answered (invalid JSON), not the desktop guard
+
+
+def test_desktop_mode_middleware_logs_the_rejection(tmp_path, monkeypatch, caplog):
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        await client.delete("/api/memory/facts/abc")
+
+    with caplog.at_level("WARNING", logger="jarvis.web"):
+        _run(app, scenario)
+    assert any("DELETE /api/memory/facts/abc" in record.getMessage() for record in caplog.records)
+
+
+def test_desktop_mode_websocket_accepts_only_client_info(tmp_path, monkeypatch, caplog):
+    """Second layer: the socket handler itself. The read middleware already refuses /ws in desktop
+    mode, so this app has the flag but not the middleware to exercise the handler in isolation."""
+    import jarvis_web
+    app = _app(tmp_path, monkeypatch, desktop_mode=False)
+    app["desktop_mode"] = True
+    app["components"] = {
+        "doc_buffer": object(),
+        "conversation": SimpleNamespace(load_full_history=lambda: [], current_user="u"),
+    }
+    app["tts_proxy"] = SimpleNamespace(get_pending_announcements=lambda: [])
+    app["ws_connections"] = {}
+
+    async def first_error(ws, payload):
+        await ws.send_json(payload)
+        async with asyncio.timeout(5):
+            while True:
+                message = await ws.receive()
+                if message.type != WSMsgType.TEXT:
+                    return None
+                data = message.json()
+                if data.get("type") == "error":
+                    return data
+
+    async def scenario(client):
+        async with client.ws_connect("/ws") as ws:
+            rejected = {}
+            for kind in ("message", "slash_command", "toggle_voice", "set_user", "client_location", "file_drop"):
+                rejected[kind] = await first_error(ws, {"type": kind, "content": "hi", "command": "/x", "enabled": True})
+            await ws.send_json({"type": "client_info", "client_id": "test", "user_agent": "test", "screen_width": 1920})
+            await ws.close()
+            return rejected
+
+    with caplog.at_level("WARNING", logger="jarvis.web"):
+        rejected = _run(app, scenario)
+    assert all(data == {"type": "error", "content": jarvis_web.DESKTOP_MODE_REJECTION} for data in rejected.values())
+    assert sum("WebSocket-Nachricht" in record.getMessage() for record in caplog.records) == 6
+    assert jarvis_web._DESKTOP_WS_ALLOWED_TYPES == frozenset({"client_info"})
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+    ({}, None),
+    ({"host": "127.0.0.1", "port": 8091}, None),
+    ({"voice": True}, "--voice"),
+    ({"host": "0.0.0.0"}, "127.0.0.1"),
+    ({"host": "192.168.0.5"}, "127.0.0.1"),
+    ({"port": 8443}, "8091"),
+    ({"port": 9000}, "8091"),
+])
+def test_desktop_mode_arguments_cannot_widen_the_binding(kwargs, expected):
+    import jarvis_web
+    args = SimpleNamespace(**{"voice": False, "host": None, "port": None, **kwargs})
+    problem = jarvis_web._desktop_mode_argument_problem(args)
+    assert (problem is None) if expected is None else (expected in problem)
+
+
+def test_desktop_mode_is_loopback_8091_only():
+    import jarvis_web
+    assert (jarvis_web.DESKTOP_MODE_HOST, jarvis_web.DESKTOP_MODE_PORT) == ("127.0.0.1", 8091)
+
+
+@pytest.mark.parametrize("configured,expected", [
+    ("${JARVIS_WEB_AUTH_TOKEN}", ""), ("", ""), (None, ""), ("local-test-token", "local-test-token"),
+])
+def test_desktop_mode_token_honors_a_real_token_and_ignores_placeholders(configured, expected):
+    import jarvis_web
+    config = SimpleNamespace(get=lambda key, default=None: configured if key == "web.auth_token" else default)
+    assert jarvis_web._desktop_mode_auth_token(config) == expected
+
+
+def test_desktop_mode_never_needs_the_https_token_rule(tmp_path):
+    """The default path raises when TLS certs exist without a token; desktop mode has no TLS at all."""
+    import jarvis_web
+    cert, key = tmp_path / "tls.crt", tmp_path / "tls.key"
+    cert.touch()
+    key.touch()
+    values = {"web.auth_token": "", "web.tls": {"enabled": True, "cert": str(cert), "key": str(key)}}
+    config = SimpleNamespace(get=lambda name, default=None: values.get(name, default))
+    with pytest.raises(RuntimeError):
+        jarvis_web._configured_web_auth_token(config)
+    assert jarvis_web._desktop_mode_auth_token(config) == ""
+
+
+# --- GET allowlist ---------------------------------------------------------------------------
+
+# Copy of what the WinUI app really requests (BackendHub -> JarvisApiClient). The C# harness
+# UI/tests/WinUiBackendAdapters.Tests asserts the app never requests anything outside this list.
+WINUI_READ_REQUESTS = [
+    "/api/stats",
+    "/api/desktop/snapshot",
+    "/api/agents/status",
+    "/api/automations/status",
+    "/api/memory/summary",
+    "/api/events/recent?hours=24&limit=40",
+    "/api/events/aggregate?hours=24",
+    "/api/sessions?limit=1",
+    "/api/webcam/status",
+]
+
+FORBIDDEN_READS = [
+    "/", "/index.html", "/memory", "/dashboard", "/dashboard/health", "/dashboard/pipeline",
+    "/dashboard/governance", "/ws", "/ws/dashboard",
+    "/api/webcam/stream", "/api/webcam/snapshot", "/api/browse?path=/tmp",
+    "/api/history", "/api/session/1", "/api/desktop/live", "/api/metrics/summary",
+    "/api/metrics/export", "/api/events/stt", "/api/events/tts", "/api/events/speaker_id",
+    "/api/events/routing", "/api/events/watchdog", "/api/events/health", "/api/gpu-status",
+    "/api/governance/status", "/api/governance/proposals", "/api/observations/findings",
+    "/api/memory/facts", "/api/memory/interactions", "/api/memory/timeseries", "/api/memory/db-health",
+    "/images/x.png", "/generated/x.png", "/app.js", "/nope",
+    # allowed path, key outside the allowlist
+    "/api/sessions?limit=1&user=someone", "/api/events/recent?hours=1&category=voice",
+    "/api/stats?verbose=1",
+]
+
+
+@pytest.mark.parametrize("target", WINUI_READ_REQUESTS)
+def test_desktop_mode_lets_the_winui_read_endpoints_through(tmp_path, monkeypatch, target):
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        return (await client.get(target)).status, (await client.head(target)).status
+
+    # The real handlers answer 503 ("components not initialised") here; anything but 403 = let through.
+    statuses = _run(app, scenario)
+    assert 403 not in statuses, (target, statuses)
+
+
+@pytest.mark.parametrize("target", FORBIDDEN_READS)
+def test_desktop_mode_refuses_every_other_read_with_403_for_get_and_head(tmp_path, monkeypatch, target):
+    import jarvis_web
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        response = await client.get(target)
+        body = await response.json()
+        return response.status, body, (await client.head(target)).status
+
+    status, body, head_status = _run(app, scenario)
+    assert (status, head_status) == (403, 403), target
+    assert body == {"error": jarvis_web.DESKTOP_MODE_REJECTION, "desktopMode": True}
+
+
+def test_desktop_mode_allowlist_covers_every_registered_get_route_decision(tmp_path, monkeypatch):
+    """Completeness: every GET route the app registers is either allowlisted or answers 403."""
+    import jarvis_web
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+    placeholders = {"{session_id}": "1", "{id}": "1", "{fact_id}": "1", "{interaction_id}": "1"}
+    paths = set()
+    for resource in app.router.resources():
+        if not any(route.method in ("GET", "*") for route in resource):
+            continue
+        info = resource.get_info()
+        if "prefix" in info:  # static directory: probe a file below it
+            paths.add(info["prefix"].rstrip("/") + "/x.png")
+            continue
+        path = info.get("path") or info.get("formatter") or ""
+        for name, value in placeholders.items():
+            path = path.replace(name, value)
+        paths.add(path)
+
+    async def scenario(client):
+        return {path: (await client.get(path)).status for path in paths}
+
+    results = _run(app, scenario)
+    allowed = set(jarvis_web._DESKTOP_READ_ALLOWLIST)
+    assert allowed <= paths
+    for path, status in results.items():
+        assert (status != 403) == (path in allowed), (path, status)
+
+
+def test_desktop_mode_tolerates_the_auth_token_query_key(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        return (await client.get("/api/stats?token=abc")).status
+
+    assert _run(app, scenario) != 403
+
+
+def test_desktop_mode_read_rejections_are_logged_without_the_query(tmp_path, monkeypatch, caplog):
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        await client.get("/api/webcam/stream?token=SECRET_TOKEN_VALUE")
+
+    with caplog.at_level("WARNING", logger="jarvis.web"):
+        _run(app, scenario)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("GET /api/webcam/stream abgelehnt" in message for message in messages)
+    assert not any("SECRET_TOKEN_VALUE" in message for message in messages)
+
+
+def test_desktop_mode_refuses_both_websocket_endpoints_at_http_level(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, desktop_mode=True)
+
+    async def scenario(client):
+        headers = {"Connection": "Upgrade", "Upgrade": "websocket",
+                   "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "x" * 22 + "=="}
+        return [(await client.get(path, headers=headers)).status for path in ("/ws", "/ws/dashboard")]
+
+    assert _run(app, scenario) == [403, 403]
+
+
+def test_default_mode_keeps_all_read_routes_open(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, desktop_mode=False)
+
+    async def scenario(client):
+        targets = ["/api/webcam/status", "/api/history", "/api/browse?path=/tmp", "/api/desktop/live"]
+        return {target: (await client.get(target)).status for target in targets}
+
+    assert 403 not in _run(app, scenario).values()
+
+
+# --- honest ownership semantics --------------------------------------------------------------
+
+def _request(desktop_mode, components):
+    return SimpleNamespace(app={"components": components, "desktop_mode": desktop_mode})
+
+
+def test_desktop_automations_never_claim_disabled_for_workers_it_does_not_own():
+    import jarvis_web
+    response = asyncio.run(jarvis_web.automations_status_handler(_request(True, {})))
+    schedulers = {item["id"]: item for item in json.loads(response.text)["schedulers"]}
+    assert schedulers["reminder_poller"]["state"] == "backend_owned"
+    assert schedulers["reminder_poller"]["owner"] == "voice-daemon"
+    assert schedulers["health_snapshot"]["state"] == "backend_owned"
+    assert schedulers["health_snapshot"]["owner"] == "voice-daemon"
+    assert schedulers["observation_collector"]["state"] == "unavailable"
+    assert schedulers["observation_collector"]["owner"] == "web-standard-mode"
+    assert not any(item["state"] in ("disabled", "stopped", "running") for item in schedulers.values())
+
+
+def test_desktop_automations_do_not_report_a_local_running_state_as_system_state():
+    import jarvis_web
+
+    class Thread:
+        def is_alive(self):
+            return True
+
+    class Reminder:
+        _running = True
+        _poll_thread = Thread()
+        poll_interval = 30
+
+    response = asyncio.run(jarvis_web.automations_status_handler(_request(True, {"reminder_manager": Reminder()})))
+    reminder = next(item for item in json.loads(response.text)["schedulers"] if item["id"] == "reminder_poller")
+    assert reminder["state"] == "backend_owned" and reminder["configuredIntervalSeconds"] == 30
+
+
+def test_default_automations_semantics_are_unchanged():
+    import jarvis_web
+    response = asyncio.run(jarvis_web.automations_status_handler(_request(False, {})))
+    payload = json.loads(response.text)
+    assert [item["state"] for item in payload["schedulers"]] == ["disabled", "disabled", "disabled"]
+    assert all("owner" not in item for item in payload["schedulers"])
+
+
+def test_desktop_agents_status_is_backend_owned_not_a_local_idle():
+    import jarvis_web
+
+    class Planner:
+        active_plan = None
+        has_pending_confirmation = False
+        is_paused = False
+        can_pause = False
+
+    response = asyncio.run(jarvis_web.agents_status_handler(_request(True, {"task_planner": Planner()})))
+    payload = json.loads(response.text)
+    assert response.status == 200
+    assert payload["available"] is False and payload["state"] == "backend_owned"
+    default = asyncio.run(jarvis_web.agents_status_handler(_request(False, {"task_planner": Planner()})))
+    assert json.loads(default.text)["state"] == "idle" and json.loads(default.text)["available"] is True
+
+
+def test_desktop_snapshot_reports_unowned_workers_as_unknown_not_not_loaded():
+    import jarvis_web
+    config = SimpleNamespace(get=lambda key, default=None: default)
+    components = {"calendar_manager": None, "news_manager": None, "weather_poller": None,
+                  "memory_manager": object()}
+    desktop = jarvis_web._desktop_snapshot(config, components, True)["capabilities"]
+    default = jarvis_web._desktop_snapshot(config, components)["capabilities"]
+    assert (desktop["calendar"], desktop["news"], desktop["weather"]) == (None, None, None)
+    assert desktop["memory"] is True
+    assert (default["calendar"], default["news"], default["weather"]) == (False, False, False)
+
+
+
+===== LOCAL ONLY: tests/unit/test_memory_read_only.py =====
+"""Read-only MemoryManager (jarvis_web.py --desktop-mode): reads work, every write is refused and logged.
+
+Real temp-file SQLite and a real FAISS index, no mocks of the stores: the point is that the owner's
+files stay byte-identical while a second, read-only manager is alive.
+"""
+
+import hashlib
+import os
+import sys
+from unittest.mock import MagicMock
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+os.environ.setdefault("JARVIS_LOG_FILE_ONLY", "1")
+
+import numpy as np
+import pytest
+
+from core.memory_manager import MemoryManager
+
+
+class _FakeConfig(dict):
+    def get(self, path, default=None):
+        node = self
+        for part in path.split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                return default
+        return node
+
+
+class _Embedder:
+    def __init__(self, dim=4):
+        self.dim = dim
+
+    def get_sentence_embedding_dimension(self):
+        return self.dim
+
+    def _vector(self, text):
+        vector = np.zeros(self.dim, dtype=np.float32)
+        vector[len(text) % self.dim] = 1.0
+        return vector
+
+    def encode(self, text, normalize_embeddings=True, show_progress_bar=False, batch_size=None):
+        if isinstance(text, list):
+            return np.array([self._vector(item) for item in text], dtype=np.float32)
+        return self._vector(text)
+
+
+def _config(tmp_path):
+    return _FakeConfig({"conversational_memory": {
+        "db_path": str(tmp_path / "data" / "memory.db"),
+        "faiss_index_path": str(tmp_path / "data" / "faiss"),
+    }})
+
+
+def _digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _fact(content="the user's favorite editor is VS Code", subject="editor"):
+    return {"user_id": "primary_user", "category": "preference", "subject": subject, "content": content,
+            "value": None, "source": "explicit", "confidence": 0.9, "source_messages": "[]"}
+
+
+@pytest.fixture
+def owner(tmp_path):
+    """The voice daemon's manager: writes a fact, an interaction and a persisted FAISS index."""
+    manager = MemoryManager(_config(tmp_path), conversation=None, embedding_model=_Embedder())
+    manager.store_fact(_fact())
+    manager.persist_interaction("research", "query", "answer")
+    manager.index_message({"content": "a message that is long enough", "timestamp": 1.0, "role": "user"})
+    manager.save()
+    return manager
+
+
+def _stores(tmp_path):
+    return {
+        "db": tmp_path / "data" / "memory.db",
+        "index": tmp_path / "data" / "faiss" / "default.index",
+        "meta": tmp_path / "data" / "faiss" / "default_meta.jsonl",
+    }
+
+
+def _read_only(tmp_path, embedder=None):
+    manager = MemoryManager(_config(tmp_path), conversation=None, embedding_model=embedder or _Embedder(),
+                            read_only=True)
+    manager.logger = MagicMock()
+    return manager
+
+
+def test_default_manager_is_writable_and_unchanged(owner):
+    assert owner.read_only is False and owner.rejected_writes == {}
+    assert owner.get_fact_count()  # the owner really wrote its fact
+
+
+def test_read_only_reads_the_owners_facts_interactions_and_index(owner, tmp_path):
+    reader = _read_only(tmp_path)
+    assert reader.read_only is True
+    assert [fact["content"] for fact in reader.get_facts()] == ["the user's favorite editor is VS Code"]
+    assert len(reader.get_recent_interactions(limit=5)) == 1
+    assert reader.faiss_index.ntotal == 1
+    assert reader.search_history("a message that is long enough", top_k=1)
+
+
+def test_read_only_never_changes_the_owners_files(owner, tmp_path):
+    before = {name: _digest(path) for name, path in _stores(tmp_path).items()}
+    reader = _read_only(tmp_path)
+    reader.get_facts()
+    reader.search_history("anything long enough", top_k=1)
+    reader.save()
+    assert {name: _digest(path) for name, path in _stores(tmp_path).items()} == before
+
+
+def test_every_write_path_is_rejected_logged_and_counted(owner, tmp_path):
+    before = {name: _digest(path) for name, path in _stores(tmp_path).items()}
+    reader = _read_only(tmp_path)
+    fact_id = reader.get_facts()[0]["fact_id"]
+
+    assert reader.store_fact(_fact("another fact", subject="other")) is None
+    assert reader.update_fact(fact_id, confidence=0.1) is False
+    assert reader.delete_fact(fact_id) is False
+    assert reader.delete_fact(fact_id, soft=False) is False
+    assert reader.persist_interaction("research", "q", "a") is None
+    assert reader.promote_session_artifacts([object()], "window") is None
+    assert reader.cleanup_old_interactions(retention_days=0) is None
+    assert reader.run_decay_pass() == {"archived_count": 0, "archived_fact_ids": []}
+    assert reader.run_consolidation() == {"skipped": True, "reason": "read_only"}
+    assert reader._merge_duplicate_excluded_candidates() == {"merged_count": 0}
+    assert reader.backfill_history() == 0
+    assert reader.extract_facts_realtime({"role": "user", "content": "my name is Test User"}) == []
+    reader.index_message({"content": "a message that is long enough", "timestamp": 2.0, "role": "user"})
+    reader.on_message({"role": "user", "content": "a message that is long enough"})
+    assert reader.handle_forget("forget my editor") == MemoryManager.READ_ONLY_MESSAGE
+    assert reader.confirm_forget() == MemoryManager.READ_ONLY_MESSAGE
+    reader._save_faiss_index()
+
+    assert set(reader.rejected_writes) >= {
+        "store_fact", "update_fact", "delete_fact", "persist_interaction", "promote_session_artifacts",
+        "cleanup_old_interactions", "run_decay_pass", "run_consolidation",
+        "merge_duplicate_excluded_candidates", "backfill_history", "extract_facts_realtime", "index_message",
+        "on_message", "handle_forget", "confirm_forget", "faiss_save",
+    }
+    assert reader.rejected_writes["delete_fact"] == 2
+    assert reader.logger.warning.call_count == sum(reader.rejected_writes.values())
+    assert all("read-only" in call.args[0] for call in reader.logger.warning.call_args_list)
+    assert reader.faiss_index.ntotal == 1  # nothing slipped into the in-memory index either
+    assert {name: _digest(path) for name, path in _stores(tmp_path).items()} == before
+
+
+def test_a_stale_read_only_process_cannot_overwrite_newer_owner_vectors(owner, tmp_path):
+    reader = _read_only(tmp_path)  # loaded with 1 vector
+    owner.index_message({"content": "a second message that is long enough", "timestamp": 3.0, "role": "user"})
+    owner.save()  # the owner now has 2 vectors on disk
+    newer = _digest(_stores(tmp_path)["index"])
+
+    reader.index_message({"content": "third message from the reader", "timestamp": 4.0, "role": "user"})
+    reader.save()
+    reader._faiss_dirty = 99  # even a dirty counter must not let it write
+    reader.save()
+
+    assert _digest(_stores(tmp_path)["index"]) == newer
+    assert MemoryManager(_config(tmp_path), None, _Embedder()).faiss_index.ntotal == 2
+
+
+def test_read_only_init_does_not_create_or_migrate_or_clean_anything(tmp_path):
+    # No stores at all: nothing may be created (no directory, no db, no index).
+    reader = _read_only(tmp_path)
+    assert not (tmp_path / "data").exists()
+    assert reader.faiss_index is not None and reader.faiss_index.ntotal == 0
+
+
+def test_read_only_leaves_the_owners_temp_files_alone(owner, tmp_path):
+    tmp_index = tmp_path / "data" / "faiss" / "default.index.tmp"
+    tmp_index.write_bytes(b"owner is writing right now")
+    _read_only(tmp_path)
+    assert tmp_index.read_bytes() == b"owner is writing right now"
+    MemoryManager(_config(tmp_path), None, _Embedder())  # a normal manager still cleans it up
+    assert not tmp_index.exists()
+
+
+def test_read_only_never_rebuilds_an_index_with_another_dimension(owner, tmp_path):
+    before = {name: _digest(path) for name, path in _stores(tmp_path).items()}
+    reader = _read_only(tmp_path, embedder=_Embedder(dim=8))
+    assert reader.faiss_index is None and reader.faiss_metadata == []
+    reader.save()
+    assert {name: _digest(path) for name, path in _stores(tmp_path).items()} == before
+
+
+def test_read_only_repairs_a_desync_in_memory_only(owner, tmp_path):
+    meta = _stores(tmp_path)["meta"]
+    meta.write_text("", encoding="utf-8")  # 1 vector, 0 metadata entries
+    before = _digest(meta)
+    reader = _read_only(tmp_path)
+    assert reader.faiss_index.ntotal == 0 and reader.faiss_metadata == []
+    assert _digest(meta) == before
+
+
+def test_factory_passes_read_only_through(tmp_path, monkeypatch):
+    import core.memory_manager as module
+    monkeypatch.setattr(module, "_instance", None)
+    manager = module.get_memory_manager(_config(tmp_path), None, _Embedder(), read_only=True)
+    assert manager.read_only is True
+    assert module.get_memory_manager() is manager
+

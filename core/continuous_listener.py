@@ -98,6 +98,7 @@ class ContinuousListener:
         
         # Device monitor (hot-plug recovery)
         self._monitor_thread = None
+        self._monitor_stop = threading.Event()
         self._monitor_interval = config.get("audio.device_monitor_interval", 5.0)
         self._mic_lost_announced = False
         self._on_mic_state_change = None  # Callback: (available: bool) -> None
@@ -243,11 +244,15 @@ class ContinuousListener:
         """Route a finished segment to the audio_queue (via the assembler)."""
         asm = self._turn_assembler
         if asm is None:
-            self.audio_queue.put({
+            turn = {
                 "audio": full_audio,
                 "capture_generation": generation,
                 "during_tts": during_tts,
-            })
+            }
+            speech_end = getattr(self, "_last_speech_end_ts", None)
+            if speech_end is not None:
+                turn["speech_end"] = speech_end
+            self.audio_queue.put(turn)
             return
         with self._turn_lock:
             turns = asm.add(full_audio, generation, during_tts,
@@ -270,6 +275,9 @@ class ContinuousListener:
         if recheck_generation:
             if turn["capture_generation"] != self._capture_generation:
                 return False
+        speech_end = getattr(self, "_last_speech_end_ts", None)
+        if speech_end is not None:
+            turn["speech_end"] = speech_end
         self.audio_queue.put(turn)
         return True
 
@@ -445,6 +453,9 @@ class ContinuousListener:
 
         # Process through VAD while idle and during the bounded barge-in window.
         in_speech, state_changed = self.vad.process_frame(audio_int16)
+        if in_speech and getattr(self.vad, "silence_frames", None) == 0:
+            # Actual positive VAD frame receipt; quantized to the capture frame.
+            self._last_speech_end_ts = now
 
         # Diagnostic: log VAD state every ~1 second
         if self._diag_audio:
@@ -842,6 +853,7 @@ class ContinuousListener:
         """Start the background device monitor thread."""
         if self._monitor_thread is not None:
             return
+        self._monitor_stop.clear()
         self._monitor_thread = threading.Thread(
             target=self._device_monitor_loop,
             daemon=True,
@@ -853,6 +865,7 @@ class ContinuousListener:
         """Stop the device monitor thread."""
         thread = self._monitor_thread
         self._monitor_thread = None  # Signal the loop to exit
+        self._monitor_stop.set()
         if thread and thread.is_alive():
             thread.join(timeout=self._monitor_interval + 1)
 
@@ -867,7 +880,8 @@ class ContinuousListener:
 
         while self._monitor_thread is not None:
             try:
-                time.sleep(self._monitor_interval)
+                if self._monitor_stop.wait(self._monitor_interval):
+                    break
             except Exception:
                 break
 
@@ -1357,7 +1371,9 @@ class ContinuousListener:
         self.stop_device_monitor()
 
         if self.stream:
+            self.logger.info("Listener shutdown: stopping audio stream")
             self.stream.stop()
+            self.logger.info("Listener shutdown: closing audio stream")
             self.stream.close()
             self.stream = None
 

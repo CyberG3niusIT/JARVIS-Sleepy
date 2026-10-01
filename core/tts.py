@@ -14,6 +14,7 @@ import wave
 import time
 import random
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -92,6 +93,7 @@ class TextToSpeech:
 
         # TTS lock to prevent concurrent calls
         self._tts_lock = threading.Lock()
+        self._output_observers = threading.local()
 
         # Track active audio subprocesses for scoped interrupt/kill
         self._active_procs: list = []
@@ -527,6 +529,7 @@ class TextToSpeech:
                 self._track_proc(player)
 
                 player.stdin.write(pcm)
+                self._notify_output_start()
                 player.stdin.close()
 
                 rc = player.wait(timeout=30)
@@ -846,6 +849,7 @@ class TextToSpeech:
                 return False
             self._track_proc(player)
             player.stdin.write(pcm)
+            self._notify_output_start()
             player.stdin.close()
             return player.wait(timeout=max(30, len(pcm) / (rate * 2) + 5)) == 0
         finally:
@@ -928,6 +932,7 @@ class TextToSpeech:
                     if aplay:
                         self._track_proc(aplay)
                         aplay.stdin.write(cached_pcm)
+                        self._notify_output_start()
                         aplay.stdin.close()
                         aplay.wait(timeout=10)
                         self._untrack_proc(aplay)
@@ -1371,6 +1376,7 @@ class TextToSpeech:
                     return False
                 self._track_proc(aplay)
                 aplay.stdin.write(pcm)
+                self._notify_output_start()
                 aplay.stdin.close()
                 aplay.wait(timeout=10)
                 self._untrack_proc(aplay)
@@ -1494,6 +1500,7 @@ class TextToSpeech:
                     return False
                 self._track_proc(aplay)
                 aplay.stdin.write(pcm)
+                self._notify_output_start()
                 aplay.stdin.close()
                 # Set flag immediately — audio is committed to the pipe.
                 # Must be visible to the streaming thread BEFORE aplay finishes,
@@ -1518,6 +1525,26 @@ class TextToSpeech:
         self._ack_played = False
 
     # ── Scoped subprocess control ─────────────────────────────────────
+
+    @contextmanager
+    def observe_output(self, callback):
+        """Scope metadata-only output instrumentation to this playback thread."""
+        if not hasattr(self, "_output_observers"):
+            self._output_observers = threading.local()
+        previous = getattr(self._output_observers, "callback", None)
+        self._output_observers.callback = callback
+        try:
+            yield
+        finally:
+            self._output_observers.callback = previous
+
+    def _notify_output_start(self):
+        callback = getattr(getattr(self, "_output_observers", None), "callback", None)
+        if callback:
+            try:
+                callback()
+            except Exception:
+                pass  # instrumentation must never change playback
 
     def _play_wav_windows(self, wav_bytes: bytes) -> bool:
         """Play a complete WAV through the native Windows audio stack."""
@@ -1545,7 +1572,8 @@ class TextToSpeech:
             ps = (
                 f"$p='{ps_path}';"
                 "$sp=[System.Media.SoundPlayer]::new($p);"
-                "try{$sp.Load();$sp.PlaySync()}"
+                "try{$sp.Load();[Console]::Out.WriteLine('JARVIS_PLAYBACK_CALL');"
+                "[Console]::Out.Flush();$sp.PlaySync()}"
                 "finally{$sp.Dispose()}"
             )
 
@@ -1557,13 +1585,30 @@ class TextToSpeech:
                     "-Command",
                     ps,
                 ],
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             self._track_proc(proc)
+            # The bridge acknowledges the actual software playback invocation,
+            # not device samples or acoustic output. Capture only this fixed
+            # marker, never process output or user/audio content.
+            callback = getattr(getattr(self, "_output_observers", None), "callback", None)
+            reader = None
+            if callback and getattr(proc, "stdout", None) is not None:
+                def observe_bridge_start():
+                    try:
+                        if proc.stdout.readline().strip() == b"JARVIS_PLAYBACK_CALL":
+                            callback()
+                    except Exception:
+                        pass
+                reader = threading.Thread(target=observe_bridge_start, daemon=True,
+                                          name="tts-output-observer")
+                reader.start()
 
             try:
                 rc = proc.wait(timeout=120)
+                if reader is not None:
+                    reader.join(timeout=1)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
@@ -1898,6 +1943,7 @@ class TextToSpeech:
                     self._track_proc(aplay)
 
                 aplay.stdin.write(pcm)
+                self._notify_output_start()
                 total_samples += len(audio)
         except BrokenPipeError:
             self.logger.error("aplay broken pipe (device busy?)")
